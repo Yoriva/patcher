@@ -176,7 +176,7 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
         else -> sourceAbis.first()
     }
 
-    private fun setAbi(abi: String) {
+    fun setAbi(abi: String) {
         if (abi !in SUPPORTED_ABIS || abi == _abi.value) return
         _abi.value = abi
         val b = loadedBundle
@@ -565,8 +565,12 @@ private fun externalRoot(app: Application): File {
             _receivedSource.value = null
             return
         }
-        if (supported.isNotEmpty() && _abi.value !in supported) {
-            resolveAbi(supported)?.let { setAbi(it) }
+        if (supported.isNotEmpty()) {
+            if (supported.size == 1) {
+                setAbi(supported.first())
+            } else if (_abi.value !in supported) {
+                resolveAbi(supported)?.let { setAbi(it) }
+            }
         }
         _source.value = SourceInfo(label, file.length(), info.entryCount, supported)
         _receivedSource.value = file

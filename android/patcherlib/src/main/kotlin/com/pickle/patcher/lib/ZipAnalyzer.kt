@@ -2,7 +2,6 @@ package com.pickle.patcher.lib
 
 import java.io.File
 
-/** Reads structural facts about a source APK (UI + validation). */
 object ZipAnalyzer {
 
     data class ArchiveInfo(
@@ -24,8 +23,35 @@ object ZipAnalyzer {
         try {
             val arsc = zip.entries["resources.arsc"]
             val libs = zip.entries.keys.filter { it.startsWith("lib/") && it.endsWith(".so") }
-            // Which known ABIs has lib dirs for (in priority order).
-            val abis = KNOWN_ABIS.filter { abi -> libs.any { it.startsWith("lib/$abi/") } }
+            val detected = mutableSetOf<String>()
+
+            for (lib in libs) {
+                when {
+                    lib.startsWith("lib/arm64-v8a/") || lib.startsWith("lib/arm64/") -> detected.add("arm64-v8a")
+                    lib.startsWith("lib/armeabi-v7a/") || lib.startsWith("lib/armeabi/") -> detected.add("armeabi-v7a")
+                }
+            }
+
+            if (detected.isEmpty() && libs.isNotEmpty()) {
+                for (libPath in libs) {
+                    val entry = zip.entries[libPath] ?: continue
+                    try {
+                        val header = zip.readContent(entry)
+                        if (header.size >= 20 && header[0] == 0x7F.toByte() && header[1] == 'E'.code.toByte() && header[2] == 'L'.code.toByte() && header[3] == 'F'.code.toByte()) {
+                            val elfClass = header[4].toInt()
+                            val machine = (header[18].toInt() and 0xFF) or ((header[19].toInt() and 0xFF) shl 8)
+                            if (elfClass == 2 || machine == 183) {
+                                detected.add("arm64-v8a")
+                            } else if (elfClass == 1 || machine == 40) {
+                                detected.add("armeabi-v7a")
+                            }
+                        }
+                    } catch (_: Throwable) {
+                    }
+                }
+            }
+
+            val abis = KNOWN_ABIS.filter { it in detected }
             val abi = abis.firstOrNull()
             val misaligned = zip.entries.values
                 .filter { it.method == 0 && (it.dataOffset % 4) != 0L }
@@ -45,7 +71,6 @@ object ZipAnalyzer {
         }
     }
 
-    /** Queries whether the output contains the given path with the given method. */
     fun entryState(file: File, path: String): Triple<Boolean, Int, Long> {
         val zip = ZipRaw.open(file) ?: return Triple(false, -1, -1)
         try {

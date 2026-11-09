@@ -33,10 +33,15 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.NightlightRound
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -169,18 +174,11 @@ fun SettingsScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Surface(
-                            shape = RoundedCornerShape(percent = 50),
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                        ) {
-                            Text(
-                                text = "$workers Cores",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            )
-                        }
+                        Text(
+                            text = "$workers cores",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                     Spacer(Modifier.height(10.dp))
                     Slider(
@@ -236,18 +234,11 @@ fun SettingsScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Surface(
-                            shape = RoundedCornerShape(percent = 50),
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                        ) {
-                            Text(
-                                text = "$patchWorkers Threads",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            )
-                        }
+                        Text(
+                            text = "$patchWorkers threads",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                     Spacer(Modifier.height(10.dp))
                     Slider(
@@ -308,7 +299,7 @@ fun SettingsScreen(
             Card(
                 onClick = onOpenTheme,
                 modifier = Modifier.fillMaxWidth(),
-                shape = getGroupedItemShape(0, 2),
+                shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainer,
                 ),
@@ -334,7 +325,6 @@ fun SettingsScreen(
                     }
                     Spacer(modifier = Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        val paletteName = if (themeChoice.keyColor == 0) "Material You" else "Palette"
                         Text(
                             text = "Theme & Palette",
                             style = MaterialTheme.typography.titleMedium,
@@ -343,69 +333,17 @@ fun SettingsScreen(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "$paletteName · ${themeChoice.mode.label}",
+                            text = themeChoice.mode.label,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    val currentPaletteName = if (themeChoice.keyColor == 0) "Material You" else "Palette"
-                    StatusPill(currentPaletteName, tone = Tone.Primary)
                     Spacer(modifier = Modifier.width(8.dp))
                     Icon(
                         imageVector = Icons.Filled.ChevronRight,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                         modifier = Modifier.size(20.dp),
-                    )
-                }
-            }
-
-            Card(
-                onClick = { themeController.setAmoled(!themeChoice.amoled) },
-                modifier = Modifier.fillMaxWidth(),
-                shape = getGroupedItemShape(1, 2),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                ),
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 18.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.NightlightRound,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "AMOLED Dark",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "True #000000 background for OLED displays",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Switch(
-                        checked = themeChoice.amoled,
-                        onCheckedChange = { themeController.setAmoled(it) },
                     )
                 }
             }
@@ -478,6 +416,7 @@ private fun GroupedFolderCard(
     onClear: (() -> Unit)?,
 ) {
     Card(
+        onClick = onPick,
         modifier = Modifier.fillMaxWidth(),
         shape = getGroupedItemShape(index, total),
         colors = CardDefaults.cardColors(
@@ -520,16 +459,35 @@ private fun GroupedFolderCard(
                 )
             }
             Spacer(modifier = Modifier.width(8.dp))
-            ExpressiveOutlinedButton(
-                text = if (path != null) "Change" else "Pick",
-                onClick = onPick,
-            )
-            if (onClear != null) {
-                Spacer(modifier = Modifier.width(4.dp))
-                GhostButton(
-                    text = "Clear",
-                    onClick = onClear,
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                FilledTonalIconButton(
+                    onClick = onPick,
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
+                    modifier = Modifier.size(38.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.FolderOpen,
+                        contentDescription = "Browse folder",
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                if (onClear != null) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    IconButton(
+                        onClick = onClear,
+                        modifier = Modifier.size(38.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Clear folder",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
             }
         }
     }

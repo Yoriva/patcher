@@ -118,10 +118,9 @@ fun ThemeScreen(
 
         item {
             val options = listOf(
-                ModeOption("System", ThemeMode.System, false, Icons.Filled.Brightness4),
-                ModeOption("Light", ThemeMode.Light, false, Icons.Filled.Brightness7),
-                ModeOption("Dark", ThemeMode.Dark, false, Icons.Filled.Brightness3),
-                ModeOption("AMOLED", ThemeMode.Dark, true, Icons.Filled.Brightness1),
+                ModeOption("System", ThemeMode.System, Icons.Filled.Brightness4),
+                ModeOption("Light", ThemeMode.Light, Icons.Filled.Brightness7),
+                ModeOption("Dark", ThemeMode.Dark, Icons.Filled.Brightness3),
             )
 
             Row(
@@ -131,13 +130,7 @@ fun ThemeScreen(
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 options.forEachIndexed { index, opt ->
-                    val isSelected = if (opt.amoled) {
-                        choice.mode == ThemeMode.Dark && choice.amoled
-                    } else if (opt.mode == ThemeMode.Dark) {
-                        choice.mode == ThemeMode.Dark && !choice.amoled
-                    } else {
-                        choice.mode == opt.mode
-                    }
+                    val isSelected = choice.mode == opt.mode
 
                     val shape = when (index) {
                         0 -> RoundedCornerShape(topStart = 20.dp, bottomStart = 20.dp, topEnd = 4.dp, bottomEnd = 4.dp)
@@ -150,7 +143,7 @@ fun ThemeScreen(
                         onCheckedChange = {
                             if (!isSelected) {
                                 view.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
-                                controller.setMode(opt.mode, opt.amoled)
+                                controller.setMode(opt.mode)
                             }
                         },
                         modifier = Modifier
@@ -381,6 +374,5 @@ private fun ColorButtonMaterial(
 private data class ModeOption(
     val title: String,
     val mode: ThemeMode,
-    val amoled: Boolean,
     val icon: ImageVector,
 )

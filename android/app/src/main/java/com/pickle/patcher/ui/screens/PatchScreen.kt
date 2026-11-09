@@ -30,6 +30,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.SystemUpdateAlt
@@ -319,39 +320,75 @@ private fun SourceCard(vm: PatcherViewModel) {
 private fun BundleCard(vm: PatcherViewModel) {
     val bundleState by vm.bundle.collectAsState()
     val abiStatus by vm.abiStatus.collectAsState()
+    val currentAbi by vm.abi.collectAsState()
 
     AppCard {
         val target = abiStatus.firstOrNull { it.selected }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.secondaryContainer,
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            val abiList = listOf("arm64-v8a" to "Arm64 (64-bit)", "armeabi-v7a" to "Arm32 (32-bit)")
+            abiList.forEachIndexed { index, (abiKey, label) ->
+                val isSelected = currentAbi == abiKey
+                val status = abiStatus.firstOrNull { it.abi == abiKey }
+                val shape = when (index) {
+                    0 -> RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp, topEnd = 4.dp, bottomEnd = 4.dp)
+                    else -> RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp, topEnd = 14.dp, bottomEnd = 14.dp)
+                }
+
+                Surface(
+                    checked = isSelected,
+                    onCheckedChange = { if (!isSelected) vm.setAbi(abiKey) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(42.dp),
+                    shape = shape,
+                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+                    contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                 ) {
-                    Icon(
-                        Icons.Filled.PhoneAndroid,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        "${displayAbi(target?.abi ?: vm.isDeviceAbi)} · " +
-                            if (target?.abi == "arm64-v8a") "64-bit" else "32-bit",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        Icon(
+                            imageVector = if (isSelected) Icons.Filled.Check else Icons.Filled.PhoneAndroid,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = if (isSelected) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Medium,
+                            ),
+                        )
+                        if (status?.inSource == true) {
+                            Spacer(Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary),
+                            )
+                        }
+                    }
                 }
             }
-            Spacer(Modifier.width(12.dp))
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 when {
                     target == null || !target.inSource -> "Waiting for the client APK"
                     target.installed -> "Installed · ${target.libCount} libs"
-                    else -> "No libraries yet"
+                    else -> "No libraries yet · Download required"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

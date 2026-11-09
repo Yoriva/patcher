@@ -6,17 +6,22 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -47,6 +52,7 @@ import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.RocketLaunch
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Storefront
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -67,6 +73,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -88,9 +96,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.pickle.patcher.data.StoreApi
-import com.pickle.patcher.jobs.JobProgress
 import com.pickle.patcher.patcher.PatcherViewModel
-import com.pickle.patcher.ui.JobStrip
 import com.pickle.patcher.ui.screens.AddonsScreen
 import com.pickle.patcher.ui.screens.AdminScreen
 import com.pickle.patcher.ui.screens.CompilerScreen
@@ -223,118 +229,138 @@ fun PatcherApp(vm: PatcherViewModel) {
                         navigationIconContentColor = MaterialTheme.colorScheme.onBackground,
                     ),
                     navigationIcon = {
-                        if (!isMainTab) {
+                        AnimatedVisibility(
+                            visible = !isMainTab,
+                            enter = fadeIn(animationSpec = tween(220, delayMillis = 60)) + slideInHorizontally(initialOffsetX = { -it / 3 }, animationSpec = tween(220, delayMillis = 60)),
+                            exit = fadeOut(animationSpec = tween(140)),
+                        ) {
                             TopBarBackButton(onClick = { nav.popBackStack() })
                         }
                     },
                     title = {
-                        if (isMainTab) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(vertical = 4.dp),
-                            ) {
-                                Image(
-                                    painter = painterResource(id = R.drawable.nexora_logo),
-                                    contentDescription = "Nexora Logo",
-                                    modifier = Modifier
-                                        .size(28.dp)
-                                        .clip(CircleShape),
-                                )
-                                Spacer(Modifier.width(10.dp))
+                        AnimatedContent(
+                            targetState = isMainTab,
+                            transitionSpec = {
+                                fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(160))
+                            },
+                            label = "titleCrossfade",
+                        ) { mainTab ->
+                            if (mainTab) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(vertical = 4.dp),
+                                ) {
+                                    Image(
+                                        painter = painterResource(id = R.drawable.nexora_logo),
+                                        contentDescription = "Nexora Logo",
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape),
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(
+                                        "Nexora",
+                                        style = MaterialTheme.typography.titleLarge.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = (-0.3).sp,
+                                        ),
+                                        color = MaterialTheme.colorScheme.onBackground,
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    val version by vm.bundleVersion.collectAsState()
+                                    val isUpdate = update is PatcherViewModel.AppUpdate.Available
+                                    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                                    val dotAlpha by infiniteTransition.animateFloat(
+                                        initialValue = 0.45f,
+                                        targetValue = 1f,
+                                        animationSpec = infiniteRepeatable(
+                                            animation = tween(1200, easing = FastOutSlowInEasing),
+                                            repeatMode = RepeatMode.Reverse,
+                                        ),
+                                        label = "dotAlpha",
+                                    )
+
+                                    Surface(
+                                        shape = RoundedCornerShape(percent = 50),
+                                        color = if (isUpdate) {
+                                            MaterialTheme.colorScheme.primaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceContainerHigh
+                                        },
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(6.dp)
+                                                    .graphicsLayer { alpha = dotAlpha }
+                                                    .clip(CircleShape)
+                                                    .background(
+                                                        if (isUpdate) MaterialTheme.colorScheme.primary
+                                                        else MaterialTheme.colorScheme.secondary,
+                                                    ),
+                                            )
+                                            Spacer(Modifier.width(6.dp))
+                                            Text(
+                                                text = if (isUpdate) "Update" else if (version.isNotBlank()) version.toDisplayVersion() else "Live",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = if (isUpdate) {
+                                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                val title = when (currentRoute) {
+                                    Dest.Settings.route -> "Settings"
+                                    Dest.Theme.route -> "Theme"
+                                    Dest.StoreLogin.route -> "Sign In"
+                                    Dest.StoreRegister.route -> "Register"
+                                    Dest.StoreUpload.route -> "Upload Package"
+                                    Dest.StoreManage.route -> "Manage Posts"
+                                    else -> "Nexora"
+                                }
                                 Text(
-                                    "Nexora",
+                                    text = title,
                                     style = MaterialTheme.typography.titleLarge.copy(
                                         fontWeight = FontWeight.Bold,
                                         letterSpacing = (-0.3).sp,
                                     ),
                                     color = MaterialTheme.colorScheme.onBackground,
                                 )
-                                Spacer(Modifier.width(10.dp))
-                                val version by vm.bundleVersion.collectAsState()
-                                val isUpdate = update is PatcherViewModel.AppUpdate.Available
-                                val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-                                val dotAlpha by infiniteTransition.animateFloat(
-                                    initialValue = 0.45f,
-                                    targetValue = 1f,
-                                    animationSpec = infiniteRepeatable(
-                                        animation = tween(1200, easing = FastOutSlowInEasing),
-                                        repeatMode = RepeatMode.Reverse,
-                                    ),
-                                    label = "dotAlpha",
-                                )
-
-                                Surface(
-                                    shape = RoundedCornerShape(percent = 50),
-                                    color = if (isUpdate) {
-                                        MaterialTheme.colorScheme.primaryContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.surfaceContainerHigh
-                                    },
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(6.dp)
-                                                .graphicsLayer { alpha = dotAlpha }
-                                                .clip(CircleShape)
-                                                .background(
-                                                    if (isUpdate) MaterialTheme.colorScheme.primary
-                                                    else MaterialTheme.colorScheme.secondary,
-                                                ),
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Text(
-                                            text = if (isUpdate) "Update" else if (version.isNotBlank()) version.toDisplayVersion() else "Live",
-                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                            color = if (isUpdate) {
-                                                MaterialTheme.colorScheme.onPrimaryContainer
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurfaceVariant
-                                            },
-                                        )
-                                    }
-                                }
                             }
-                        } else {
-                            val title = when (currentRoute) {
-                                Dest.Settings.route -> "Settings"
-                                Dest.Theme.route -> "Theme"
-                                Dest.StoreLogin.route -> "Sign In"
-                                Dest.StoreRegister.route -> "Register"
-                                Dest.StoreUpload.route -> "Upload Package"
-                                Dest.StoreManage.route -> "Manage Posts"
-                                else -> "Nexora"
-                            }
-                            Text(
-                                text = title,
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = (-0.3).sp,
-                                ),
-                                color = MaterialTheme.colorScheme.onBackground,
-                            )
                         }
                     },
                     actions = {
-                        if (isMainTab) {
-                            val isSettingsRoute = currentRoute == Dest.Settings.route
-                            val settingsRotation by animateFloatAsState(
-                                targetValue = if (isSettingsRoute) 90f else 0f,
-                                animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
-                                label = "settingsRotation",
-                            )
+                        var settingsRotationAngle by remember { mutableFloatStateOf(0f) }
+                        val settingsRotation by animateFloatAsState(
+                            targetValue = settingsRotationAngle,
+                            animationSpec = spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow),
+                            label = "settingsRotation",
+                        )
+                        AnimatedVisibility(
+                            visible = isMainTab,
+                            enter = fadeIn(animationSpec = tween(220, delayMillis = 60)),
+                            exit = fadeOut(animationSpec = tween(150)),
+                        ) {
                             IconButton(
                                 onClick = {
-                                    nav.navigate(Dest.Settings.route) {
-                                        launchSingleTop = true
+                                    settingsRotationAngle += 180f
+                                    scope.launch {
+                                        kotlinx.coroutines.delay(120)
+                                        nav.navigate(Dest.Settings.route) {
+                                            launchSingleTop = true
+                                        }
                                     }
                                 },
                             ) {
                                 Icon(
-                                    imageVector = Icons.Outlined.Settings,
+                                    imageVector = Icons.Rounded.Settings,
                                     contentDescription = "Settings",
                                     tint = MaterialTheme.colorScheme.onBackground,
                                     modifier = Modifier
@@ -397,36 +423,14 @@ fun PatcherApp(vm: PatcherViewModel) {
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            val jobs by JobProgress.jobs.collectAsState()
-            JobStrip(jobs.values.toList())
             NavHost(
                 navController = nav,
                 startDestination = Dest.Patch.route,
                 modifier = Modifier.fillMaxSize(),
-                enterTransition = {
-                    slideInHorizontally(
-                        initialOffsetX = { fullWidth -> (fullWidth * 0.15f).toInt() },
-                        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
-                    ) + fadeIn(animationSpec = tween(durationMillis = 250))
-                },
-                exitTransition = {
-                    slideOutHorizontally(
-                        targetOffsetX = { fullWidth -> (-fullWidth * 0.15f).toInt() },
-                        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
-                    ) + fadeOut(animationSpec = tween(durationMillis = 200))
-                },
-                popEnterTransition = {
-                    slideInHorizontally(
-                        initialOffsetX = { fullWidth -> (-fullWidth * 0.15f).toInt() },
-                        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
-                    ) + fadeIn(animationSpec = tween(durationMillis = 250))
-                },
-                popExitTransition = {
-                    slideOutHorizontally(
-                        targetOffsetX = { fullWidth -> (fullWidth * 0.15f).toInt() },
-                        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
-                    ) + fadeOut(animationSpec = tween(durationMillis = 200))
-                },
+                enterTransition = { fadeIn(animationSpec = tween(durationMillis = 200)) },
+                exitTransition = { fadeOut(animationSpec = tween(durationMillis = 180)) },
+                popEnterTransition = { fadeIn(animationSpec = tween(durationMillis = 200)) },
+                popExitTransition = { fadeOut(animationSpec = tween(durationMillis = 180)) },
             ) {
                 composable(Dest.Patch.route) { PatchScreen(vm) }
                 composable(Dest.Compiler.route) {
