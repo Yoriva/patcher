@@ -20,12 +20,10 @@ enum class ThemeMode(val key: String, val label: String) {
 }
 
 data class ThemeChoice(
-    val themeId: String = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) "dynamic" else NexoraPalette.id,
+    val themeId: String = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) "dynamic" else "default",
     val mode: ThemeMode = ThemeMode.System,
     val amoled: Boolean = false,
-) {
-    val palette: Palette get() = paletteFor(themeId)
-}
+)
 
 class ThemeController(app: Application) : AndroidViewModel(app) {
 
@@ -37,7 +35,7 @@ class ThemeController(app: Application) : AndroidViewModel(app) {
     val choice: StateFlow<ThemeChoice> = _choice.asStateFlow()
 
     private fun read(): ThemeChoice {
-        val defaultTheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) "dynamic" else NexoraPalette.id
+        val defaultTheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) "dynamic" else "default"
         return ThemeChoice(
             themeId = prefs.getString("theme_id", defaultTheme) ?: defaultTheme,
             mode = ThemeMode.fromKey(prefs.getString("mode", null)),

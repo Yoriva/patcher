@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,8 +26,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -36,6 +35,8 @@ import androidx.compose.material.icons.filled.Brightness4
 import androidx.compose.material.icons.filled.Brightness7
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -56,7 +57,9 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 @Composable
 fun ThemeScreen(
@@ -75,7 +78,7 @@ fun ThemeScreen(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(13.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
         contentPadding = PaddingValues(vertical = 12.dp),
     ) {
         item {
@@ -86,112 +89,131 @@ fun ThemeScreen(
         }
 
         item {
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    item {
+                Text(
+                    text = "Mode",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 4.dp),
+                )
+
+                val options = listOf(
+                    ModeOption("System", ThemeMode.System, false, Icons.Filled.Brightness4),
+                    ModeOption("Light", ThemeMode.Light, false, Icons.Filled.Brightness7),
+                    ModeOption("Dark", ThemeMode.Dark, false, Icons.Filled.Brightness3),
+                    ModeOption("AMOLED", ThemeMode.Dark, true, Icons.Filled.Brightness1),
+                )
+                val view = LocalView.current
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    options.forEachIndexed { index, opt ->
+                        val isSelected = if (opt.amoled) {
+                            choice.mode == ThemeMode.Dark && choice.amoled
+                        } else if (opt.mode == ThemeMode.Dark) {
+                            choice.mode == ThemeMode.Dark && !choice.amoled
+                        } else {
+                            choice.mode == opt.mode
+                        }
+
+                        val shape = when (index) {
+                            0 -> RoundedCornerShape(topStart = 20.dp, bottomStart = 20.dp, topEnd = 4.dp, bottomEnd = 4.dp)
+                            options.lastIndex -> RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp, topEnd = 20.dp, bottomEnd = 20.dp)
+                            else -> RoundedCornerShape(4.dp)
+                        }
+
+                        Surface(
+                            checked = isSelected,
+                            onCheckedChange = {
+                                if (!isSelected) {
+                                    view.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
+                                    controller.setMode(opt.mode, opt.amoled)
+                                }
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(44.dp)
+                                .semantics { role = Role.RadioButton },
+                            shape = shape,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
+                            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = opt.icon,
+                                    contentDescription = opt.title,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = "Palette",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 4.dp),
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    val isDynamicSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                    if (isDynamicSupported) {
                         val dynamicScheme = if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-                        ColorButtonMaterial(
+                        StockPaletteCard(
+                            title = "Material You",
+                            subtitle = "Dynamic wallpaper",
                             isSelected = choice.themeId == "dynamic",
                             primaryContainer = dynamicScheme.primaryContainer,
                             tertiaryContainer = dynamicScheme.tertiaryContainer,
                             primary = dynamicScheme.primary,
                             onPrimary = dynamicScheme.onPrimary,
                             surfaceContainer = dynamicScheme.surfaceContainer,
+                            modifier = Modifier.weight(1f),
                             onClick = { controller.select("dynamic") },
                         )
                     }
-                }
 
-                item {
-                    val defScheme = schemeFor(NexoraPalette, isDark)
-                    ColorButtonMaterial(
-                        isSelected = choice.themeId == "nexora",
-                        primaryContainer = defScheme.primaryContainer,
-                        tertiaryContainer = defScheme.tertiaryContainer,
-                        primary = defScheme.primary,
-                        onPrimary = defScheme.onPrimary,
-                        surfaceContainer = defScheme.surfaceContainer,
-                        onClick = { controller.select("nexora") },
-                    )
-                }
-
-                items(KeyColorOptions) { colorInt ->
-                    val hex = Integer.toHexString(colorInt)
-                    val themeId = "color_$hex"
-                    val scheme = schemeFor(paletteFor(themeId), isDark)
-                    ColorButtonMaterial(
-                        isSelected = choice.themeId == themeId,
-                        primaryContainer = scheme.primaryContainer,
-                        tertiaryContainer = scheme.tertiaryContainer,
-                        primary = scheme.primary,
-                        onPrimary = scheme.onPrimary,
-                        surfaceContainer = scheme.surfaceContainer,
-                        onClick = { controller.select(themeId) },
+                    val stockScheme = if (isDark) StockM3Dark else StockM3Light
+                    StockPaletteCard(
+                        title = "Default",
+                        subtitle = "Stock Material 3",
+                        isSelected = choice.themeId == "default",
+                        primaryContainer = stockScheme.primaryContainer,
+                        tertiaryContainer = stockScheme.tertiaryContainer,
+                        primary = stockScheme.primary,
+                        onPrimary = stockScheme.onPrimary,
+                        surfaceContainer = stockScheme.surfaceContainer,
+                        modifier = Modifier.weight(1f),
+                        onClick = { controller.select("default") },
                     )
                 }
             }
         }
 
         item {
-            val options = listOf(
-                ModeOption("System", ThemeMode.System, false, Icons.Filled.Brightness4),
-                ModeOption("Light", ThemeMode.Light, false, Icons.Filled.Brightness7),
-                ModeOption("Dark", ThemeMode.Dark, false, Icons.Filled.Brightness3),
-                ModeOption("AMOLED", ThemeMode.Dark, true, Icons.Filled.Brightness1),
-            )
-            val view = LocalView.current
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                options.forEachIndexed { index, opt ->
-                    val isSelected = if (opt.amoled) {
-                        choice.mode == ThemeMode.Dark && choice.amoled
-                    } else if (opt.mode == ThemeMode.Dark) {
-                        choice.mode == ThemeMode.Dark && !choice.amoled
-                    } else {
-                        choice.mode == opt.mode
-                    }
-
-                    val shape = when (index) {
-                        0 -> RoundedCornerShape(topStart = 20.dp, bottomStart = 20.dp, topEnd = 4.dp, bottomEnd = 4.dp)
-                        options.lastIndex -> RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp, topEnd = 20.dp, bottomEnd = 20.dp)
-                        else -> RoundedCornerShape(4.dp)
-                    }
-
-                    Surface(
-                        checked = isSelected,
-                        onCheckedChange = {
-                            if (!isSelected) {
-                                view.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
-                                controller.setMode(opt.mode, opt.amoled)
-                            }
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp)
-                            .semantics { role = Role.RadioButton },
-                        shape = shape,
-                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
-                        contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = opt.icon,
-                                contentDescription = opt.title,
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
-                    }
-                }
-            }
+            Spacer(Modifier.height(16.dp))
         }
     }
 }
@@ -210,7 +232,7 @@ private fun ThemePreviewCard(
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
         Surface(
             modifier = Modifier
-                .fillMaxWidth(0.4f)
+                .fillMaxWidth(0.42f)
                 .aspectRatio(screenRatio),
             color = MaterialTheme.colorScheme.surfaceContainer,
             shape = RoundedCornerShape(20.dp),
@@ -232,6 +254,7 @@ private fun ThemePreviewCard(
                         Text(
                             text = "Nexora",
                             style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                     }
@@ -293,50 +316,70 @@ private fun ThemePreviewCard(
 }
 
 @Composable
-private fun ColorButtonMaterial(
+private fun StockPaletteCard(
+    title: String,
+    subtitle: String,
     isSelected: Boolean,
     primaryContainer: Color,
     tertiaryContainer: Color,
     primary: Color,
     onPrimary: Color,
     surfaceContainer: Color,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val view = LocalView.current
+    val scale by animateFloatAsState(targetValue = if (isSelected) 1.02f else 1.0f)
 
-    Surface(
+    Card(
         onClick = {
             view.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
             onClick()
         },
+        modifier = modifier.graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+        },
         shape = RoundedCornerShape(20.dp),
-        color = surfaceContainer,
-        modifier = Modifier.size(72.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) {
+                MaterialTheme.colorScheme.surfaceContainerHighest
+            } else {
+                MaterialTheme.colorScheme.surfaceContainer
+            },
+        ),
+        border = if (isSelected) {
+            BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+        } else {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        },
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            Canvas(modifier = Modifier.size(48.dp)) {
-                drawArc(
-                    color = primaryContainer,
-                    startAngle = 180f,
-                    sweepAngle = 180f,
-                    useCenter = true,
-                )
-                drawArc(
-                    color = tertiaryContainer,
-                    startAngle = 0f,
-                    sweepAngle = 180f,
-                    useCenter = true,
-                )
-            }
-
-            val scale by animateFloatAsState(targetValue = if (isSelected) 1.1f else 1.0f)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp, horizontal = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
             Box(
-                modifier = Modifier.graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                },
+                modifier = Modifier.size(56.dp),
                 contentAlignment = Alignment.Center,
             ) {
+                Canvas(modifier = Modifier.size(50.dp)) {
+                    drawArc(
+                        color = primaryContainer,
+                        startAngle = 180f,
+                        sweepAngle = 180f,
+                        useCenter = true,
+                    )
+                    drawArc(
+                        color = tertiaryContainer,
+                        startAngle = 0f,
+                        sweepAngle = 180f,
+                        useCenter = true,
+                    )
+                }
+
                 androidx.compose.animation.AnimatedVisibility(
                     visible = isSelected,
                     enter = fadeIn() + scaleIn(initialScale = 0.8f),
@@ -353,14 +396,13 @@ private fun ColorButtonMaterial(
                                 .size(24.dp)
                                 .clip(CircleShape)
                                 .background(primary, CircleShape),
+                            contentAlignment = Alignment.Center,
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Check,
                                 contentDescription = null,
                                 tint = onPrimary,
-                                modifier = Modifier
-                                    .align(Alignment.Center)
-                                    .size(16.dp),
+                                modifier = Modifier.size(16.dp),
                             )
                         }
                     }
@@ -377,6 +419,20 @@ private fun ColorButtonMaterial(
                     )
                 }
             }
+
+            Spacer(Modifier.height(10.dp))
+
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
