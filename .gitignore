@@ -5,3 +5,4 @@ cs16-client/
 signingkey.jks
 *.jks
 *.keystore
+shots/

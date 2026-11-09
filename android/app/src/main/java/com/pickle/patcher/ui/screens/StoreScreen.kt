@@ -127,7 +127,6 @@ fun StoreScreen(
         }
     }
 
-    // Detail dialog with download buttons
     detailItem?.let { obj ->
         val libs = obj.optJSONArray("libs")
         val libCount = libs?.length() ?: 0
@@ -162,7 +161,6 @@ fun StoreScreen(
                     )
                     Spacer(Modifier.height(8.dp))
 
-                    // Project links
                     if (links != null && links.length() > 0) {
                         Text(
                             "Links",
@@ -185,7 +183,6 @@ fun StoreScreen(
                         Spacer(Modifier.height(8.dp))
                     }
 
-                    // Files with download count
                     if (libCount > 0) {
                         Text(
                             "Files",
@@ -254,7 +251,6 @@ fun StoreScreen(
                     }
 
                     Spacer(Modifier.height(8.dp))
-                    // Like + comments row
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val liked = obj.optBoolean("liked", false)
                         val likes = obj.optInt("likesCount", 0)
@@ -330,7 +326,6 @@ fun StoreScreen(
         )
     }
 
-    // Comments popup
     if (showComments && detailItem != null) {
         val obj = detailItem!!
         AlertDialog(

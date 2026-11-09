@@ -93,7 +93,6 @@ import java.util.Locale
 private val mbFmt = DecimalFormat("0.0")
 private fun Long.mb(): String = "${mbFmt.format(this / 1048576.0)} MB"
 
-/** Manifest versions like 1.27.x print as v1.27.x; continuous builds print raw. */
 fun String.toDisplayVersion(): String =
     if (firstOrNull()?.isDigit() == true) "v$this" else this
 
@@ -179,13 +178,8 @@ private fun displayAbi(abi: String): String = when (abi) {
 private fun SourceCard(vm: PatcherViewModel) {
     val source by vm.source.collectAsState()
     val download by vm.sourceDownload.collectAsState()
-    // Bind the state to a local first: a delegated property cannot be smart
-    // cast, so every branch below needs a stable reference.
     val state = download
 
-    // The client APK always comes from GitHub: check what is cached whenever
-    // the card appears, adopt a good one silently and flag a broken or stale
-    // one instead of patching with half a file.
     LaunchedEffect(Unit) { vm.refreshSourceApkStatus() }
 
     AppCard {
@@ -235,21 +229,40 @@ private fun SourceCard(vm: PatcherViewModel) {
 
         Spacer(Modifier.height(12.dp))
 
-        // An available update turns the whole button red: the cached APK is
-        // usable, but what is on GitHub is newer and that is the one to patch.
         val isUpdate = state is SourceDownloadState.Outdated
+
+        if (state is SourceDownloadState.Downloading) {
+            val progress = if (state.total > 0) state.downloaded.toFloat() / state.total.toFloat() else 0.5f
+            Spacer(Modifier.height(8.dp))
+            WavyProgressBar(progress = progress)
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = if (state.total > 0) {
+                        "%.1f / %.1f MB".format(state.downloaded / 1048576.0, state.total / 1048576.0)
+                    } else {
+                        "%.1f MB".format(state.downloaded / 1048576.0)
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "${(progress * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+
         PrimaryButton(
             text = when (state) {
                 is SourceDownloadState.Fetching -> "Finding release..."
-                is SourceDownloadState.Downloading ->
-                    if (state.total > 0) {
-                        "%.0f / %.0f MB".format(
-                            state.downloaded / 1048576.0,
-                            state.total / 1048576.0,
-                        )
-                    } else {
-                        "%.0f MB".format(state.downloaded / 1048576.0)
-                    }
+                is SourceDownloadState.Downloading -> "Downloading..."
                 is SourceDownloadState.Done -> "Download again"
                 is SourceDownloadState.Outdated -> "Update"
                 is SourceDownloadState.Corrupt -> "Re-download"
@@ -308,8 +321,6 @@ private fun BundleCard(vm: PatcherViewModel) {
     val abiStatus by vm.abiStatus.collectAsState()
 
     AppCard {
-        // Read-only: the device architecture picks the ABI, there is nothing to
-        // choose. The status line still shows what that means for the bundle.
         val target = abiStatus.firstOrNull { it.selected }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Surface(
@@ -369,7 +380,14 @@ private fun BundleCard(vm: PatcherViewModel) {
                     overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(8.dp))
-                AppProgressBar(bs.percent)
+                WavyProgressBar(progress = bs.percent)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "%${(bs.percent * 100).toInt()}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                )
             }
             is BundleState.DownloadError -> {
                 BundleSummaryLine(
@@ -557,8 +575,6 @@ private fun LibListCard(vm: PatcherViewModel) {
                 color = Gray60,
             )
         } else {
-            // Flat list: every lib is its own row, box height ~4 rows so it
-            // stays compact and the rest scrolls inside.
             LazyColumn(
                 modifier = Modifier.fillMaxWidth().heightIn(max = 176.dp),
                 verticalArrangement = Arrangement.spacedBy(0.dp),
@@ -706,8 +722,6 @@ private fun PatchCard(vm: PatcherViewModel) {
                     vm = vm,
                     report = s.report,
                     log = s.log,
-                    // Goes through the view model so an installed copy of the
-                    // client is removed first, with a dialog first.
                     onInstall = { vm.requestInstall() },
                     onPatchAgain = { vm.reset() },
                 )
@@ -749,16 +763,11 @@ private fun PatchCard(vm: PatcherViewModel) {
         val problemText = problem
 
         val libPicker = androidx.activity.compose.rememberLauncherForActivityResult(
-            // No mime filter: a .so picked from a file manager often arrives as
-            // application/octet-stream or with nothing at all, and filtering on
-            // that hides the file the user is looking at.
             androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
         ) { uri ->
             if (uri != null) vm.addCustomLibs(listOf(uri))
         }
 
-        // Two AlertDialogs at once stack badly, so the complaint replaces the
-        // list while it is up and the list comes straight back after.
         if (problemText != null) {
             AlertDialog(
                 onDismissRequest = {
@@ -812,8 +821,6 @@ private fun PatchComponentsDialog(
         mutableStateOf((allKeys).toSet())
     }
     val allSelected = selected.size == allKeys.size
-    // A library built for another ABI would make the installer reject the whole
-    // APK, so it blocks the patch here rather than at install time.
     val blocked = staleCustomLibs.filter { it.name in selected }
 
     AlertDialog(

@@ -8,6 +8,12 @@ java {
     targetCompatibility = JavaVersion.VERSION_17
 }
 
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
 dependencies {
     implementation("com.android.tools.build:apksig:8.13.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")

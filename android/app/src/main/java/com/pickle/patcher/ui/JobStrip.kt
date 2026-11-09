@@ -27,11 +27,6 @@ import androidx.compose.ui.unit.dp
 import com.pickle.patcher.jobs.JobProgress
 import com.pickle.patcher.ui.theme.Accent
 
-/**
- * The in-app face of [JobProgress]: what the notification shows while the app
- * is in the background, shown inline while it is in front. Finished jobs stay
- * for a moment with their result and a dismiss button.
- */
 @Composable
 fun JobStrip(jobs: List<JobProgress.Job>, modifier: Modifier = Modifier) {
     AnimatedVisibility(visible = jobs.isNotEmpty(), modifier = modifier) {

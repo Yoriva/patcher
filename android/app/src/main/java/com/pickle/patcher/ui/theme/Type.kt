@@ -10,9 +10,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.pickle.patcher.R
 
-// Google's Roboto Flex (bundled variable font, offline-safe).
-// Weight axis instances map onto the M3 type scale; if the font ever fails
-// to load, Compose falls back to the system font automatically.
 @OptIn(ExperimentalTextApi::class)
 private val RobotoFlexFamily = FontFamily(
     Font(
@@ -38,83 +35,109 @@ private val RobotoFlexFamily = FontFamily(
 )
 
 val NexoraTypography = Typography(
+    displayLarge = TextStyle(
+        fontFamily = RobotoFlexFamily,
+        fontWeight = FontWeight.Bold,
+        fontSize = 40.sp,
+        lineHeight = 46.sp,
+        letterSpacing = (-0.5).sp,
+    ),
+    displayMedium = TextStyle(
+        fontFamily = RobotoFlexFamily,
+        fontWeight = FontWeight.Bold,
+        fontSize = 34.sp,
+        lineHeight = 40.sp,
+        letterSpacing = (-0.25).sp,
+    ),
     displaySmall = TextStyle(
         fontFamily = RobotoFlexFamily,
         fontWeight = FontWeight.Bold,
         fontSize = 28.sp,
         lineHeight = 34.sp,
-        letterSpacing = (-0.3).sp,
+        letterSpacing = 0.sp,
+    ),
+    headlineLarge = TextStyle(
+        fontFamily = RobotoFlexFamily,
+        fontWeight = FontWeight.Bold,
+        fontSize = 26.sp,
+        lineHeight = 32.sp,
+        letterSpacing = 0.sp,
     ),
     headlineMedium = TextStyle(
         fontFamily = RobotoFlexFamily,
         fontWeight = FontWeight.Bold,
         fontSize = 22.sp,
         lineHeight = 28.sp,
-        letterSpacing = (-0.2).sp,
+        letterSpacing = 0.sp,
     ),
     headlineSmall = TextStyle(
         fontFamily = RobotoFlexFamily,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 18.sp,
-        lineHeight = 24.sp,
+        fontSize = 20.sp,
+        lineHeight = 26.sp,
+        letterSpacing = 0.sp,
     ),
     titleLarge = TextStyle(
         fontFamily = RobotoFlexFamily,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 17.sp,
-        lineHeight = 23.sp,
+        fontWeight = FontWeight.Bold,
+        fontSize = 20.sp,
+        lineHeight = 26.sp,
+        letterSpacing = 0.sp,
     ),
     titleMedium = TextStyle(
         fontFamily = RobotoFlexFamily,
-        fontWeight = FontWeight.Medium,
-        fontSize = 15.sp,
-        lineHeight = 21.sp,
-        letterSpacing = 0.1.sp,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 16.sp,
+        lineHeight = 22.sp,
+        letterSpacing = 0.15.sp,
     ),
     titleSmall = TextStyle(
         fontFamily = RobotoFlexFamily,
-        fontWeight = FontWeight.Medium,
-        fontSize = 13.sp,
-        lineHeight = 18.sp,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
         letterSpacing = 0.1.sp,
     ),
     bodyLarge = TextStyle(
         fontFamily = RobotoFlexFamily,
         fontWeight = FontWeight.Normal,
-        fontSize = 14.sp,
-        lineHeight = 20.sp,
+        fontSize = 15.sp,
+        lineHeight = 22.sp,
+        letterSpacing = 0.25.sp,
     ),
     bodyMedium = TextStyle(
         fontFamily = RobotoFlexFamily,
         fontWeight = FontWeight.Normal,
-        fontSize = 13.sp,
-        lineHeight = 18.sp,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+        letterSpacing = 0.2.sp,
     ),
     bodySmall = TextStyle(
         fontFamily = RobotoFlexFamily,
         fontWeight = FontWeight.Normal,
-        fontSize = 11.sp,
-        lineHeight = 15.sp,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.2.sp,
     ),
     labelLarge = TextStyle(
         fontFamily = RobotoFlexFamily,
-        fontWeight = FontWeight.Medium,
-        fontSize = 13.sp,
-        lineHeight = 17.sp,
-        letterSpacing = 0.2.sp,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+        letterSpacing = 0.1.sp,
     ),
     labelMedium = TextStyle(
         fontFamily = RobotoFlexFamily,
-        fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        lineHeight = 15.sp,
-        letterSpacing = 0.3.sp,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.2.sp,
     ),
     labelSmall = TextStyle(
         fontFamily = RobotoFlexFamily,
         fontWeight = FontWeight.Medium,
-        fontSize = 10.sp,
-        lineHeight = 13.sp,
+        fontSize = 11.sp,
+        lineHeight = 14.sp,
         letterSpacing = 0.3.sp,
     ),
 )

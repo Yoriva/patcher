@@ -51,8 +51,54 @@ import com.pickle.patcher.ui.theme.Gray90
 import com.pickle.patcher.ui.theme.SuccessGreen
 import com.pickle.patcher.ui.theme.Gray30
 
+import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Tab
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.filled.Edit
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun AddonsScreen(vm: PatcherViewModel) {
+    var selectedTab by remember { mutableStateOf(0) }
+    Column(modifier = Modifier.fillMaxSize()) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            PrimaryTabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                contentColor = MaterialTheme.colorScheme.primary,
+                divider = { HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)) },
+            ) {
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    text = { Text("Packages", style = MaterialTheme.typography.titleSmall) },
+                    icon = { Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                    selectedContentColor = MaterialTheme.colorScheme.primary,
+                    unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    text = { Text("plugins.ini", style = MaterialTheme.typography.titleSmall) },
+                    icon = { Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                    selectedContentColor = MaterialTheme.colorScheme.primary,
+                    unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (selectedTab == 0) {
+            AddonsPackagesContent(vm)
+        } else {
+            PluginsScreen(vm)
+        }
+    }
+}
+
+@Composable
+private fun AddonsPackagesContent(vm: PatcherViewModel) {
     val context = LocalContext.current
     val addons by vm.addons.collectAsState()
     val addonFiles by vm.addonFiles.collectAsState()
@@ -212,10 +258,18 @@ fun AddonsScreen(vm: PatcherViewModel) {
                         Text(
                             s.step,
                             style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary,
                         )
                         Spacer(Modifier.height(8.dp))
-                        AppProgressBar(s.percent)
+                        WavyProgressBar(progress = s.percent)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "%${(s.percent * 100).toInt()}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
                     }
                     is AddonsState.Done -> {
                         Row(verticalAlignment = Alignment.CenterVertically) {

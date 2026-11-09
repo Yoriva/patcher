@@ -25,9 +25,6 @@ object CrashLog {
                 write(appContext, throwable)
             } catch (_: Throwable) {
             }
-            // Show a dialog instead of silently dying. The previous handler's
-            // job was to terminate the process; we do that ourselves after the
-            // user acknowledges, so the crash file is always flushed first.
             try {
                 showCrashDialog(appContext, throwable)
             } catch (_: Throwable) {
@@ -42,9 +39,6 @@ object CrashLog {
         throwable.printStackTrace(PrintWriter(sw))
         val preview = sw.toString().lines().take(15).joinToString("\n")
 
-        // We are already on the main thread (the crash happened there), so show
-        // the dialog synchronously. No Handler.post, no sleep - both of those
-        // were preventing the dialog from ever appearing.
         try {
             AlertDialog.Builder(context)
                 .setTitle("Nexora Crash")
@@ -74,13 +68,11 @@ object CrashLog {
                 }
                 .show()
         } catch (_: Throwable) {
-            // Dialog could not be shown (window manager dead, etc.). Exit.
             android.os.Process.killProcess(android.os.Process.myPid())
             System.exit(1)
         }
     }
 
-    /** All locations where a crash file may have been written, most recent first. */
     fun candidateFiles(context: Context): List<File> = buildList {
         add(File(context.getExternalFilesDir(null), FILE_NAME))
         runCatching {
@@ -88,11 +80,9 @@ object CrashLog {
         }.getOrNull()?.let { add(File(it, FILE_NAME)) }
     }
 
-    /** Returns the newest crash file that actually exists, or null. */
     fun latestFile(context: Context): File? =
         candidateFiles(context).firstOrNull { it.exists() }
 
-    /** Reads the newest crash file content, trimmed, or an empty string if none. */
     fun readLatest(context: Context): String? =
         latestFile(context)?.takeIf { it.length() in 1..(1 shl 20) }?.readText()
 

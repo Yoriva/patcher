@@ -6,57 +6,50 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Extension
-import androidx.compose.material.icons.filled.ShoppingCart
-import androidx.compose.material.icons.filled.Login
-import androidx.compose.material.icons.filled.Upload
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.RocketLaunch
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
-import androidx.compose.ui.res.painterResource
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.SystemUpdate
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Storefront
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Extension
+import androidx.compose.material.icons.outlined.RocketLaunch
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Storefront
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -65,48 +58,42 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.Density
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
-import androidx.navigation.navArgument
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.pickle.patcher.patcher.PatcherViewModel
-import kotlinx.coroutines.launch
-import com.pickle.patcher.ui.screens.AddonsScreen
-import com.pickle.patcher.ui.screens.CompilerScreen
-import com.pickle.patcher.ui.screens.PluginsScreen
-import com.pickle.patcher.ui.screens.CrashLogScreen
-import com.pickle.patcher.ui.screens.PatchScreen
-import com.pickle.patcher.ui.DrawerWidthController
-import com.pickle.patcher.ui.UiScaleController
-import com.pickle.patcher.ui.screens.SettingsScreen
-import com.pickle.patcher.ui.screens.StoreScreen
-import com.pickle.patcher.ui.screens.StoreLoginScreen
-import com.pickle.patcher.ui.screens.StoreRegisterScreen
-import com.pickle.patcher.ui.screens.StoreVerifyEmailScreen
-import com.pickle.patcher.ui.screens.StoreUploadScreen
-import com.pickle.patcher.ui.screens.StoreProfileScreen
-import com.pickle.patcher.ui.screens.StoreManageScreen
-import com.pickle.patcher.ui.screens.AdminScreen
+import androidx.navigation.navArgument
 import com.pickle.patcher.data.StoreApi
+import com.pickle.patcher.jobs.JobProgress
+import com.pickle.patcher.patcher.PatcherViewModel
+import com.pickle.patcher.ui.JobStrip
+import com.pickle.patcher.ui.screens.AddonsScreen
+import com.pickle.patcher.ui.screens.AdminScreen
+import com.pickle.patcher.ui.screens.CompilerScreen
+import com.pickle.patcher.ui.screens.PatchScreen
+import com.pickle.patcher.ui.screens.SettingsScreen
+import com.pickle.patcher.ui.screens.StoreManageScreen
+import com.pickle.patcher.ui.screens.StoreProfileScreen
+import com.pickle.patcher.ui.screens.StoreScreen
 import com.pickle.patcher.ui.screens.toDisplayVersion
-import com.pickle.patcher.ui.theme.NexoraTheme
+import com.pickle.patcher.ui.theme.Gray30
 import com.pickle.patcher.ui.theme.Gray40
 import com.pickle.patcher.ui.theme.Gray60
-import com.pickle.patcher.ui.theme.Gray30
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.pickle.patcher.jobs.JobProgress
-import com.pickle.patcher.ui.JobStrip
+import com.pickle.patcher.ui.theme.NexoraTheme
 import com.pickle.patcher.ui.theme.ThemeController
-import com.pickle.patcher.ui.theme.ThemePickerDialog
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -116,21 +103,14 @@ class MainActivity : ComponentActivity() {
         setContent {
             val themeController: ThemeController = viewModel()
             val themeChoice by themeController.choice.collectAsState()
-            val uiScaleController: UiScaleController = viewModel()
-            val uiScale by uiScaleController.scale.collectAsState()
             NexoraTheme(themeChoice, themeController) {
-                CompositionLocalProvider(
-                    LocalDensity provides Density(LocalDensity.current.density * uiScale, LocalDensity.current.fontScale),
-                ) {
-                    val vm: PatcherViewModel = viewModel()
-                    val drawerWidthController: DrawerWidthController = viewModel()
-                    LaunchedEffect(Unit) {
-                        vm.autoInstallAddons()
-                        vm.scanAddonsStatus()
-                    }
-                    Box(Modifier.fillMaxSize()) {
-                        PatcherApp(vm, drawerWidthController, uiScaleController)
-                    }
+                val vm: PatcherViewModel = viewModel()
+                LaunchedEffect(Unit) {
+                    vm.autoInstallAddons()
+                    vm.scanAddonsStatus()
+                }
+                Box(Modifier.fillMaxSize()) {
+                    PatcherApp(vm)
                 }
             }
         }
@@ -149,32 +129,22 @@ private enum class Dest(val route: String) {
     StoreProfile("store/profile/{username}"),
     StoreManage("store/manage"),
     StoreAdmin("store/admin"),
-    // Settings and Plugins sit in the drawer next to the three tasks and are
-    // peers of them, so they navigate as tabs too. As plain destinations they
-    // stacked on the back stack and the app bar grew a back arrow, which made
-    // them read as a sub-page of whichever tab opened them.
     Settings("settings"),
     Plugins("plugins"),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PatcherApp(vm: PatcherViewModel, drawerWidthController: DrawerWidthController, uiScaleController: UiScaleController) {
+fun PatcherApp(vm: PatcherViewModel) {
     val nav = rememberNavController()
     val entry by nav.currentBackStackEntryAsState()
     val currentRoute = entry?.destination?.route
-    val drawerWidthFraction by drawerWidthController.fraction.collectAsState()
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
-    var showAbout by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-    var showTheme by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val update by vm.appUpdate.collectAsState()
+    var showAbout by remember { mutableStateOf(false) }
 
-    // No automatic update checks: the user triggers "Update check" from the
-    // overflow menu explicitly. When the user downloads an app update from the
-    // dialog, installation starts automatically once it finishes.
-
-    androidx.compose.runtime.LaunchedEffect(update) {
+    LaunchedEffect(update) {
         val u = update
         if (u is PatcherViewModel.AppUpdate.Downloaded) {
             vm.installIntentFor(u.file)?.let { context.startActivity(it) }
@@ -182,11 +152,8 @@ fun PatcherApp(vm: PatcherViewModel, drawerWidthController: DrawerWidthControlle
         }
     }
 
-    // The install step of "remove the old client, then install the new one":
-    // it fires as soon as the system uninstall returned, or as soon as the
-    // rebuild that was needed for it finished.
     val pendingInstall by vm.pendingInstall.collectAsState()
-    androidx.compose.runtime.LaunchedEffect(pendingInstall) {
+    LaunchedEffect(pendingInstall) {
         pendingInstall?.let {
             context.startActivity(it)
             vm.consumePendingInstall()
@@ -199,111 +166,138 @@ fun PatcherApp(vm: PatcherViewModel, drawerWidthController: DrawerWidthControlle
         vm.onUninstallFinished()
     }
     val pendingUninstall by vm.pendingUninstall.collectAsState()
-    androidx.compose.runtime.LaunchedEffect(pendingUninstall) {
+    LaunchedEffect(pendingUninstall) {
         pendingUninstall?.let {
             uninstallLauncher.launch(it)
             vm.consumePendingUninstall()
         }
     }
 
-    val drawerState = androidx.compose.material3.rememberDrawerState(
-        androidx.compose.material3.DrawerValue.Closed,
-    )
-    val drawerOpenScope = androidx.compose.runtime.rememberCoroutineScope()
+    val bottomNavItems = remember {
+        listOf(
+            BottomNavItem(Dest.Patch.route, "Patch", Icons.Filled.RocketLaunch, Icons.Outlined.RocketLaunch),
+            BottomNavItem(Dest.Compiler.route, "Compiler", Icons.Filled.Code, Icons.Outlined.Code),
+            BottomNavItem(Dest.Addons.route, "Addons", Icons.Filled.Extension, Icons.Outlined.Extension),
+            BottomNavItem(Dest.Store.route, "Store", Icons.Filled.Storefront, Icons.Outlined.Storefront),
+            BottomNavItem(Dest.Settings.route, "Settings", Icons.Filled.Settings, Icons.Outlined.Settings),
+        )
+    }
 
-    NavDrawer(
-        vm = vm,
-        nav = nav,
-        drawerState = drawerState,
-        currentRoute = currentRoute,
-        drawerWidthFraction = drawerWidthFraction,
-        onShareLogs = {
-            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                val text = vm.buildLogShareText()
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(android.content.Intent.EXTRA_TEXT, text)
-                    }
-                    context.startActivity(android.content.Intent.createChooser(intent, "Share logs"))
-                }
-            }
-        },
-        onRedownloadBundle = { vm.fetchAndDownloadBundle() },
-        onAbout = { showAbout = true },
-        onTheme = { showTheme = true },
-    ) {
+    val isTopLevelRoute = currentRoute in listOf(
+        Dest.Patch.route,
+        Dest.Compiler.route,
+        Dest.Addons.route,
+        Dest.Store.route,
+        Dest.Settings.route,
+    )
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         contentColor = MaterialTheme.colorScheme.onBackground,
         topBar = {
             TopAppBar(
-                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
+                colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainer,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
                     actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 ),
                 title = {
-                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        androidx.compose.foundation.Image(
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Image(
                             painter = painterResource(id = R.drawable.nexora_logo),
                             contentDescription = null,
-                            modifier = Modifier.height(28.dp).width(28.dp)
-                                .clip(androidx.compose.foundation.shape.RoundedCornerShape(7.dp)),
+                            modifier = Modifier
+                                .height(30.dp)
+                                .width(30.dp)
+                                .clip(RoundedCornerShape(8.dp)),
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            "Nexora",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text("Nexora", style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.width(8.dp))
                         val version by vm.bundleVersion.collectAsState()
-                        val update by vm.appUpdate.collectAsState()
                         if (version.isNotBlank()) {
                             Surface(
-                                shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 color = if (update is PatcherViewModel.AppUpdate.Available) {
-                                    com.pickle.patcher.ui.theme.Tertiary.copy(alpha = 0.18f)
+                                    MaterialTheme.colorScheme.tertiaryContainer
                                 } else {
                                     MaterialTheme.colorScheme.surfaceContainerHighest
                                 },
                             ) {
                                 Text(
                                     text = if (update is PatcherViewModel.AppUpdate.Available) {
-                                        "update"
+                                        "Update"
                                     } else {
                                         version.toDisplayVersion()
                                     },
-                                    style = MaterialTheme.typography.labelSmall,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                                     color = if (update is PatcherViewModel.AppUpdate.Available) {
-                                        com.pickle.patcher.ui.theme.Tertiary
+                                        MaterialTheme.colorScheme.onTertiaryContainer
                                     } else {
                                         MaterialTheme.colorScheme.onSurfaceVariant
                                     },
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                                 )
                             }
                         }
                     }
                 },
-                navigationIcon = {
-                     // The drawer is the one navigation surface for top-level
-                     // destinations, so the menu button stays available.
-                    IconButton(
-                        // DrawerState.open() is suspend; the scope lives in
-                        // the drawer, this launches on the app's own.
-                        onClick = { drawerOpenScope.launch { drawerState.open() } },
-                    ) {
-                        Icon(
-                            androidx.compose.material.icons.Icons.Filled.Menu,
-                            contentDescription = "Open menu",
+                actions = {},
+            )
+        },
+        bottomBar = {
+            if (isTopLevelRoute) {
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    tonalElevation = 3.dp,
+                ) {
+                    bottomNavItems.forEach { item ->
+                        val selected = currentRoute == item.route
+                        NavigationBarItem(
+                            selected = selected,
+                            onClick = {
+                                if (currentRoute != item.route) {
+                                    nav.navigate(item.route) {
+                                        popUpTo(nav.graph.findStartDestination().id) {
+                                            saveState = true
+                                        }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                }
+                            },
+                            icon = {
+                                Icon(
+                                    imageVector = if (selected) item.selectedIcon else item.unselectedIcon,
+                                    contentDescription = item.title,
+                                )
+                            },
+                            label = {
+                                Text(
+                                    text = item.title,
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                    ),
+                                )
+                            },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
+                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
                         )
                     }
-                },
-            )
+                }
+            }
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            // In-app view of the background jobs; the notification is the same
-            // state once the app is not in front.
             val jobs by JobProgress.jobs.collectAsState()
             JobStrip(jobs.values.toList())
             NavHost(
@@ -313,78 +307,108 @@ fun PatcherApp(vm: PatcherViewModel, drawerWidthController: DrawerWidthControlle
                 enterTransition = { fadeIn(tween(200)) },
                 exitTransition = { fadeOut(tween(200)) },
             ) {
-            composable(Dest.Patch.route) { PatchScreen(vm) }
-            composable(Dest.Compiler.route) {
-                CompilerScreen(vm, onOpenSettings = { navToTab(nav, Dest.Settings.route, currentRoute) })
-            }
-            composable(Dest.Addons.route) { AddonsScreen(vm) }
-            composable(Dest.Store.route) {
-                val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
-                StoreScreen(api, onBack = { nav.popBackStack() }, onUserClick = { u -> nav.navigate("store/profile/$u") })
-            }
-            composable(Dest.StoreLogin.route) {
-                val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
-                StoreLoginScreen(api, onBack = { nav.popBackStack() }, onLoginSuccess = { nav.popBackStack() }, onRegister = { nav.navigate(Dest.StoreRegister.route) }, onNeedsVerification = { e -> nav.navigate("store/verify-email?email=${java.net.URLEncoder.encode(e, "UTF-8")}") { popUpTo(Dest.StoreLogin.route) { inclusive = true } } })
-            }
-            composable(Dest.StoreRegister.route) {
-                val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
-                StoreRegisterScreen(api, onBack = { nav.popBackStack() }, onRegisterSuccess = { email ->
-                    nav.navigate("store/verify-email?email=${java.net.URLEncoder.encode(email, "UTF-8")}")
-                })
-            }
-            composable(
-                route = "store/verify-email?email={email}",
-                arguments = listOf(navArgument("email") { type = NavType.StringType; defaultValue = "" }),
-            ) { backStack ->
-                val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
-                val email = backStack.arguments?.getString("email") ?: ""
-                StoreVerifyEmailScreen(api, email = email, onBack = { nav.popBackStack() }, onVerified = { nav.navigate(Dest.Store.route) { popUpTo(Dest.Store.route) { inclusive = false } } })
-            }
-            composable(Dest.StoreUpload.route) {
-                val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
-                StoreUploadScreen(api, onBack = { nav.popBackStack() }, onUploadSuccess = { nav.popBackStack() })
-            }
-            composable(Dest.StoreManage.route) {
-                val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
-                StoreManageScreen(api, onBack = { nav.popBackStack() })
-            }
-            composable(Dest.StoreAdmin.route) {
-                val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
-                AdminScreen(api, onBack = { nav.popBackStack() })
-            }
-            composable(
-                route = Dest.StoreProfile.route,
-                arguments = listOf(navArgument("username") { type = NavType.StringType }),
-            ) { backStack ->
-                val username = backStack.arguments?.getString("username") ?: ""
-                val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
-                StoreProfileScreen(api, username = username, onBack = { nav.popBackStack() }, onEditProfile = { })
-            }
-            composable(Dest.Settings.route) { SettingsScreen(vm, drawerWidthController, uiScaleController) }
-            composable(Dest.Plugins.route) { PluginsScreen(vm) }
+                composable(Dest.Patch.route) { PatchScreen(vm) }
+                composable(Dest.Compiler.route) {
+                    CompilerScreen(
+                        vm = vm,
+                        onOpenSettings = {
+                            nav.navigate(Dest.Settings.route) {
+                                popUpTo(nav.graph.findStartDestination().id) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                    )
+                }
+                composable(Dest.Addons.route) { AddonsScreen(vm) }
+                composable(Dest.Store.route) {
+                    val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
+                    StoreScreen(
+                        api = api,
+                        onBack = { nav.popBackStack() },
+                        onUserClick = { username -> nav.navigate("store/profile/$username") },
+                    )
+                }
+                composable(Dest.StoreLogin.route) {
+                    val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
+                    com.pickle.patcher.ui.screens.StoreLoginScreen(
+                        api = api,
+                        onBack = { nav.popBackStack() },
+                        onLoginSuccess = { nav.popBackStack() },
+                        onRegister = { nav.navigate(Dest.StoreRegister.route) },
+                    )
+                }
+                composable(Dest.StoreRegister.route) {
+                    val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
+                    com.pickle.patcher.ui.screens.StoreRegisterScreen(
+                        api = api,
+                        onBack = { nav.popBackStack() },
+                        onRegisterSuccess = { email -> nav.navigate("store/verify-email?email=$email") },
+                    )
+                }
+                composable(
+                    route = "store/verify-email?email={email}",
+                    arguments = listOf(navArgument("email") { type = NavType.StringType; defaultValue = "" }),
+                ) { backStack ->
+                    val email = backStack.arguments?.getString("email") ?: ""
+                    val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
+                    com.pickle.patcher.ui.screens.StoreVerifyEmailScreen(
+                        api = api,
+                        email = email,
+                        onBack = { nav.popBackStack() },
+                        onVerified = { nav.popBackStack() },
+                    )
+                }
+                composable(Dest.StoreUpload.route) {
+                    val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
+                    com.pickle.patcher.ui.screens.StoreUploadScreen(
+                        api = api,
+                        onBack = { nav.popBackStack() },
+                        onUploadSuccess = { nav.popBackStack() },
+                    )
+                }
+                composable(Dest.StoreManage.route) {
+                    val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
+                    StoreManageScreen(api, onBack = { nav.popBackStack() })
+                }
+                composable(Dest.StoreAdmin.route) {
+                    val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
+                    AdminScreen(api, onBack = { nav.popBackStack() })
+                }
+                composable(
+                    route = Dest.StoreProfile.route,
+                    arguments = listOf(navArgument("username") { type = NavType.StringType }),
+                ) { backStack ->
+                    val username = backStack.arguments?.getString("username") ?: ""
+                    val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
+                    StoreProfileScreen(api, username = username, onBack = { nav.popBackStack() }, onEditProfile = { })
+                }
+                composable(Dest.Settings.route) {
+                    SettingsScreen(
+                        vm = vm,
+                        onOpenAbout = { showAbout = true },
+                        onShareLogs = {
+                            scope.launch(Dispatchers.IO) {
+                                val text = vm.buildLogShareText()
+                                withContext(Dispatchers.Main) {
+                                    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(android.content.Intent.EXTRA_TEXT, text)
+                                    }
+                                    context.startActivity(android.content.Intent.createChooser(intent, "Share logs"))
+                                }
+                            }
+                        },
+                        onRedownloadBundle = { vm.fetchAndDownloadBundle() },
+                    )
+                }
+                composable(Dest.Plugins.route) { AddonsScreen(vm) }
             }
         }
     }
-    }
-
-
 
     if (showAbout) {
         AboutDialog(version = appVersion(context), onDismiss = { showAbout = false })
-    }
-
-    // The picker repaints everything behind it as the choice changes, which is
-    // the point of it being a dialog over the app rather than a screen.
-    val themeController = com.pickle.patcher.ui.theme.LocalThemeController.current
-    val themeChoice by themeController.choice.collectAsState()
-    if (showTheme) {
-        ThemePickerDialog(
-            choice = themeChoice,
-            onPick = themeController::select,
-            onMode = themeController::setMode,
-            onCustom = themeController::selectCustom,
-            onDismiss = { showTheme = false },
-        )
     }
 
     val showUpdateDialog = update is PatcherViewModel.AppUpdate.Available ||
@@ -396,343 +420,16 @@ fun PatcherApp(vm: PatcherViewModel, drawerWidthController: DrawerWidthControlle
     }
 }
 
-/**
- * Install asked twice, in two steps, for a reason: the patched APK is signed
- * with our key and cannot go on top of a differently signed copy, so the old
- * one has to go first. Confirming removes it and rebuilds the patch right away.
- */
-@Composable
-private fun UninstallDialog(
-    packages: List<String>,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Remove the installed client?") },
-        text = {
-            Text(
-                "These are installed on the device:\n\n" +
-                    packages.joinToString("\n") +
-                    "\n\nAndroid refuses to replace them with the patched APK " +
-                    "(different signature). Removing them starts a fresh patch right away."
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) { Text("Remove and patch") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        },
-    )
-}
-
-/**
- * Asked before a new patch replaces the APK that is already there. Confirming
- * deletes it and the patch continues on its own, which is what the user asked
- * for - no second tap after the dialog.
- */
-@Composable
-private fun ReplaceDialog(
-    fileName: String,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Replace the existing APK?") },
-        text = {
-            Text(
-                "$fileName is already in the patch folder. Deleting it starts a fresh " +
-                    "patch right away, and the old file cannot be recovered."
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) { Text("Delete and patch") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Keep it") }
-        },
-    )
-}
-
-private fun formatBytes(bytes: Long): String {
-    if (bytes <= 0) return "0 B"
-    val kb = bytes.toDouble() / 1024.0
-    if (kb < 1024.0) return "%.1f KB".format(kb)
-    val mb = kb / 1024.0
-    if (mb < 1024.0) return "%.1f MB".format(mb)
-    return "%.2f GB".format(mb / 1024.0)
-}
-
-private fun formatSpeed(bps: Long): String = "${formatBytes(bps)}/s"
-
-/**
- * Side menu. Replaces the overflow menu: everything the three-dot button held
- * is either a place you go (Patch/Compile/Addons/Settings/Plugins) or a one-shot
- * command, and a list that does not change shape while you use it is far easier
- * to reach with a thumb.
- *
- * The sheet carries the whole menu so the items do not slide in on their own
- * and fight the drawer's animation. The open gesture is the problem: a swipe
- * that starts anywhere on the screen would hijack every horizontal scroll and
- * every list in the app, so the edge strip below is the only place that pulls
- * it open.
- */
-@Composable
-private fun NavDrawer(
-    vm: PatcherViewModel,
-    nav: androidx.navigation.NavHostController,
-    drawerState: androidx.compose.material3.DrawerState,
-    currentRoute: String?,
-    drawerWidthFraction: Float,
-    onShareLogs: () -> Unit,
-    onRedownloadBundle: () -> Unit,
-    onAbout: () -> Unit,
-    onTheme: () -> Unit,
-    content: @Composable () -> Unit,
-) {
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
-    val context = androidx.compose.ui.platform.LocalContext.current
-
-    // DrawerState.close() is suspend, and the item callbacks are not. Closing
-    // first and navigating after keeps the sheet from animating out on top of
-    // the screen it just navigated to.
-    fun closeThen(block: () -> Unit) {
-        scope.launch {
-            drawerState.close()
-            block()
-        }
-    }
-
-    androidx.compose.material3.ModalNavigationDrawer(
-        drawerState = drawerState,
-        gesturesEnabled = true,
-        drawerContent = {
-            androidx.compose.material3.ModalDrawerSheet(
-                drawerShape = androidx.compose.foundation.shape.RoundedCornerShape(
-                    topEnd = 28.dp,
-                    bottomEnd = 28.dp,
-                ),
-                drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                drawerContentColor = MaterialTheme.colorScheme.onSurface,
-                modifier = androidx.compose.ui.Modifier
-                    .fillMaxWidth(drawerWidthFraction)
-                    .verticalScroll(androidx.compose.foundation.rememberScrollState()),
-            ) {
-                DrawerHeader()
-
-                DrawerSection("Patcher")
-                DrawerItem("Patch", Icons.Filled.RocketLaunch, currentRoute == Dest.Patch.route) {
-                    closeThen { nav.popBackStack(nav.graph.findStartDestination().id, inclusive = true); nav.navigate(Dest.Patch.route) }
-                }
-                DrawerItem("Compile", Icons.Filled.Code, currentRoute == Dest.Compiler.route) {
-                    closeThen { nav.popBackStack(nav.graph.findStartDestination().id, inclusive = true); nav.navigate(Dest.Compiler.route) }
-                }
-                DrawerItem("Addons", Icons.Filled.Extension, currentRoute == Dest.Addons.route) {
-                    closeThen { nav.popBackStack(nav.graph.findStartDestination().id, inclusive = true); nav.navigate(Dest.Addons.route) }
-                }
-
-                DrawerSection("Store")
-                DrawerItem("Store", Icons.Filled.ShoppingCart, currentRoute == Dest.Store.route) {
-                    closeThen { nav.popBackStack(nav.graph.findStartDestination().id, inclusive = true); nav.navigate(Dest.Store.route) }
-                }
-                // Only show account actions when there is a session. Upload and
-                // Manage are useless (and confusing) to an anonymous user.
-                val loggedIn = com.pickle.patcher.data.StoreSession.token(context) != null
-                // Resolve role: always refresh from /api/auth/me when logged in
-                var role by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(com.pickle.patcher.data.StoreSession.role(context)) }
-                androidx.compose.runtime.LaunchedEffect(loggedIn) {
-                    if (loggedIn) {
-                        while (true) {
-                            val api = com.pickle.patcher.data.StoreApi("https://nexora-store-tawny.vercel.app", context)
-                            val res = api.me()
-                            if (res.isFailure && res.exceptionOrNull()?.message?.contains("Not authorized") == true) {
-                                com.pickle.patcher.data.StoreSession.clear(context)
-                                role = null
-                            } else {
-                                res.getOrNull()?.optJSONObject("user")?.let { uj ->
-                                    val r = uj.optString("role")
-                                    role = r
-                                    val ev = uj.optBoolean("emailVerified", false)
-                                    val t = com.pickle.patcher.data.StoreSession.token(context)
-                                    val u = com.pickle.patcher.data.StoreSession.username(context) ?: ""
-                                    if (t != null) {
-                                        com.pickle.patcher.data.StoreSession.save(context, t, u, r, ev)
-                                    }
-                                }
-                            }
-                            kotlinx.coroutines.delay(3000)
-                        }
-                    } else {
-                        role = null
-                    }
-                }
-                val isAdmin = role == "admin" || role == "owner"
-                if (!loggedIn) {
-                    DrawerItem("Store Login", Icons.Filled.Login, currentRoute == Dest.StoreLogin.route) {
-                        closeThen { nav.popBackStack(nav.graph.findStartDestination().id, inclusive = true); nav.navigate(Dest.StoreLogin.route) }
-                    }
-                } else {
-                    val uname = com.pickle.patcher.data.StoreSession.username(context)
-                    if (uname != null) {
-                        DrawerItem("My Profile", Icons.Filled.Person, currentRoute == Dest.StoreProfile.route) {
-                            closeThen { nav.popBackStack(nav.graph.findStartDestination().id, inclusive = true); nav.navigate("store/profile/$uname") }
-                        }
-                    }
-                    DrawerItem("Store Upload", Icons.Filled.Upload, currentRoute == Dest.StoreUpload.route) {
-                        closeThen { nav.popBackStack(nav.graph.findStartDestination().id, inclusive = true); nav.navigate(Dest.StoreUpload.route) }
-                    }
-                    DrawerItem("Store Manage", Icons.Filled.Edit, currentRoute == Dest.StoreManage.route) {
-                        closeThen { nav.popBackStack(nav.graph.findStartDestination().id, inclusive = true); nav.navigate(Dest.StoreManage.route) }
-                    }
-                    if (isAdmin) {
-                        DrawerItem("Admin", Icons.Filled.Lock, currentRoute == Dest.StoreAdmin.route) {
-                            closeThen { nav.popBackStack(nav.graph.findStartDestination().id, inclusive = true); nav.navigate(Dest.StoreAdmin.route) }
-                        }
-                    }
-                }
-
-                DrawerSection("Settings")
-                DrawerItem("Settings", Icons.Filled.Tune, currentRoute == Dest.Settings.route) {
-                    closeThen { nav.popBackStack(nav.graph.findStartDestination().id, inclusive = true); nav.navigate(Dest.Settings.route) }
-                }
-                DrawerItem("Plugins", Icons.Filled.Extension, currentRoute == Dest.Plugins.route) {
-                    closeThen { nav.popBackStack(nav.graph.findStartDestination().id, inclusive = true); nav.navigate(Dest.Plugins.route) }
-                }
-
-                DrawerSection("Tools")
-                DrawerItem("Theme", Icons.Filled.Palette, false, onTheme)
-                DrawerItem("Update check", Icons.Filled.SystemUpdate) {
-                    closeThen {
-                        vm.checkAppUpdate()
-                        vm.refreshLibStatus()
-                    }
-                }
-                DrawerItem("Redownload bundle", Icons.Filled.Download) {
-                    closeThen { onRedownloadBundle() }
-                }
-                DrawerItem("Share logs", Icons.Filled.Share) {
-                    closeThen { onShareLogs() }
-                }
-                DrawerItem("About", Icons.Filled.Info) {
-                    closeThen { onAbout() }
-                }
-            }
-        },
-    ) {
-        Box(Modifier.fillMaxSize()) {
-            content()
-
-            // Invisible strip on the left edge that opens the menu. Laid over
-            // the content rather than replacing its gesture, so everything to
-            // the right of it keeps working untouched.
-            Box(
-                modifier = Modifier
-                    .align(androidx.compose.ui.Alignment.CenterStart)
-                    .width(DRAWER_EDGE_DP.dp)
-                    .fillMaxHeight()
-                    .draggable(
-                        orientation = androidx.compose.foundation.gestures.Orientation.Horizontal,
-                        state = androidx.compose.foundation.gestures.rememberDraggableState { delta ->
-                            // Any real drag opens; there is no partial drag
-                            // state to preserve, the sheet animates on its own.
-                            if (delta != 0f) scope.launch { drawerState.open() }
-                        },
-                    ),
-            )
-        }
-    }
-}
-
-/**
- * How wide the left edge strip that pulls the menu open is. Wide enough to find
- * with a thumb, narrow enough that it never steals a swipe meant for a list.
- */
-private const val DRAWER_EDGE_DP = 28f
-
-/**
- * Switches between drawer destinations, keeping each one's state.
- */
-private fun navToTab(
-    nav: androidx.navigation.NavHostController,
-    route: String,
-    currentRoute: String?,
-) {
-    if (currentRoute == route) return
-    nav.navigate(route) {
-        popUpTo(nav.graph.findStartDestination().id) { saveState = true }
-        launchSingleTop = true
-        restoreState = true
-    }
-}
-
-
-@Composable
-private fun DrawerHeader() {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 14.dp),
-        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-    ) {
-        androidx.compose.foundation.Image(
-            painter = painterResource(id = R.drawable.nexora_logo),
-            contentDescription = null,
-            modifier = Modifier
-                .height(36.dp)
-                .width(36.dp)
-                .clip(androidx.compose.foundation.shape.RoundedCornerShape(9.dp)),
-        )
-        Spacer(Modifier.width(12.dp))
-        Column {
-            Text("Nexora", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "AMXX tools",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun DrawerSection(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 28.dp, top = 12.dp, bottom = 4.dp),
-    )
-}
-
-@Composable
-private fun DrawerItem(
-    label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    selected: Boolean = false,
-    onClick: () -> Unit,
-) {
-    androidx.compose.material3.NavigationDrawerItem(
-        label = { Text(label, style = MaterialTheme.typography.bodyMedium) },
-        selected = selected,
-        onClick = onClick,
-        icon = { Icon(icon, contentDescription = null) },
-        colors = androidx.compose.material3.NavigationDrawerItemDefaults.colors(
-            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-            selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            unselectedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
-        ),
-        modifier = Modifier.padding(horizontal = 12.dp, vertical = 1.dp),
-    )
-}
+private data class BottomNavItem(
+    val route: String,
+    val title: String,
+    val selectedIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    val unselectedIcon: androidx.compose.ui.graphics.vector.ImageVector,
+)
 
 @Composable
 private fun AboutDialog(version: String, onDismiss: () -> Unit) {
-    androidx.compose.material3.AlertDialog(
+    AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Nexora") },
         text = {
@@ -744,8 +441,7 @@ private fun AboutDialog(version: String, onDismiss: () -> Unit) {
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    "AMXX bundle injection for CS 1.6 on Android: " +
-                        "Pawn compiler, addons manager and crash logs.",
+                    "AMXX bundle injection for CS 1.6 on Android: Pawn compiler, addons manager and patch engine.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -758,7 +454,7 @@ private fun AboutDialog(version: String, onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Close") }
+            TextButton(onClick = onDismiss) { Text("Close") }
         },
     )
 }
@@ -779,9 +475,20 @@ private fun appVersion(context: android.content.Context): String {
     }
 }
 
+private fun formatBytes(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
+    val kb = bytes.toDouble() / 1024.0
+    if (kb < 1024.0) return "%.1f KB".format(kb)
+    val mb = kb / 1024.0
+    if (mb < 1024.0) return "%.1f MB".format(mb)
+    return "%.2f GB".format(mb / 1024.0)
+}
+
+private fun formatSpeed(bps: Long): String = "${formatBytes(bps)}/s"
+
 @Composable
 private fun UpdateDialog(vm: PatcherViewModel, state: PatcherViewModel.AppUpdate) {
-    androidx.compose.material3.AlertDialog(
+    AlertDialog(
         onDismissRequest = {
             if (state !is PatcherViewModel.AppUpdate.Downloading) vm.dismissUpdate()
         },
@@ -805,7 +512,7 @@ private fun UpdateDialog(vm: PatcherViewModel, state: PatcherViewModel.AppUpdate
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .heightIn(max = 260.dp)
-                                .verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                                .verticalScroll(rememberScrollState()),
                         ) {
                             if (state.commits.isNotEmpty()) {
                                 Text(
@@ -854,8 +561,8 @@ private fun UpdateDialog(vm: PatcherViewModel, state: PatcherViewModel.AppUpdate
                     val frac = if (state.total > 0) {
                         (state.downloaded.toDouble() / state.total).toFloat().coerceIn(0f, 1f)
                     } else 0f
-                    androidx.compose.material3.LinearProgressIndicator(
-                        progress = frac,
+                    LinearProgressIndicator(
+                        progress = { frac },
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -890,12 +597,12 @@ private fun UpdateDialog(vm: PatcherViewModel, state: PatcherViewModel.AppUpdate
         confirmButton = {
             when (state) {
                 is PatcherViewModel.AppUpdate.Available -> {
-                    androidx.compose.material3.TextButton(onClick = { vm.downloadAppUpdate() }) {
+                    TextButton(onClick = { vm.downloadAppUpdate() }) {
                         Text("Download")
                     }
                 }
                 is PatcherViewModel.AppUpdate.Failed -> {
-                    androidx.compose.material3.TextButton(onClick = { vm.checkAppUpdate() }) {
+                    TextButton(onClick = { vm.checkAppUpdate() }) {
                         Text("Retry")
                     }
                 }
@@ -904,7 +611,7 @@ private fun UpdateDialog(vm: PatcherViewModel, state: PatcherViewModel.AppUpdate
         },
         dismissButton = {
             if (state !is PatcherViewModel.AppUpdate.Downloading) {
-                androidx.compose.material3.TextButton(onClick = { vm.dismissUpdate() }) {
+                TextButton(onClick = { vm.dismissUpdate() }) {
                     Text("Later")
                 }
             }

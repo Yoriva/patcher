@@ -6,12 +6,6 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 
-/**
- * A theme is three colours. Everything else - containers, surfaces, outlines,
- * the greys - is derived from those three, so a theme is three swatches wide
- * and stays coherent in both light and dark instead of being two hand-tuned
- * schemes that drift apart.
- */
 data class Palette(
     val id: String,
     val name: String,
@@ -20,31 +14,13 @@ data class Palette(
     val tertiary: Color,
 )
 
-/**
- * Mixes [a] toward [b] by [t]: 0 leaves a, 1 returns b. Used instead of
- * Color.copy(alpha) because every role needs an opaque colour - a
- * semi-transparent scheme breaks surfaces stacked on surfaces.
- */
 private fun mix(a: Color, b: Color, t: Float) = lerp(a, b, t)
 
 private val BLACK = Color(0xFF000000)
 private val WHITE = Color(0xFFFFFFFF)
 
-/**
- * Builds the full scheme for a palette.
- *
- * Dark mixes every neutral toward black and lifts the accents so they stay
- * legible on it; light does the mirror image. The accent containers are the
- * same hue pushed away from the background rather than a fixed dark shade,
- * which is what keeps a lime theme from ending up with a navy button.
- */
 fun schemeFor(p: Palette, dark: Boolean): ColorScheme = if (dark) darkOf(p) else lightOf(p)
 
-/**
- * Lifts a dark scheme away from pure black and tints it with its own primary,
- * so Material You's wallpaper-derived near-black surfaces do not read as an
- * AMOLED void. Containers are lifted a little more than the background.
- */
 fun softenDarkScheme(scheme: ColorScheme): ColorScheme = scheme.copy(
     background = mix(scheme.background, scheme.primary, 0.16f),
     surface = mix(scheme.surface, scheme.primary, 0.14f),
@@ -139,10 +115,9 @@ private fun lightOf(p: Palette): ColorScheme {
     )
 }
 
-/** The default, and the fallback for an id that no longer exists. */
 val NexoraPalette = Palette(
     id = "nexora",
-    name = "Nexora",
+    name = "Default",
     primary = Color(0xFF7CC7FF),
     secondary = Color(0xFFC6BFFF),
     tertiary = Color(0xFFFFB871),
@@ -151,27 +126,10 @@ val NexoraPalette = Palette(
 val Presets: List<Palette> = listOf(
     Palette("dynamic", "Material You", Color(0xFF6750A4), Color(0xFF625B71), Color(0xFF7D5260)),
     NexoraPalette,
-    Palette("ember", "Ember", Color(0xFFFF8A4C), Color(0xFFFF5E5B), Color(0xFFFFD166)),
-    Palette("toxic", "Toxic", Color(0xFF9BE564), Color(0xFF34D399), Color(0xFFD9F99D)),
-    Palette("ice", "Ice", Color(0xFF67E8F9), Color(0xFF60A5FA), Color(0xFFA5B4FC)),
-    Palette("grape", "Grape", Color(0xFFC084FC), Color(0xFFF472B6), Color(0xFFE879F9)),
-    Palette("rust", "Rust", Color(0xFFD9A066), Color(0xFFB45309), Color(0xFFE7C99B)),
-    Palette("ocean", "Ocean", Color(0xFF60A5FA), Color(0xFF2DD4BF), Color(0xFF0EA5E9)),
-    Palette("neon", "Neon", Color(0xFFF0ABFC), Color(0xFF22D3EE), Color(0xFFA3E635)),
-    Palette("sand", "Sand", Color(0xFFD6BD8B), Color(0xFFA3B18A), Color(0xFFE9D8A6)),
-    Palette("blood", "Blood", Color(0xFFEF4444), Color(0xFF9F1239), Color(0xFFFCA5A5)),
 )
 
 private val byId = Presets.associateBy { it.id }
 
-/** The preset with this id, or the default when the id is stale or custom. */
 fun presetById(id: String?): Palette? = id?.let { byId[it] }
 
-/**
- * The palette a saved choice resolves to. A custom choice keeps whatever the
- * user picked rather than snapping back to a preset when they reopen the app.
- */
-fun paletteFor(themeId: String, custom: Triple<Long, Long, Long>?): Palette =
-    presetById(themeId)
-        ?: custom?.let { Palette("custom", "Custom", Color(it.first), Color(it.second), Color(it.third)) }
-        ?: NexoraPalette
+fun paletteFor(themeId: String): Palette = presetById(themeId) ?: NexoraPalette

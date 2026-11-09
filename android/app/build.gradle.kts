@@ -69,7 +69,7 @@ android {
         // offsets. Stripping here removes both, so an arm32 SIGSEGV lands as
         // a bare address instead of a function name.
         jniLibs {
-            doNotStrip("**/*.so")
+            keepDebugSymbols.add("**/*.so")
         }
     }
 }

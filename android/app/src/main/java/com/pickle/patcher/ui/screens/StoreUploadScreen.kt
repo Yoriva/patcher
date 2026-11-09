@@ -37,7 +37,6 @@ fun StoreUploadScreen(
     var description by remember { mutableStateOf("") }
     var version by remember { mutableStateOf("1.0.0") }
     var logoUri by remember { mutableStateOf<Uri?>(null) }
-    // Selected file URIs paired with their content hash for dedup
     var libEntries by remember { mutableStateOf<List<Triple<Uri, String, String>>>(emptyList()) }
     var links by remember { mutableStateOf<List<Pair<String?, String>>>(emptyList()) }
     var linkInput by remember { mutableStateOf("") }
@@ -219,7 +218,6 @@ fun StoreUploadScreen(
                 if (!StoreSession.emailVerified(context)) { error = "Verify your email to upload"; return@Button }
                 loading = true; error = null; cooldown = null
                 scope.launch {
-                    // Preflight cooldown check to avoid uploading large files first.
                     val me = api.me()
                     val upload = me.getOrNull()?.optJSONObject("upload")
                     val allowed = upload?.optBoolean("allowed", true) ?: true
@@ -229,7 +227,6 @@ fun StoreUploadScreen(
                         loading = false
                         return@launch
                     }
-                    // Upload files directly to Cloudinary/Supabase (bypasses server body limit).
                     progress = 0f
                     var logoUrl: String? = null
                     var uploadedLogoUrl: String? = null
@@ -293,7 +290,6 @@ private fun displayName(context: Context, uri: Uri): String {
         }
     } catch (_: Exception) { null }
     val fromPath = uri.lastPathSegment?.substringAfterLast('/')
-    // Prefer a name that carries an extension; fall back to whatever is available.
     val candidates = listOfNotNull(fromColumn, fromPath)
     val withExt = candidates.firstOrNull { it.contains('.') }
     return (withExt ?: candidates.firstOrNull() ?: "file.bin")

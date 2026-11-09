@@ -1,18 +1,26 @@
 package com.pickle.patcher.ui.screens
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Save
@@ -32,54 +40,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pickle.patcher.patcher.PatcherViewModel
-import com.pickle.patcher.ui.theme.Accent
-import com.pickle.patcher.ui.theme.Gray40
-import com.pickle.patcher.ui.theme.Gray60
-import com.pickle.patcher.ui.theme.Gray70
-import com.pickle.patcher.ui.theme.Gray85
-import com.pickle.patcher.ui.theme.Secondary
-import com.pickle.patcher.ui.theme.SuccessGreen
-import com.pickle.patcher.ui.theme.Tertiary
-import com.pickle.patcher.ui.theme.Gray30
 import java.io.File
-import androidx.compose.foundation.clickable
-import androidx.compose.ui.text.font.FontStyle
-import com.pickle.patcher.ui.theme.Gray99
-import androidx.compose.foundation.layout.size
-import androidx.compose.ui.text.input.OffsetMapping
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.Box
-import androidx.compose.ui.text.PlatformTextStyle
 
 private val EditorFont = FontFamily.Monospace
 private val EditorSize = 13.sp
 private val EditorLineHeight = 19.sp
 private val EditorLines = 18
 
-/**
- * INI highlighting for the plugin config editor: comments, sections, keys and
- * values get their own colours, and a commented plugin name stays readable so
- * it is obvious which entry is switched off.
- *
- * The text is copied verbatim — only styles are attached — so the visual
- * transformation keeps a 1:1 offset mapping. Rebuilding the line (trimming,
- * collapsing spaces around '=') changes the length and Compose rejects the
- * identity mapping, which crashes the editor.
- */
 private fun highlightIni(text: String, colors: IniColors): AnnotatedString = buildAnnotatedString {
     var pos = 0
     while (pos <= text.length) {
@@ -97,7 +77,6 @@ private fun highlightIni(text: String, colors: IniColors): AnnotatedString = bui
             when {
                 line[first] == ';' -> {
                     style(first, line.length, SpanStyle(color = colors.comment, fontStyle = FontStyle.Italic))
-                    // keep the name after ';' readable so an off plugin is obvious
                     var nameStart = first + 1
                     if (nameStart < line.length && line[nameStart] == ' ') nameStart++
                     var nameEnd = nameStart
@@ -142,19 +121,14 @@ private fun highlightIni(text: String, colors: IniColors): AnnotatedString = bui
     }
 }
 
-/**
- * The palette the highlighter paints with, resolved once at the composable call
- * site. VisualTransformation.filter is not a composable, so the colours cannot
- * be read inside it.
- */
 private data class IniColors(
-    val comment: androidx.compose.ui.graphics.Color,
-    val pluginName: androidx.compose.ui.graphics.Color,
-    val section: androidx.compose.ui.graphics.Color,
-    val text: androidx.compose.ui.graphics.Color,
-    val operator: androidx.compose.ui.graphics.Color,
-    val string: androidx.compose.ui.graphics.Color,
-    val value: androidx.compose.ui.graphics.Color,
+    val comment: Color,
+    val pluginName: Color,
+    val section: Color,
+    val text: Color,
+    val operator: Color,
+    val string: Color,
+    val value: Color,
 )
 
 private class IniHighlight(private val colors: IniColors) : VisualTransformation {
@@ -182,7 +156,6 @@ fun PluginsScreen(vm: PatcherViewModel) {
     LaunchedEffect(selected) { selected?.let(vm::openPluginIni) }
 
     val file = selected
-    // Recomputed when the theme changes, so the highlighter repaints with it.
     val iniColors = IniColors(
         comment = MaterialTheme.colorScheme.onSurfaceVariant,
         pluginName = MaterialTheme.colorScheme.tertiary,
@@ -267,9 +240,6 @@ fun PluginsScreen(vm: PatcherViewModel) {
                 color = MaterialTheme.colorScheme.surfaceContainerLowest,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                // The viewport is a fixed 18 lines; scrolling happens inside it in
-                // both directions, and the gutter scrolls with the text through the
-                // same state.
                 val editorHeight = (EditorLines * EditorLineHeight.value).dp + 16.dp
                 Box(
                     Modifier
@@ -279,9 +249,6 @@ fun PluginsScreen(vm: PatcherViewModel) {
                         .horizontalScroll(hScroll),
                 ) {
                     Row(Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
-                        // One Text for the whole gutter, with the same style as the
-                        // field: a stack of per-line Texts drifts by a fraction of a
-                        // dp per line against the field's single text layout.
                         Text(
                             text = gutterText,
                             style = editorStyle.copy(
@@ -291,8 +258,6 @@ fun PluginsScreen(vm: PatcherViewModel) {
                             textAlign = TextAlign.End,
                         )
                         Spacer(Modifier.width(10.dp))
-                        // Measured with unbounded width, so long lines stay on one
-                        // line instead of soft-wrapping.
                         BasicTextField(
                             value = text,
                             onValueChange = vm::editIniText,

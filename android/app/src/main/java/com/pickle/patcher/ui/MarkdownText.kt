@@ -30,7 +30,6 @@ fun MarkdownText(
         for (line in lines) {
             if (line.trim().startsWith("```")) {
                 if (inCode) {
-                    // render code block
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
                         shape = MaterialTheme.shapes.small,

@@ -37,7 +37,7 @@ fun AdminScreen(api: StoreApi, onBack: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     val token = StoreSession.token(context) ?: ""
-    var tab by remember { mutableStateOf(0) } // 0 posts, 1 users
+    var tab by remember { mutableStateOf(0) }
 
     Scaffold(
         topBar = {
@@ -87,7 +87,7 @@ fun AdminScreen(api: StoreApi, onBack: () -> Unit) {
 @Composable
 private fun AdminPosts(api: StoreApi, token: String) {
     val scope = rememberCoroutineScope()
-    var statusFilter by remember { mutableStateOf<String?>(null) } // null = all
+    var statusFilter by remember { mutableStateOf<String?>(null) }
     var items by remember { mutableStateOf<JSONArray?>(null) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }

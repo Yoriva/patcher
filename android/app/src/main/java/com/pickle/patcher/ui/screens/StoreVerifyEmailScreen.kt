@@ -51,7 +51,6 @@ fun StoreVerifyEmailScreen(
     }
 
     LaunchedEffect(Unit) {
-        // If email not provided, fetch from session via me()
         if (email.isBlank()) {
             api.me().getOrNull()?.optJSONObject("user")?.optString("email")?.let { em ->
                 if (em.isNotBlank()) {

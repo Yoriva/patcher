@@ -1,12 +1,19 @@
 package com.pickle.patcher.ui.screens
 
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,47 +22,74 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.border
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.pickle.patcher.ui.theme.Accent
-import com.pickle.patcher.ui.theme.Gray30
-import com.pickle.patcher.ui.theme.Gray40
-import com.pickle.patcher.ui.theme.Gray60
-import com.pickle.patcher.ui.theme.Gray70
-import com.pickle.patcher.ui.theme.Gray85
-import com.pickle.patcher.ui.theme.Gray99
+import androidx.compose.ui.unit.sp
+import kotlin.math.PI
+import kotlin.math.sin
 
-private val CardShape: androidx.compose.ui.graphics.Shape
-    @Composable get() = MaterialTheme.shapes.large
+fun getGroupedItemShape(
+    index: Int,
+    total: Int,
+    outerCorner: Dp = 24.dp,
+    innerCorner: Dp = 6.dp,
+): RoundedCornerShape {
+    return when {
+        total <= 1 -> RoundedCornerShape(outerCorner)
+        index == 0 -> RoundedCornerShape(
+            topStart = outerCorner,
+            topEnd = outerCorner,
+            bottomStart = innerCorner,
+            bottomEnd = innerCorner,
+        )
+        index == total - 1 -> RoundedCornerShape(
+            topStart = innerCorner,
+            topEnd = innerCorner,
+            bottomStart = outerCorner,
+            bottomEnd = outerCorner,
+        )
+        else -> RoundedCornerShape(innerCorner)
+    }
+}
 
+val CardShape: Shape = RoundedCornerShape(24.dp)
 
 enum class Tone {
     Primary,
@@ -72,7 +106,7 @@ data class Stat(
 )
 
 @Composable
-private fun toneColors(tone: Tone): Pair<Color, Color> = when (tone) {
+fun toneColors(tone: Tone): Pair<Color, Color> = when (tone) {
     Tone.Primary ->
         MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
     Tone.Secondary ->
@@ -93,9 +127,13 @@ fun StatusPill(
     icon: ImageVector? = null,
 ) {
     val (container, content) = toneColors(tone)
-    Surface(modifier = modifier, shape = RoundedCornerShape(50), color = container) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(percent = 50),
+        color = container,
+    ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) {
@@ -109,7 +147,7 @@ fun StatusPill(
             }
             Text(
                 text,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                 color = content,
             )
         }
@@ -128,48 +166,49 @@ fun ScreenHeader(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.extraLarge,
+        shape = RoundedCornerShape(26.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         tonalElevation = 1.dp,
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    shape = MaterialTheme.shapes.large,
-                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
                 ) {
-                    Box(modifier = Modifier.size(52.dp), contentAlignment = Alignment.Center) {
+                    Box(modifier = Modifier.size(50.dp), contentAlignment = Alignment.Center) {
                         Icon(
                             icon,
                             contentDescription = null,
                             modifier = Modifier.size(26.dp),
-                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
                         )
                     }
                 }
-                Spacer(Modifier.width(14.dp))
+                Spacer(Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         title,
-                        style = MaterialTheme.typography.headlineSmall,
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
                         subtitle,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
                 if (status != null) {
+                    Spacer(Modifier.width(8.dp))
                     StatusPill(status, tone = statusTone)
                 }
             }
             if (stats.isNotEmpty()) {
                 Spacer(Modifier.height(16.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     stats.forEach { stat ->
                         StatCard(stat, Modifier.weight(1f))
                     }
@@ -182,13 +221,22 @@ fun ScreenHeader(
 @Composable
 fun StatCard(stat: Stat, modifier: Modifier = Modifier) {
     val (container, content) = toneColors(stat.tone)
-    Surface(modifier = modifier, shape = MaterialTheme.shapes.large, color = container) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-            Text(stat.label, style = MaterialTheme.typography.labelSmall, color = content)
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        color = container,
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Text(
+                stat.label,
+                style = MaterialTheme.typography.labelSmall,
+                color = content.copy(alpha = 0.8f),
+                maxLines = 1,
+            )
             Spacer(Modifier.height(2.dp))
             Text(
                 stat.value,
-                style = MaterialTheme.typography.labelLarge,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                 color = content,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -200,40 +248,119 @@ fun StatCard(stat: Stat, modifier: Modifier = Modifier) {
 @Composable
 fun SectionHeader(
     title: String,
-    caption: String,
+    caption: String? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(bottom = 10.dp, top = 4.dp),
+            .padding(start = 6.dp, end = 6.dp, top = 8.dp, bottom = 6.dp),
     ) {
         Text(
             title,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.primary,
         )
-        Text(
-            caption,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (!caption.isNullOrBlank()) {
+            Spacer(Modifier.height(1.dp))
+            Text(
+                caption,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
 @Composable
 fun AppCard(
     modifier: Modifier = Modifier,
+    shape: Shape = CardShape,
+    containerColor: Color = MaterialTheme.colorScheme.surfaceContainer,
     content: @Composable () -> Unit,
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = CardShape,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        tonalElevation = 1.dp,
+        shape = shape,
+        color = containerColor,
     ) {
-        Column(modifier = Modifier.padding(18.dp)) {
+        Column(modifier = Modifier.padding(20.dp)) {
             content()
+        }
+    }
+}
+
+@Composable
+fun GroupedSettingCard(
+    title: String,
+    subtitle: String? = null,
+    icon: ImageVector? = null,
+    index: Int = 0,
+    total: Int = 1,
+    onClick: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    trailing: @Composable (() -> Unit)? = null,
+) {
+    val shape = getGroupedItemShape(index, total)
+    Card(
+        onClick = onClick ?: {},
+        enabled = onClick != null,
+        modifier = modifier.fillMaxWidth(),
+        shape = shape,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (icon != null) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                if (!subtitle.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (trailing != null) {
+                Spacer(modifier = Modifier.width(12.dp))
+                trailing()
+            } else if (onClick != null) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Icon(
+                    imageVector = Icons.Rounded.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
     }
 }
@@ -245,26 +372,30 @@ fun PrimaryButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     icon: @Composable (() -> Unit)? = null,
-    // Set for actions that replace something the user already has (an APK
-    // update, for instance): the button itself has to look like the update.
     containerColor: Color = MaterialTheme.colorScheme.primary,
     contentColor: Color = MaterialTheme.colorScheme.onPrimary,
 ) {
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.fillMaxWidth().height(48.dp),
-        shape = RoundedCornerShape(50),
+        modifier = modifier.fillMaxWidth().height(52.dp),
+        shape = RoundedCornerShape(percent = 50),
         colors = ButtonDefaults.buttonColors(
             containerColor = containerColor,
             contentColor = contentColor,
             disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
         ),
+        elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp, pressedElevation = 2.dp),
     ) {
-        icon?.invoke()
-        if (icon != null) Spacer(Modifier.width(6.dp))
-        Text(text, style = MaterialTheme.typography.labelLarge)
+        if (icon != null) {
+            icon()
+            Spacer(Modifier.width(8.dp))
+        }
+        Text(
+            text,
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+        )
     }
 }
 
@@ -279,18 +410,49 @@ fun SecondaryButton(
     FilledTonalButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.height(48.dp),
-        shape = RoundedCornerShape(50),
+        modifier = modifier.height(52.dp),
+        shape = RoundedCornerShape(percent = 50),
         colors = ButtonDefaults.filledTonalButtonColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
         ),
     ) {
-        icon?.invoke()
-        if (icon != null) Spacer(Modifier.width(6.dp))
-        Text(text, style = MaterialTheme.typography.labelLarge)
+        if (icon != null) {
+            icon()
+            Spacer(Modifier.width(8.dp))
+        }
+        Text(
+            text,
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+        )
+    }
+}
+
+@Composable
+fun ExpressiveOutlinedButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    icon: @Composable (() -> Unit)? = null,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.height(44.dp),
+        shape = RoundedCornerShape(percent = 50),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        if (icon != null) {
+            icon()
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(
+            text,
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+        )
     }
 }
 
@@ -310,7 +472,10 @@ fun GhostButton(
             disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         ),
     ) {
-        Text(text, style = MaterialTheme.typography.labelLarge)
+        Text(
+            text,
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+        )
     }
 }
 
@@ -322,15 +487,20 @@ fun InfoRow(
     valueColor: Color = MaterialTheme.colorScheme.primary,
 ) {
     Row(
-        modifier = modifier.fillMaxWidth().padding(vertical = 3.dp),
+        modifier = modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             label,
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(value, style = MaterialTheme.typography.bodySmall, color = valueColor)
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = valueColor,
+        )
     }
 }
 
@@ -343,25 +513,82 @@ fun StatPill(
 ) {
     Surface(
         modifier = modifier,
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp).widthIn(min = 80.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp).widthIn(min = 72.dp),
         ) {
             Text(
                 value,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                 color = accent,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            Spacer(Modifier.height(1.dp))
             Text(
                 label,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
             )
+        }
+    }
+}
+
+@Composable
+fun WavyProgressBar(
+    progress: Float,
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.primary,
+    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "waveTransition")
+    val phase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "wavePhase",
+    )
+
+    val clipPath = remember { Path() }
+    val wavePath = remember { Path() }
+
+    Canvas(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(10.dp)
+            .clip(RoundedCornerShape(5.dp)),
+    ) {
+        drawRect(trackColor, size = size)
+        if (progress <= 0f) return@Canvas
+
+        val barWidth = size.width * progress.coerceIn(0f, 1f)
+        val amplitude = size.height * 0.28f
+        val wavelength = 28.dp.toPx().coerceAtLeast(8f)
+        val centerY = size.height / 2f
+
+        clipPath.reset()
+        clipPath.addRect(Rect(Offset.Zero, Size(size.width, size.height)))
+
+        clipPath(clipPath) {
+            wavePath.reset()
+            wavePath.moveTo(0f, centerY)
+            var x = 0f
+            val twoPi = (2 * PI).toFloat()
+            while (x <= barWidth) {
+                wavePath.lineTo(x, centerY + amplitude * sin(x / wavelength * twoPi + phase))
+                x += 3f
+            }
+            wavePath.lineTo(barWidth, size.height)
+            wavePath.lineTo(0f, size.height)
+            wavePath.close()
+
+            drawPath(wavePath, color)
         }
     }
 }
@@ -390,11 +617,6 @@ fun AppProgressBar(fraction: Float, modifier: Modifier = Modifier) {
     }
 }
 
-
-/**
- * Circular progress with the percentage in the middle. Used by the patch
- * screen so the whole run has one anchor instead of a bar that only grows.
- */
 @Composable
 fun RingProgress(
     fraction: Float,
@@ -408,8 +630,6 @@ fun RingProgress(
         animationSpec = tween(220),
         label = "ring",
     )
-    // Read here rather than inside the Canvas: its lambda is a DrawScope, which
-    // is not a composable scope.
     val trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
     val progressColor = MaterialTheme.colorScheme.primary
     Box(modifier = modifier.size(diameter), contentAlignment = Alignment.Center) {
@@ -443,23 +663,19 @@ fun RingProgress(
                 text = "${(animated * 100).toInt()}%",
                 color = MaterialTheme.colorScheme.onSurface,
                 fontSize = 20.sp,
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = FontWeight.Bold,
             )
             if (label.isNotEmpty()) {
                 Text(
                     text = label,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 10.sp,
+                    fontSize = 11.sp,
                 )
             }
         }
     }
 }
 
-/**
- * Ten-line live console. Keeps the tail of the log visible while the run is
- * going, and stays scrollable so the user can read what already scrolled by.
- */
 @Composable
 fun MiniConsole(
     lines: List<String>,
@@ -469,20 +685,20 @@ fun MiniConsole(
     val scroll = rememberScrollState()
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
+        shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLowest,
     ) {
         Column(
             modifier = Modifier
-                .height((visibleLines * 16 + 16).dp)
+                .height((visibleLines * 18 + 20).dp)
                 .verticalScroll(scroll)
-                .padding(vertical = 10.dp, horizontal = 12.dp),
+                .padding(vertical = 12.dp, horizontal = 14.dp),
         ) {
             if (lines.isEmpty()) {
                 Text(
                     text = "waiting…",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    fontSize = 12.sp,
                     fontFamily = FontFamily.Monospace,
                 )
             }
@@ -491,11 +707,13 @@ fun MiniConsole(
                     text = line,
                     color = if (line.startsWith("+")) {
                         MaterialTheme.colorScheme.primary
+                    } else if (line.startsWith("!") || line.contains("error", ignoreCase = true)) {
+                        MaterialTheme.colorScheme.error
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
-                    fontSize = 11.sp,
-                    lineHeight = 16.sp,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

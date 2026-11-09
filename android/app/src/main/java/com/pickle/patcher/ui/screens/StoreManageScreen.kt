@@ -43,7 +43,6 @@ fun StoreManageScreen(
         scope.launch {
             val username = StoreSession.username(context)
             if (username == null) { loading = false; return@launch }
-            // Get user profile to find their items
             api.getUserProfile(username).fold(
                 onSuccess = { json ->
                     val profile = json.optJSONObject("profile")
@@ -139,7 +138,6 @@ fun StoreManageScreen(
         }
     }
 
-    // Delete confirmation
     deleteTarget?.let { id ->
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
@@ -178,7 +176,6 @@ fun StoreManageScreen(
         )
     }
 
-    // Edit dialog
     editTarget?.let { obj ->
         key(obj.optString("id")) {
             var title by remember { mutableStateOf(obj.optString("title")) }
@@ -250,7 +247,7 @@ fun StoreManageScreen(
                             )
                             if (logoUri != null || existingLogo != null) {
                                 Spacer(Modifier.width(8.dp))
-                                TextButton(onClick = { logoUri = null; /* keep existing? */ }) {
+                                TextButton(onClick = { logoUri = null }) {
                                     Text("Clear", color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
@@ -304,7 +301,6 @@ fun StoreManageScreen(
                                 }
                             }
                         }
-                        // Project links
                         Spacer(Modifier.height(8.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             OutlinedTextField(value = linkInput, onValueChange = { linkInput = it }, label = { Text("Project link URL") }, modifier = Modifier.weight(1f), singleLine = true)
@@ -348,7 +344,6 @@ fun StoreManageScreen(
                             saving = true
                             scope.launch {
                                 val token = api.token ?: ""
-                                // Upload logo only if newly picked.
                                 var logoUrl: String? = existingLogo
                                 var hasLogo = existingLogo != null
                                 var uploadedLogoUrl: String? = null
@@ -363,7 +358,6 @@ fun StoreManageScreen(
                                         hasLogo = true
                                     }
                                 }
-                                // Upload only new files.
                                 val uploadedNew = mutableListOf<com.pickle.patcher.data.StoreApi.LibUpload>()
                                 val total = newLibs.size
                                 newLibs.forEachIndexed { idx, (uri, _, name) ->
@@ -381,7 +375,6 @@ fun StoreManageScreen(
                                         uploadedNew.add(com.pickle.patcher.data.StoreApi.LibUpload(f.name, u.url, u.bytes))
                                     }
                                 }
-                                // Final file list: unchanged existing + uploaded new.
                                 val finalLibs = mutableListOf<com.pickle.patcher.data.StoreApi.LibUpload>()
                                 initialLibs.forEach { l ->
                                     val url = l.optString("url")
