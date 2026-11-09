@@ -334,7 +334,7 @@ fun SettingsScreen(
                     }
                     Spacer(modifier = Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        val paletteName = if (themeChoice.themeId == "dynamic") "Material You" else "Default"
+                        val paletteName = if (themeChoice.keyColor == 0) "Material You" else "Palette"
                         Text(
                             text = "Theme & Palette",
                             style = MaterialTheme.typography.titleMedium,
@@ -348,7 +348,7 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    val currentPaletteName = if (themeChoice.themeId == "dynamic") "Material You" else "Default"
+                    val currentPaletteName = if (themeChoice.keyColor == 0) "Material You" else "Palette"
                     StatusPill(currentPaletteName, tone = Tone.Primary)
                     Spacer(modifier = Modifier.width(8.dp))
                     Icon(

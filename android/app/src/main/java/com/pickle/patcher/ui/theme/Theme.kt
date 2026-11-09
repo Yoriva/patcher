@@ -1,13 +1,9 @@
 package com.pickle.patcher.ui.theme
 
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -40,23 +36,16 @@ fun NexoraTheme(
     }
 
     val context = LocalContext.current
-    val baseScheme: ColorScheme = when {
-        choice.themeId == "dynamic" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        dark -> StockM3Dark
-        else -> StockM3Light
-    }
-
-    val finalScheme = if (dark && choice.amoled) {
-        baseScheme.toAmoled()
-    } else {
-        baseScheme
-    }
+    val colorScheme = schemeForSeed(
+        keyColor = choice.keyColor,
+        isDark = dark,
+        isAmoled = dark && choice.amoled,
+        context = context,
+    )
 
     CompositionLocalProvider(LocalThemeController provides controller) {
         MaterialTheme(
-            colorScheme = finalScheme,
+            colorScheme = colorScheme,
             typography = NexoraTypography,
             shapes = NexoraShapes,
             content = content,
