@@ -99,12 +99,14 @@ import com.pickle.patcher.ui.screens.SettingsScreen
 import com.pickle.patcher.ui.screens.StoreManageScreen
 import com.pickle.patcher.ui.screens.StoreProfileScreen
 import com.pickle.patcher.ui.screens.StoreScreen
+import com.pickle.patcher.ui.screens.TopBarBackButton
 import com.pickle.patcher.ui.screens.toDisplayVersion
 import com.pickle.patcher.ui.theme.Gray30
 import com.pickle.patcher.ui.theme.Gray40
 import com.pickle.patcher.ui.theme.Gray60
 import com.pickle.patcher.ui.theme.NexoraTheme
 import com.pickle.patcher.ui.theme.ThemeController
+import com.pickle.patcher.ui.theme.ThemeScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -144,6 +146,7 @@ private enum class Dest(val route: String) {
     StoreManage("store/manage"),
     StoreAdmin("store/admin"),
     Settings("settings"),
+    Theme("settings/theme"),
     Plugins("plugins"),
 }
 
@@ -221,13 +224,7 @@ fun PatcherApp(vm: PatcherViewModel) {
                     ),
                     navigationIcon = {
                         if (!isMainTab) {
-                            IconButton(onClick = { nav.popBackStack() }) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = MaterialTheme.colorScheme.onBackground,
-                                )
-                            }
+                            TopBarBackButton(onClick = { nav.popBackStack() })
                         }
                     },
                     title = {
@@ -304,6 +301,7 @@ fun PatcherApp(vm: PatcherViewModel) {
                         } else {
                             val title = when (currentRoute) {
                                 Dest.Settings.route -> "Settings"
+                                Dest.Theme.route -> "Theme"
                                 Dest.StoreLogin.route -> "Sign In"
                                 Dest.StoreRegister.route -> "Register"
                                 Dest.StoreUpload.route -> "Upload Package"
@@ -509,6 +507,11 @@ fun PatcherApp(vm: PatcherViewModel) {
                 composable(Dest.Settings.route) {
                     SettingsScreen(
                         vm = vm,
+                        onOpenTheme = {
+                            nav.navigate(Dest.Theme.route) {
+                                launchSingleTop = true
+                            }
+                        },
                         onOpenAbout = { showAbout = true },
                         onShareLogs = {
                             scope.launch(Dispatchers.IO) {
@@ -524,6 +527,9 @@ fun PatcherApp(vm: PatcherViewModel) {
                         },
                         onRedownloadBundle = { vm.fetchAndDownloadBundle() },
                     )
+                }
+                composable(Dest.Theme.route) {
+                    ThemeScreen(onBack = { nav.popBackStack() })
                 }
                 composable(Dest.Plugins.route) { AddonsScreen(vm) }
             }

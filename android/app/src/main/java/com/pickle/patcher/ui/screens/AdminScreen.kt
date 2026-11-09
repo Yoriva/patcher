@@ -50,13 +50,7 @@ fun AdminScreen(api: StoreApi, onBack: () -> Unit) {
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.Filled.ArrowBack,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
+                    TopBarBackButton(onClick = onBack)
                 },
             )
         },

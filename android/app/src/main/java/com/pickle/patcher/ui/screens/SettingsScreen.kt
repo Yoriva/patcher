@@ -56,11 +56,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pickle.patcher.patcher.PatcherViewModel
 import com.pickle.patcher.ui.theme.LocalThemeController
-import com.pickle.patcher.ui.theme.ThemePickerDialog
 
 @Composable
 fun SettingsScreen(
     vm: PatcherViewModel,
+    onOpenTheme: () -> Unit = {},
     onOpenAbout: () -> Unit = {},
     onShareLogs: () -> Unit = {},
     onRedownloadBundle: () -> Unit = {},
@@ -75,7 +75,6 @@ fun SettingsScreen(
     val themeController = LocalThemeController.current
     val themeChoice by themeController.choice.collectAsState()
 
-    var showThemeDialog by remember { mutableStateOf(false) }
     var pickForOutput by remember { mutableStateOf(false) }
 
     val folderPicker = rememberLauncherForActivityResult(
@@ -109,19 +108,6 @@ fun SettingsScreen(
         } else {
             folderPicker.launch(null)
         }
-    }
-
-    if (showThemeDialog) {
-        ThemePickerDialog(
-            choice = themeChoice,
-            onPick = {
-                themeController.select(it)
-            },
-            onMode = {
-                themeController.setMode(it)
-            },
-            onDismiss = { showThemeDialog = false },
-        )
     }
 
     Column(
@@ -320,7 +306,7 @@ fun SettingsScreen(
             )
 
             Card(
-                onClick = { showThemeDialog = true },
+                onClick = onOpenTheme,
                 modifier = Modifier.fillMaxWidth(),
                 shape = getGroupedItemShape(0, 2),
                 colors = CardDefaults.cardColors(

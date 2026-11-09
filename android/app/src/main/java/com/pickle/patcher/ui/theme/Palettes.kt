@@ -118,9 +118,27 @@ private fun lightOf(p: Palette): ColorScheme {
 val NexoraPalette = Palette(
     id = "nexora",
     name = "Default",
-    primary = Color(0xFF7CC7FF),
-    secondary = Color(0xFFC6BFFF),
-    tertiary = Color(0xFFFFB871),
+    primary = Color(0xFF6750A4),
+    secondary = Color(0xFF625B71),
+    tertiary = Color(0xFF7D5260),
+)
+
+val KeyColorOptions = listOf(
+    0xFF6750A4.toInt(),
+    0xFFF44336.toInt(),
+    0xFFE91E63.toInt(),
+    0xFF9C27B0.toInt(),
+    0xFF3F51B5.toInt(),
+    0xFF2196F3.toInt(),
+    0xFF00BCD4.toInt(),
+    0xFF009688.toInt(),
+    0xFF4FAF50.toInt(),
+    0xFFFFEB3B.toInt(),
+    0xFFFFC107.toInt(),
+    0xFFFF9800.toInt(),
+    0xFF795548.toInt(),
+    0xFF607D8F.toInt(),
+    0xFFFF9CA8.toInt(),
 )
 
 val Presets: List<Palette> = listOf(
@@ -132,4 +150,16 @@ private val byId = Presets.associateBy { it.id }
 
 fun presetById(id: String?): Palette? = id?.let { byId[it] }
 
-fun paletteFor(themeId: String): Palette = presetById(themeId) ?: NexoraPalette
+fun paletteFor(themeId: String): Palette {
+    if (themeId.startsWith("color_")) {
+        val hex = themeId.removePrefix("color_")
+        val colorInt = hex.toLongOrNull(16)?.toInt()
+        if (colorInt != null) {
+            val primary = Color(colorInt)
+            val secondary = mix(primary, Color(0xFFC6BFFF), 0.45f)
+            val tertiary = mix(primary, Color(0xFFFFB871), 0.45f)
+            return Palette(themeId, "Custom", primary, secondary, tertiary)
+        }
+    }
+    return presetById(themeId) ?: NexoraPalette
+}

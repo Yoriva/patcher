@@ -58,5 +58,7 @@ class ThemeController(app: Application) : AndroidViewModel(app) {
 
     fun setMode(mode: ThemeMode) = write(_choice.value.copy(mode = mode))
 
+    fun setMode(mode: ThemeMode, amoled: Boolean) = write(_choice.value.copy(mode = mode, amoled = amoled))
+
     fun setAmoled(enabled: Boolean) = write(_choice.value.copy(amoled = enabled))
 }
