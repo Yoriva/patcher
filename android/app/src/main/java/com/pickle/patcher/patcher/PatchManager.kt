@@ -161,46 +161,25 @@ class PatchManager(
             "armeabi-v7a" -> "armv7l"
             else -> return
         }
-        val isCounterStrike = gameDir.name == com.pickle.patcher.patcher.PatcherViewModel.GAME_CSTRIKE
         val metamodDir = File(gameDir, "addons/metamod").apply { mkdirs() }
         val configFile = File(metamodDir, "config.ini")
         val gamedllLine = "gamedll dlls/libcs_android_${suffix}.so"
-        if (isCounterStrike) {
-            if (configFile.exists()) {
-                val lines = configFile.readLines().toMutableList()
-                val idx = lines.indexOfFirst { it.startsWith("gamedll") }
-                if (idx >= 0) lines[idx] = gamedllLine else lines.add(0, gamedllLine)
-                configFile.writeText(lines.joinToString("\n"))
-            } else {
-                configFile.writeText("$gamedllLine\n")
-            }
+        if (configFile.exists()) {
+            val lines = configFile.readLines().toMutableList()
+            val idx = lines.indexOfFirst { it.startsWith("gamedll") }
+            if (idx >= 0) lines[idx] = gamedllLine else lines.add(0, gamedllLine)
+            configFile.writeText(lines.joinToString("\n"))
         } else {
-            if (configFile.exists()) {
-                configFile.writeText(
-                    configFile.readLines()
-                        .filterNot { it.trimStart().startsWith("gamedll") }
-                        .joinToString("\n")
-                )
-            }
+            configFile.writeText("$gamedllLine\n")
         }
         val pluginsFile = File(metamodDir, "plugins.ini")
-        val plugins = if (isCounterStrike) {
-            buildString {
-                append("; Metamod plugins.ini\n")
-                append("; Format: <platform> <path relative to game directory>\n")
-                append("; AMX Mod X core (lives in the app native dir as libamxmodx.so)\n")
-                append("linux addons/amxmodx/libamxmodx.so\n")
-                append("; YaPB Counter-Strike bot\n")
-                append("linux addons/yapb/bin/libyapb.so\n")
-            }
-        } else {
-            buildString {
-                append("; Metamod plugins.ini - ${gameDir.name}\n")
-                append("; Nothing is loaded here on purpose: the AMXX stack needs a\n")
-                append("; Counter-Strike game dll (ReGameDLL_CS) and YaPB is a\n")
-                append("; Counter-Strike bot. Loading either under Condition Zero crashes\n")
-                append("; the game, so ${gameDir.name} is left as the shipped mod.\n")
-            }
+        val plugins = buildString {
+            append("; Metamod plugins.ini\n")
+            append("; Format: <platform> <path relative to game directory>\n")
+            append("; AMX Mod X core (lives in the app native dir as libamxmodx.so)\n")
+            append("linux addons/amxmodx/libamxmodx.so\n")
+            append("; YaPB Counter-Strike bot\n")
+            append("linux addons/yapb/bin/libyapb.so\n")
         }
         pluginsFile.writeText(plugins)
     }

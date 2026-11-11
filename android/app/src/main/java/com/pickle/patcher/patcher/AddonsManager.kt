@@ -6,15 +6,11 @@ import android.os.Build
 import android.os.Environment
 import com.pickle.patcher.data.BundleProvider
 import com.pickle.patcher.jobs.JobProgress
-import com.pickle.patcher.patcher.PatcherViewModel.AddonFileStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -34,38 +30,27 @@ class AddonsManager(
     private val _addons = MutableStateFlow<AddonsState>(AddonsState.None)
     val addons: StateFlow<AddonsState> = _addons.asStateFlow()
 
-    private val _addonFiles = MutableStateFlow<List<AddonFileStatus>>(emptyList())
-    val addonFiles: StateFlow<List<AddonFileStatus>> = _addonFiles.asStateFlow()
 
-    private val gamePrefs by lazy {
-        app.getSharedPreferences("game_prefs", Context.MODE_PRIVATE)
+    private val defaultGameId = com.pickle.patcher.patcher.PatcherViewModel.GAME_CSTRIKE
+
+    private val _installed = MutableStateFlow(isInstalledOnDisk())
+    val addonsInstalled: StateFlow<Boolean> = _installed.asStateFlow()
+    private fun isInstalledOnDisk(): Boolean {
+        val root = File(gameDirFor(defaultGameId))
+        return File(root, "addons/amxmodx/configs/amxx.cfg").isFile ||
+            File(root, "addons/metamod/config.ini").isFile
     }
 
-    private fun savedGameId(): String =
-        gamePrefs.getString("game_id", com.pickle.patcher.patcher.PatcherViewModel.GAME_CSTRIKE)?.takeIf {
-            it == com.pickle.patcher.patcher.PatcherViewModel.GAME_CSTRIKE || it == com.pickle.patcher.patcher.PatcherViewModel.GAME_CZERO
-        } ?: com.pickle.patcher.patcher.PatcherViewModel.GAME_CSTRIKE
-
     internal fun resolveGameRoot(): String =
-        EngineProbe.resolveGameRoot(app, savedGameId())
+        EngineProbe.resolveGameRoot(app, defaultGameId)
 
     private fun gameDirFor(gameId: String): String = "${resolveGameRoot()}/$gameId"
 
-    private val _installPath = MutableStateFlow(gameDirFor(savedGameId()))
+    private val _installPath = MutableStateFlow(gameDirFor(defaultGameId))
     val installPath: StateFlow<String> = _installPath.asStateFlow()
-    val gameId: StateFlow<String> = _installPath
-        .map { path -> if (path.endsWith("/czero")) com.pickle.patcher.patcher.PatcherViewModel.GAME_CZERO else com.pickle.patcher.patcher.PatcherViewModel.GAME_CSTRIKE }
-        .stateIn(scope, SharingStarted.Eagerly, com.pickle.patcher.patcher.PatcherViewModel.GAME_CSTRIKE)
+    val gameId: StateFlow<String> = MutableStateFlow(defaultGameId)
 
     internal fun installPathValue(): String = _installPath.value
-
-    fun setGame(gameId: String) {
-        if (gameId != com.pickle.patcher.patcher.PatcherViewModel.GAME_CSTRIKE && gameId != com.pickle.patcher.patcher.PatcherViewModel.GAME_CZERO) return
-        gamePrefs.edit().putString("game_id", gameId).apply()
-        _installPath.value = gameDirFor(gameId)
-        runAutoDetectAbi()
-        scanAddonsStatus()
-    }
 
     fun fetchAndInstallAddons() {
         scope.launch(Dispatchers.IO) {
@@ -100,16 +85,12 @@ class AddonsManager(
                         }
                     }
                 )
-                scanAddonsStatus()
+                _installed.value = true
             } catch (t: Throwable) {
                 _addons.value = AddonsState.Error(t.message ?: "Unknown error")
                 JobProgress.finish(app, com.pickle.patcher.patcher.PatcherViewModel.JOB_ADDONS, t.message ?: "Install failed", ok = false)
             }
         }
-    }
-
-    fun installAddonsFromBundle() {
-        fetchAndInstallAddons()
     }
 
     fun autoInstallAddons() {
@@ -134,42 +115,8 @@ class AddonsManager(
                 _addons.value = AddonsState.Done("Auto-installed $installed addon files")
             }
             applyGamedataAbiPolicy(gameDir, abiProvider())
-            scanAddonsStatus()
+            _installed.value = isInstalledOnDisk()
         }
     }
 
-    fun scanAddonsStatus() {
-        scope.launch(Dispatchers.IO) {
-            val gameDir = File(_installPath.value)
-            val bundle = bundleManager.loadedBundle ?: bundleProvider.loadCachedBundle(abiProvider())
-            val expected = mutableSetOf<String>()
-            if (bundle != null) {
-                for (entry in bundle.manifest.entries) {
-                    if (!entry.target.startsWith("addons/")) continue
-                    expected.add(entry.target)
-                }
-            }
-            val result = mutableListOf<AddonFileStatus>()
-            for (target in expected.sorted()) {
-                val file = File(gameDir, target)
-                if (!file.exists()) {
-                    result.add(AddonFileStatus(target, expected = true, installed = false))
-                    continue
-                }
-                var outdated = false
-                try {
-                    val entry = bundle?.manifest?.entries?.firstOrNull { it.target == target }
-                    val content = entry?.let { bundle?.resolveEntry(it) }
-                    if (content != null) {
-                        outdated = content.size.toLong() != file.length() ||
-                            !content.contentEquals(file.readBytes())
-                    }
-                } catch (_: Throwable) {
-                    outdated = false
-                }
-                result.add(AddonFileStatus(target, expected = true, installed = true, outdated = outdated))
-            }
-            _addonFiles.value = result
-        }
-    }
 }

@@ -61,7 +61,6 @@ object EngineProbe {
         for (root in gameDataRootCandidates(app)) {
             for (game in listOf(
                 com.pickle.patcher.patcher.PatcherViewModel.GAME_CSTRIKE,
-                com.pickle.patcher.patcher.PatcherViewModel.GAME_CZERO,
             )) {
                 if (isGameDirInstalled(File(root, game))) return root
             }
@@ -82,7 +81,6 @@ object EngineProbe {
         gameDataRootCandidates(app).any { root ->
             listOf(
                 com.pickle.patcher.patcher.PatcherViewModel.GAME_CSTRIKE,
-                com.pickle.patcher.patcher.PatcherViewModel.GAME_CZERO,
             ).any { game -> isGameDirInstalled(File(root, game)) }
         }
 }

@@ -496,7 +496,6 @@ private fun externalRoot(app: Application): File {
     fun staleCustomLibs() = bundleManager.staleCustomLibs()
     fun patchComponents() = bundleManager.patchComponents()
     fun fetchAndInstallAddons() = addonsManager.fetchAndInstallAddons()
-    fun installAddonsFromBundle() = addonsManager.installAddonsFromBundle()
     private fun unzipInto(zip: File, target: File): Int = patchManager.unzipInto(zip, target)
     private fun patchMetamodConfig(gameDir: File, abi: String) = patchManager.patchMetamodConfig(gameDir, abi)
     private fun applyGamedataAbiPolicy(gameDir: File, abi: String): Boolean = patchManager.applyGamedataAbiPolicy(gameDir, abi)
@@ -573,7 +572,6 @@ private fun externalRoot(app: Application): File {
         const val JOB_PATCH = "patch"
         const val CACHE_TAG = "v2"
         const val GAME_CSTRIKE = "cstrike"
-        const val GAME_CZERO = "czero"
         val SUPPORTED_ABIS = listOf("arm64-v8a", "armeabi-v7a")
         const val ASSET_DATE_SLOP = 5 * 60 * 1000L
         const val GAMEDATA_DISABLED_SUFFIX = ".disabled"
@@ -598,15 +596,6 @@ private fun externalRoot(app: Application): File {
         )
     }
     fun autoInstallAddons() = addonsManager.autoInstallAddons()
-    data class AddonFileStatus(
-        val path: String,
-        val expected: Boolean,
-        val installed: Boolean,
-        val outdated: Boolean = false,
-    )
-    val addonFiles: StateFlow<List<AddonFileStatus>> get() = addonsManager.addonFiles
     val installPath: StateFlow<String> get() = addonsManager.installPath
-    val gameId: StateFlow<String> get() = addonsManager.gameId
-    fun setGame(gameId: String) = addonsManager.setGame(gameId)
-    fun scanAddonsStatus() = addonsManager.scanAddonsStatus()
+    val addonsInstalled: StateFlow<Boolean> get() = addonsManager.addonsInstalled
 }

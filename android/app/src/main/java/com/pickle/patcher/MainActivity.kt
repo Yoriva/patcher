@@ -169,7 +169,6 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(Unit) {
                     vm.refreshGameInstalled()
                     vm.autoInstallAddons()
-                    vm.scanAddonsStatus()
                 }
                 Box(Modifier.fillMaxSize()) {
                     PatcherApp(vm)

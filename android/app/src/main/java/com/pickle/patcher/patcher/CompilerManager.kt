@@ -110,7 +110,6 @@ class CompilerManager(
         for (gamesRoot in findAmxxRoots()) {
             val games = ArrayList<String>()
             games.add(GAME_CSTRIKE)
-            games.add(GAME_CZERO)
             try {
                 gamesRoot.listFiles()?.forEach { f ->
                     if (f.isDirectory && !games.contains(f.name)) games.add(f.name)
@@ -439,7 +438,6 @@ class CompilerManager(
 
     companion object {
         private const val GAME_CSTRIKE = "cstrike"
-        private const val GAME_CZERO = "czero"
-        private const val SCRIPT_POLL_MS = 3_000L
+            private const val SCRIPT_POLL_MS = 3_000L
     }
 }
