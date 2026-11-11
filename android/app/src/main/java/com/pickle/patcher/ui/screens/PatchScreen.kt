@@ -1,6 +1,5 @@
 package com.pickle.patcher.ui.screens
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -61,7 +60,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -305,15 +303,15 @@ private fun BuildRow(vm: PatcherViewModel, index: Int, total: Int) {
     val source by vm.source.collectAsState()
     val bundleState by vm.bundle.collectAsState()
     val abiStatus by vm.abiStatus.collectAsState()
-    val patchLog by vm.patchLog.collectAsState()
+    val clientInstalled by vm.gameClientInstalled.collectAsState()
     val target = abiStatus.firstOrNull { it.selected }
     val hasClient = source != null
     val hasBundle = target?.installed == true ||
         bundleState is BundleState.Ready ||
         bundleState is BundleState.Loaded
     val canPatch = hasClient && hasBundle
-    var showLog by remember { mutableStateOf(false) }
     val running = patchState as? PatchUiState.Running
+    val clientIsInstalled = clientInstalled
     val actionKey = when (patchState) {
         PatchUiState.Idle -> "idle"
         is PatchUiState.Running -> "running"
@@ -322,10 +320,14 @@ private fun BuildRow(vm: PatcherViewModel, index: Int, total: Int) {
     }
     GroupedItem(
         title = when (patchState) {
-            is PatchUiState.Done -> "Patch Succeeded"
+            is PatchUiState.Done -> if (clientIsInstalled) "Already Patched" else "Patch Succeeded"
             is PatchUiState.Failed -> "Patch Failed"
             is PatchUiState.Running -> "Patching APK…"
             PatchUiState.Idle -> "Build Patched APK"
+        },
+        subtitle = when (patchState) {
+            is PatchUiState.Done -> if (clientIsInstalled) "The patched client is installed on this device" else null
+            else -> null
         },
         index = index,
         total = total,
@@ -351,8 +353,15 @@ private fun BuildRow(vm: PatcherViewModel, index: Int, total: Int) {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        SmallButton("Install", Icons.Filled.InstallDesktop, filled = true) { vm.requestInstall() }
-                        SmallButton("Reset", Icons.Filled.Refresh) { vm.reset() }
+                        if (clientIsInstalled) {
+                            SmallButton("Repatch", Icons.Filled.RocketLaunch, filled = true) { vm.reset() }
+                        } else {
+                            SmallButton("Install", Icons.Filled.InstallDesktop, filled = true) {
+                                vm.requestInstall()
+                                vm.refreshGameClientInstalled()
+                            }
+                            SmallButton("Reset", Icons.Filled.Refresh) { vm.reset() }
+                        }
                     }
                     else -> SmallButton(
                         text = "Reset",
@@ -379,41 +388,6 @@ private fun BuildRow(vm: PatcherViewModel, index: Int, total: Int) {
                 left = running.step.name.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() },
                 right = "${(running.progress * 100).toInt()}%",
             )
-        }
-        if (patchLog.isNotEmpty()) {
-            TextButton(
-                onClick = { showLog = !showLog },
-                modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .padding(top = 2.dp),
-            ) {
-                Text(if (showLog) "Hide Build Log" else "View Build Log")
-            }
-            AnimatedVisibility(visible = showLog) {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 14.dp, end = 14.dp, bottom = 14.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                ) {
-                    val logText = patchLog.joinToString("\n")
-                    val scrollState = rememberScrollState()
-                    Text(
-                        text = logText,
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            lineHeight = 15.sp,
-                        ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .padding(14.dp)
-                            .heightIn(max = 200.dp)
-                            .verticalScroll(scrollState),
-                    )
-                }
-            }
         }
     }
 }

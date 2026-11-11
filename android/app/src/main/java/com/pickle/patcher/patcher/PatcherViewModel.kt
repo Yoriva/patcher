@@ -352,7 +352,6 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     fun effectivePatchWorkers(): Int = patchManager.effectivePatchWorkers()
     fun setPatchWorkers(count: Int) = patchManager.setPatchWorkers(count)
     val patch: StateFlow<PatchUiState> get() = patchManager.patch
-    val patchLog: StateFlow<List<String>> get() = patchManager.patchLog
         private val compilerManager = CompilerManager(
         app = app,
         bundleProvider = bundleProvider,
