@@ -111,8 +111,7 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     private val _receivedSource: MutableStateFlow<File?> = MutableStateFlow(null)
     private val _sourceDownload = MutableStateFlow<SourceDownloadState?>(null)
     val sourceDownload: StateFlow<SourceDownloadState?> = _sourceDownload.asStateFlow()
-    private val _bundle = MutableStateFlow<BundleState>(BundleState.None)
-    val bundle: StateFlow<BundleState> = _bundle.asStateFlow()
+    val bundle: StateFlow<BundleState> get() = bundleManager.bundle
     private val deviceAbi: String =
         Build.SUPPORTED_ABIS.firstOrNull { it in SUPPORTED_ABIS } ?: SUPPORTED_ABIS.first()
     private val _abi = MutableStateFlow(deviceAbi)
@@ -222,7 +221,7 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     val supportedAbis: List<String> = SUPPORTED_ABIS
     val isDeviceAbi: String get() = deviceAbi
     val sourceAbis: List<String> get() = _source.value?.abis ?: emptyList()
-    val loadedBundleAbi: String? get() = loadedBundle?.manifest?.abi?.ifBlank { null }
+    val loadedBundleAbi: String? get() = bundleManager.loadedBundle?.manifest?.abi?.ifBlank { null }
     private fun resolveAbi(sourceAbis: List<String>): String? = when {
         sourceAbis.isEmpty() -> null
         deviceAbi in sourceAbis -> deviceAbi
@@ -231,14 +230,13 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     fun setAbi(abi: String) {
         if (abi !in SUPPORTED_ABIS || abi == _abi.value) return
         _abi.value = abi
-        val b = loadedBundle
+        val b = bundleManager.loadedBundle
         if (b != null && b.manifest.abi.isNotBlank() && b.manifest.abi != abi) {
-            loadedBundle = null
-            _bundle.value = BundleState.None
+            bundleManager.clearLoadedBundle()
         }
         viewModelScope.launch(Dispatchers.IO) {
             applyGamedataAbiPolicy(File(_installPath.value), abi)
-            if (loadedBundle == null) useCachedBundle()
+            if (bundleManager.loadedBundle == null) useCachedBundle()
             refreshAbiStatus()
         }
         scanLibs(autoLoad = true)
@@ -291,14 +289,13 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     private val _patchHistory = MutableStateFlow<List<PatchHistoryEntry>>(emptyList())
     val patchHistory: StateFlow<List<PatchHistoryEntry>> = _patchHistory.asStateFlow()
     private val _patchCheck = MutableStateFlow<PatchCheck>(PatchCheck.Idle)
-    private val _bundleVersion = MutableStateFlow("")
-    val bundleVersion: StateFlow<String> = _bundleVersion.asStateFlow()
+    val bundleVersion: StateFlow<String> get() = bundleManager.bundleVersion
     private val _updateAvailable = MutableStateFlow(false)
     val updateAvailable: StateFlow<Boolean> = _updateAvailable.asStateFlow()
     fun shouldReplayIntro(version: String): Boolean {
         if (version.isBlank()) return false
-        if (_bundleVersion.value != version) {
-            _bundleVersion.value = version
+        if (bundleManager.bundleVersion.value != version) {
+            bundleManager.setBundleVersion(version)
             val prefs = getApplication<Application>()
                 .getSharedPreferences("patcher_ui", Context.MODE_PRIVATE)
             val seen = prefs.getString("intro_version", null)
@@ -312,7 +309,7 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     val patchCheck: StateFlow<PatchCheck> = _patchCheck.asStateFlow()
     private val _abiStatus = MutableStateFlow<List<AbiStatus>>(emptyList())
     val abiStatus: StateFlow<List<AbiStatus>> = _abiStatus.asStateFlow()
-    private var downloadingAbi: String? = null
+    private val downloadingAbi: String? get() = bundleManager.downloadingAbi
     fun refreshAbiStatus() {
         val sourceAbis = _source.value?.abis ?: emptyList()
         val selected = _abi.value
@@ -325,36 +322,45 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
                 abi = a,
                 inSource = sourceAbis.isEmpty() || a in sourceAbis,
                 libCount = count,
-                hasBundle = count > 0 || bundleProvider.hasCachedBundle(a) || loadedBundle?.manifest?.abi == a,
+                hasBundle = count > 0 || bundleProvider.hasCachedBundle(a) || bundleManager.loadedBundle?.manifest?.abi == a,
                 selected = a == selected,
                 downloading = downloadingAbi == a,
                 downloadPercent = if (downloadingAbi == a) {
-                    (_bundle.value as? BundleState.Downloading)?.percent ?: 0f
+                    (bundleManager.bundle.value as? BundleState.Downloading)?.percent ?: 0f
                 } else 0f,
             )
         }
     }
-    private val _libs = MutableStateFlow<List<LibInfo>>(emptyList())
-    private val _customLibs = MutableStateFlow<List<CustomLib>>(emptyList())
-    val customLibs: StateFlow<List<CustomLib>> = _customLibs.asStateFlow()
-    val libs: StateFlow<List<LibInfo>> = _libs.asStateFlow()
-    private val _libsChecking = MutableStateFlow(false)
-    val libsChecking: StateFlow<Boolean> = _libsChecking.asStateFlow()
-    fun refreshLibStatus() {
-        scanLibs(checkRemote = true)
+    private val bundleManager by lazy {
+        BundleManager(
+            app = app,
+            bundleProvider = bundleProvider,
+            scope = viewModelScope,
+            abiProvider = { _abi.value },
+            appliedBuilds = { abi -> appliedBuilds(abi) },
+            recordAppliedBuilds = { abi, assets -> recordAppliedBuilds(abi, assets) },
+            markBundleTagKnown = { tag -> markBundleTagKnown(tag) },
+            refreshAbiStatus = { refreshAbiStatus() },
+            setReleaseNote = { note -> _releaseNote.value = note },
+            externalRoot = externalRoot(app),
+        )
     }
+    private val libsDir = bundleManager.libsDir
+    val libs: StateFlow<List<LibInfo>> get() = bundleManager.libs
+    val customLibs: StateFlow<List<CustomLib>> get() = bundleManager.customLibs
+    val libsChecking: StateFlow<Boolean> get() = bundleManager.libsChecking
+    fun refreshLibStatus() = bundleManager.refreshLibStatus()
     private val patcherPrefs by lazy {
         getApplication<Application>().getSharedPreferences("patcher_prefs", Context.MODE_PRIVATE)
     }
     private val _patchWorkers = MutableStateFlow(0)
     val patchWorkers: StateFlow<Int> = _patchWorkers.asStateFlow()
-    private var loadedBundle: Bundle? = null
     private val compilerManager = CompilerManager(
         app = app,
         bundleProvider = bundleProvider,
         scope = viewModelScope,
         abiProvider = { _abi.value },
-        loadedBundleProvider = { loadedBundle },
+        loadedBundleProvider = { bundleManager.loadedBundle },
         installPathProvider = { _installPath.value },
     )
     val scripts: StateFlow<List<SmaSource>> get() = compilerManager.scripts
@@ -390,7 +396,7 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
         patcherPrefs.edit().putInt("patch_workers", clamped).apply()
     }
     private var lastReport: ApkPatcher.PatchReport? = null
-    val hasCachedBundle: Boolean get() = bundleProvider.hasCachedBundle(_abi.value)
+    val hasCachedBundle: Boolean get() = bundleManager.hasCachedBundle
     val repo = "berkchy/nexora"
 private val externalRoot: File = externalRoot(app)
 private fun externalRoot(app: Application): File {
@@ -411,7 +417,6 @@ private fun externalRoot(app: Application): File {
         workDir.mkdirs()
         return File(workDir, name)
     }
-    private val libsDir = File(externalRoot, "libs")
     init {
         scanLibs()
         useCachedBundle()
@@ -587,7 +592,7 @@ private fun externalRoot(app: Application): File {
         }
         viewModelScope.launch(Dispatchers.IO) {
             _sourceDownload.value = SourceDownloadState.Fetching
-            JobProgress.begin(app, JOB_CLIENT_APK, "Client APK", "Finding the releaseâ€¦")
+            JobProgress.begin(app, JOB_CLIENT_APK, "Client APK", "Finding the release…")
             var partial: File? = null
             try {
                 val repo = CLIENT_APK_REPO
@@ -602,12 +607,12 @@ private fun externalRoot(app: Application): File {
                 partial = part
                 ReleaseRepository.downloadUrl(url, part, total) { done, size ->
                     _sourceDownload.value = SourceDownloadState.Downloading(done, size)
-                    JobProgress.progress(app, JOB_CLIENT_APK, done, size, "Downloadingâ€¦")
+                    JobProgress.progress(app, JOB_CLIENT_APK, done, size, "Downloading…")
                 }
                 if (total > 0 && part.length() != total) {
                     part.delete()
                     throw IOException(
-                        "Download stopped at %.1f MB of %.1f MB".format(
+                        "Download stopped at %.1f MB of %.1f MB".format(java.util.Locale.US,
                             part.length() / 1048576.0,
                             total / 1048576.0,
                         )
@@ -640,265 +645,11 @@ private fun externalRoot(app: Application): File {
     fun clearSourceDownloadState() {
         _sourceDownload.value = null
     }
-    fun useCachedBundle() {
-        val abi = _abi.value
-        val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, abi)
-        if (files.isNotEmpty()) {
-            val b = buildBundleFromFileMap(files, abi)
-            loadedBundle = b
-            _bundle.value = BundleState.Loaded
-            _bundleVersion.value = b.manifest.version
-            scanLibs()
-            refreshAbiStatus()
-            return
-        }
-        val b = bundleProvider.loadCachedBundle(abi)
-        if (b != null) {
-            loadedBundle = b
-            _bundle.value = BundleState.Ready("Cached", b.manifest.entries.size, b.manifest.version)
-            scanLibs()
-        }
-    }
-    fun useLoadedBundle() {
-        val b = loadedBundle ?: return
-        _bundle.value = BundleState.Ready("Loaded", b.manifest.entries.size, b.manifest.version)
-    }
-    fun scanLibs(autoLoad: Boolean = false, checkRemote: Boolean = false) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val abi = _abi.value
-            val targetDir = File(libsDir, abi)
-            val localFiles = if (targetDir.isDirectory) {
-                targetDir.listFiles()
-                    ?.filter { it.isFile && it.name.endsWith(".so") }
-                    ?.map { it.name to it }
-                    ?.toMap()
-                    ?: emptyMap()
-            } else emptyMap()
-            _libs.value = localFiles.keys.sorted().map { name ->
-                val f = localFiles[name] ?: return@map null
-                LibInfo(
-                    name = name,
-                    localSize = f.length(),
-                    releaseSize = f.length(),
-                    upToDate = true,
-                )
-            }.filterNotNull()
-            var tagName = "live"
-            var assets: List<IncrementalUpdateManager.AssetInfo> = emptyList()
-            if (checkRemote) {
-                _libsChecking.value = true
-                try {
-                    tagName = "libs"
-                    assets = IncrementalUpdateManager.fetchReleaseAssets(tagName, abi)
-                } catch (_: Throwable) { } finally {
-                    _libsChecking.value = false
-                }
-            }
-            if (assets.isNotEmpty()) {
-                val releaseMap = assets.associateBy { it.cleanName }
-                val allNames = (localFiles.keys + releaseMap.keys).distinct().sorted()
-                val rows = allNames.map { name ->
-                    val f = localFiles[name]
-                    val asset = releaseMap[name]
-                    LibInfo(
-                        name = name,
-                        localSize = f?.length() ?: 0L,
-                        releaseSize = asset?.size ?: (f?.length() ?: 0L),
-                        upToDate = if (asset != null) {
-                            IncrementalUpdateManager.isUpToDate(
-                                File(targetDir, name), asset, appliedBuilds(_abi.value)[name]
-                            )
-                        } else true,
-                    )
-                }
-                _libs.value = rows
-            }
-            val outdated = _libs.value.filter { !it.upToDate && it.releaseSize > 0 }
-            if (autoLoad && outdated.isEmpty() && assets.isNotEmpty()) {
-                val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, abi)
-                if (files.isNotEmpty()) {
-                    val b = buildBundleFromFileMap(files, abi)
-                    markBundleTagKnown(tagName)
-                    loadedBundle = b
-                    _bundle.value = BundleState.Loaded
-                }
-            }
-        }
-    }
-    fun refreshSingleLib(libName: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            downloadLib(libName)
-        }
-    }
-    private suspend fun downloadLib(libName: String) {
-        try {
-            val tagName = "libs"
-            val assets = IncrementalUpdateManager.fetchReleaseAssets(tagName, _abi.value)
-            val asset = assets.find { it.cleanName == libName } ?: return
-            _libs.value = _libs.value.map {
-                if (it.name == libName) it.copy(downloading = true, downloadProgress = 0f) else it
-            }
-            IncrementalUpdateManager.downloadSingle(asset, libsDir, _abi.value) { p ->
-                _libs.value = _libs.value.map {
-                    if (it.name == libName) it.copy(downloading = true, downloadProgress = p) else it
-                }
-            }
-            val fileOnDisk = File(File(libsDir, _abi.value), libName)
-            val newSize = if (fileOnDisk.exists()) fileOnDisk.length() else 0L
-            val upToDate = IncrementalUpdateManager.isUpToDate(
-                fileOnDisk, asset, appliedBuilds(_abi.value)[libName]
-            )
-            recordAppliedBuilds(_abi.value, listOf(asset))
-            _libs.value = _libs.value.map {
-                if (it.name == libName) it.copy(localSize = newSize, upToDate = upToDate) else it
-            }
-        } catch (t: Throwable) {
-            _libs.value = _libs.value.map {
-                if (it.name == libName) it.copy(downloading = false) else it
-            }
-        }
-    }
-    fun fetchAndDownloadBundle() {
-        if (_bundle.value is BundleState.Downloading) return
-        downloadingAbi = _abi.value
-        refreshAbiStatus()
-        viewModelScope.launch(Dispatchers.IO) {
-            _bundle.value = BundleState.Downloading(0.04f)
-            var jobStarted = false
-            try {
-                val tagName = "libs"
-                _releaseNote.value = tagName
-                val assets = IncrementalUpdateManager.fetchReleaseAssets(tagName, _abi.value)
-                if (assets.isEmpty()) throw IOException("No .so assets found for ABI ${_abi.value}")
-                _bundle.update { BundleState.Downloading(0.1f, tagName) }
-                val diff = IncrementalUpdateManager.diff(
-                    assets, libsDir, _abi.value, appliedBuilds(_abi.value)
-                )
-                if (diff.toDownload.isEmpty()) {
-                    val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, _abi.value)
-                    if (files.isEmpty()) throw IOException("No .so files found in libs/")
-                    val b = buildBundleFromFileMap(files, _abi.value)
-                    markBundleTagKnown(tagName)
-                    recordAppliedBuilds(_abi.value, assets)
-                    _bundle.value = BundleState.Loaded
-                    loadedBundle = b
-                    scanLibs()
-                    return@launch
-                }
-                JobProgress.begin(app, JOB_LIBS, "Libraries", "Downloading ${diff.toDownload.size} filesâ€¦")
-                jobStarted = true
-                IncrementalUpdateManager.downloadChanged(
-                    diff.toDownload, libsDir, _abi.value,
-                    onFileStart = { index, asset ->
-                        markLibDownloading(asset.cleanName, 0f)
-                        JobProgress.detail(app, JOB_LIBS, asset.cleanName)
-                        _bundle.update {
-                            BundleState.Downloading(
-                                percent = 0.15f + (0.75f * index.toFloat() / diff.toDownload.size).coerceAtMost(0.75f),
-                                tagName = tagName,
-                                currentFile = asset.cleanName,
-                                fileIndex = index,
-                                fileTotal = diff.toDownload.size,
-                            )
-                        }
-                    },
-                    onFileProgress = { index, asset, fileProgress ->
-                        markLibDownloading(asset.cleanName, fileProgress)
-                        val overall =
-                            (index + fileProgress.coerceIn(0f, 1f)) / diff.toDownload.size.toFloat()
-                        JobProgress.progress(
-                            app,
-                            JOB_LIBS,
-                            (overall * 100).toLong().toInt().toLong().coerceIn(0, 99),
-                            100L,
-                            "${asset.cleanName} Â· ${
-                                (fileProgress * 100).toInt().coerceIn(0, 100)
-                            }%",
-                        )
-                        val base = 0.15f + (0.75f * index.toFloat() / diff.toDownload.size).coerceAtMost(0.75f)
-                        val perFileWeight = 0.75f / diff.toDownload.size
-                        _bundle.update {
-                            BundleState.Downloading(
-                                percent = base + perFileWeight * fileProgress,
-                                tagName = tagName,
-                                currentFile = asset.cleanName,
-                                fileIndex = index,
-                                fileTotal = diff.toDownload.size,
-                            )
-                        }
-                    },
-                )
-                val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, _abi.value)
-                if (files.isEmpty()) throw IOException("No .so files found after download")
-                val b = buildBundleFromFileMap(files, _abi.value)
-                markBundleTagKnown(tagName)
-                recordAppliedBuilds(_abi.value, assets)
-                _bundle.value = BundleState.Ready(
-                    "Updated ${diff.toDownload.size} files", b.manifest.entries.size, b.manifest.version
-                )
-                loadedBundle = b
-                downloadingAbi = null
-                _bundleVersion.value = b.manifest.version
-                scanLibs()
-                refreshAbiStatus()
-                JobProgress.finish(app, JOB_LIBS, "Libraries ready")
-            } catch (t: Throwable) {
-                val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, _abi.value)
-                if (files.isNotEmpty()) {
-                    val b = buildBundleFromFileMap(files, _abi.value)
-                    loadedBundle = b
-                    _bundle.value = BundleState.Loaded
-                    scanLibs()
-                    if (jobStarted) {
-                        JobProgress.finish(app, JOB_LIBS, "Using the libraries already on disk")
-                    }
-                } else {
-                    _bundle.value = BundleState.DownloadError(t.message ?: "Unknown error")
-                    if (jobStarted) {
-                        JobProgress.finish(app, JOB_LIBS, t.message ?: "Download failed", ok = false)
-                    }
-                }
-                downloadingAbi = null
-                refreshAbiStatus()
-            }
-        }
-    }
-    private fun markLibDownloading(name: String, progress: Float) {
-        _libs.value = _libs.value.map {
-            if (it.name == name) it.copy(downloading = true, downloadProgress = progress) else it
-        }
-    }
-    private fun buildBundleFromFileMap(files: Map<String, File>, abi: String): Bundle {
-        val suffix = if (abi == "arm64-v8a") "arm64" else "armv7l"
-        val modSuffix = if (abi == "arm64-v8a") "amd64" else "arm"
-        val entries = files.keys.map { targetPath ->
-            val name = targetPath.substringAfterLast("/")
-            val desc = when {
-                name == "libamxmodx.so" -> "AMX Mod X core"
-                name == "libmetamod.so" || name.startsWith("libmetamod_android_") -> "Metamod HL1"
-                name == "libyapb.so" -> "YaPB bot plugin"
-                name == "libclient_android_$suffix.so" -> "CS16Client client DLL"
-                name == "libmenu_android_$suffix.so" -> "CS16Client main menu"
-                name == "libcs_android_arm64.so" -> "ReGameDLL game DLL (first-spawn fix)"
-                name.contains("_amxx_") -> "AMXX module"
-                else -> "Bundle file"
-            }
-            com.pickle.patcher.lib.BundleManifest.BundleEntry(
-                source = targetPath,
-                target = targetPath,
-                method = com.pickle.patcher.lib.BundleManifest.Compression.STORED,
-                required = true,
-                description = desc,
-            )
-        }
-        val manifest = com.pickle.patcher.lib.BundleManifest(
-            version = "live",
-            game = "cs16client",
-            abi = abi,
-            entries = entries,
-        )
-        return Bundle(manifest, emptyMap(), files)
-    }
+    fun useCachedBundle() = bundleManager.useCachedBundle()
+    fun useLoadedBundle() = bundleManager.useLoadedBundle()
+    fun scanLibs(autoLoad: Boolean = false, checkRemote: Boolean = false) = bundleManager.scanLibs(autoLoad, checkRemote)
+    fun refreshSingleLib(libName: String) = bundleManager.refreshSingleLib(libName)
+    fun fetchAndDownloadBundle() = bundleManager.fetchAndDownloadBundle()
     data class PatchComponent(
         val key: String,
         val label: String,
@@ -917,190 +668,33 @@ private fun externalRoot(app: Application): File {
         override fun equals(other: Any?): Boolean = other is CustomLib && other.name == name
         override fun hashCode(): Int = name.hashCode()
     }
-    private fun customLibDir(): File =
-        File(getApplication<Application>().filesDir, "custom-libs").apply { mkdirs() }
-    private fun shadowedBy(target: String): String? {
-        val b = loadedBundle
-        if (b != null) {
-            val key = b.manifest.entries.firstOrNull { it.target == target }?.let { componentKeyFor(it.target) }
-            return key?.let { labelForComponent(it) }
-        }
-        val key = componentKeyFor(target)
-        return if (key == "other") null else labelForComponent(key)
-    }
-    private fun displayName(uri: android.net.Uri): String? {
-        if (uri.scheme == "content") {
-            try {
-                app.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-                    if (c.moveToFirst()) {
-                        val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                        if (idx >= 0) {
-                            val v = c.getString(idx)
-                            if (!v.isNullOrBlank()) return v
-                        }
-                    }
-                }
-            } catch (_: Throwable) { }
-        }
-        return uri.lastPathSegment?.substringAfterLast('/')
-    }
-    fun addCustomLibs(uris: List<android.net.Uri>) {
-        if (uris.isEmpty()) return
-        val abi = _abi.value
-        val existing = _customLibs.value.map { it.name }.toMutableSet()
-        val rejected = ArrayList<String>()
-        val added = ArrayList<CustomLib>()
-        for (uri in uris) {
-            val name = displayName(uri)
-            if (name.isNullOrBlank() || !name.endsWith(".so")) {
-                rejected += "$name: not a .so file"
-                continue
-            }
-            if (!existing.add(name)) {
-                rejected += "$name: already added"
-                continue
-            }
-            val target = File(customLibDir(), name)
-            try {
-                app.contentResolver.openInputStream(uri)?.use { input ->
-                    target.outputStream().use { out -> input.copyTo(out) }
-                } ?: run {
-                    rejected += "$name: could not be opened"
-                    continue
-                }
-            } catch (t: Throwable) {
-                target.delete()
-                rejected += "$name: ${t.message ?: "copy failed"}"
-                continue
-            }
-            when (val verdict = com.pickle.patcher.lib.validateElf(target, abi)) {
-                is com.pickle.patcher.lib.ElfVerdict.Rejected -> {
-                    target.delete()
-                    existing.remove(name)
-                    rejected += "$name: ${verdict.reason}"
-                }
-                is com.pickle.patcher.lib.ElfVerdict.Ok -> {
-                    val machine = com.pickle.patcher.lib.readElfInfo(target)?.machineName ?: "?"
-                    added += CustomLib(
-                        name = name,
-                        file = target,
-                        machineName = machine,
-                        shadows = shadowedBy("lib/$abi/$name"),
-                    )
-                }
-            }
-        }
-        if (added.isNotEmpty()) _customLibs.value = _customLibs.value + added
-        if (rejected.isNotEmpty()) {
-            _customLibProblem.value = if (added.isEmpty()) {
-                "Nothing was added:\n" + rejected.joinToString("\n")
-            } else {
-                "Added ${added.size}, refused ${rejected.size}:\n" + rejected.joinToString("\n")
-            }
-        }
-    }
-    private val _customLibProblem = MutableStateFlow<String?>(null)
-    val customLibProblem: StateFlow<String?> = _customLibProblem.asStateFlow()
-    fun dismissCustomLibProblem() {
-        _customLibProblem.value = null
-    }
-    fun removeCustomLib(name: String) {
-        _customLibs.value = _customLibs.value.filterNot {
-            if (it.name == name) {
-                it.file.delete()
-                true
-            } else {
-                false
-            }
-        }
-    }
-    private fun scanCustomLibs() {
-        val abi = _abi.value
-        val dir = customLibDir()
-        if (!dir.isDirectory) return
-        val libs = dir.listFiles { f -> f.isFile && f.name.endsWith(".so") } ?: return
-        val loaded = libs.mapNotNull { file ->
-            when (val verdict = com.pickle.patcher.lib.validateElf(file, abi)) {
-                is com.pickle.patcher.lib.ElfVerdict.Ok -> CustomLib(
-                    name = file.name,
-                    file = file,
-                    machineName = com.pickle.patcher.lib.readElfInfo(file)?.machineName ?: "?",
-                    shadows = shadowedBy("lib/$abi/${file.name}"),
-                )
-                else -> null
-            }
-        }
-        _customLibs.value = loaded
-    }
-    fun customLibEntries(bundle: Bundle, selected: Set<String>): List<Pair<String, File>> =
-        _customLibs.value
-            .map { "lib/${_abi.value}/${it.name}" to it.file }
-    private fun labelForComponent(key: String): String = when (key) {
-        "amxx" -> "AMX Mod X core"
-        "metamod" -> "Metamod HL1"
-        "yapb" -> "YaPB bot plugin"
-        "client" -> "CS16Client client DLL"
-        "menu" -> "CS16Client main menu"
-        "game" -> "ReGameDLL game DLL"
-        "modules" -> "AMXX modules"
-        else -> "Bundle files"
-    }
-    fun staleCustomLibs(): List<CustomLib> {
-        val abi = _abi.value
-        return _customLibs.value.filter {
-            val verdict = com.pickle.patcher.lib.validateElf(it.file, abi)
-            verdict !is com.pickle.patcher.lib.ElfVerdict.Ok
-        }
-    }
-    private fun componentKeyFor(target: String): String {
-        val name = target.substringAfterLast("/")
-        return when {
-            name == "libamxmodx.so" -> "amxx"
-            name == "libmetamod.so" || name.startsWith("libmetamod_android_") -> "metamod"
-            name == "libyapb.so" -> "yapb"
-            name.startsWith("libclient_android_") -> "client"
-            name.startsWith("libmenu_android_") -> "menu"
-            name.startsWith("libcs_android_") -> "game"
-            name.contains("_amxx_") -> "modules"
-            else -> "other"
-        }
-    }
-    fun patchComponents(): List<PatchComponent> {
-        val b = loadedBundle ?: return emptyList()
-        val order = listOf("amxx", "metamod", "yapb", "client", "menu", "modules", "game", "other")
-        return b.manifest.entries
-            .groupBy { componentKeyFor(it.target) }
-            .mapNotNull { (key, entries) ->
-                PatchComponent(
-                    key = key,
-                    label = labelForComponent(key),
-                    description = entries.joinToString(", ") {
-                        it.target.substringAfterLast("/")
-                    },
-                    entryTargets = entries.map { it.target },
-                )
-            }
-            .sortedBy { order.indexOf(it.key) }
-    }
+    fun addCustomLibs(uris: List<android.net.Uri>) = bundleManager.addCustomLibs(uris)
+    val customLibProblem: StateFlow<String?> get() = bundleManager.customLibProblem
+    fun dismissCustomLibProblem() = bundleManager.dismissCustomLibProblem()
+    fun removeCustomLib(name: String) = bundleManager.removeCustomLib(name)
+    private fun scanCustomLibs() = bundleManager.scanCustomLibs()
+    fun customLibEntries(bundle: Bundle, selected: Set<String>) = bundleManager.customLibEntries(bundle, selected)
+    fun staleCustomLibs() = bundleManager.staleCustomLibs()
+    fun patchComponents() = bundleManager.patchComponents()
     fun fetchAndInstallAddons() {
         viewModelScope.launch(Dispatchers.IO) {
-            _addons.value = AddonsState.Downloading(0f, "Resolving latest releaseâ€¦")
-            JobProgress.begin(app, JOB_ADDONS, "Addons", "Resolving the releaseâ€¦")
+            _addons.value = AddonsState.Downloading(0f, "Resolving latest release…")
+            JobProgress.begin(app, JOB_ADDONS, "Addons", "Resolving the release…")
             try {
                 val tag = "extras"
                 val zip = File(bundleProvider.cacheDir(), "amxx-addons.zip")
-                _addons.value = AddonsState.Downloading(0f, "Downloading addonsâ€¦")
+                _addons.value = AddonsState.Downloading(0f, "Downloading addons…")
                 ReleaseRepository.downloadUrl(
                     ReleaseRepository.assetUrl(repo, tag, "amxx-addons.zip"),
                     zip,
                 ) { done, total ->
                     _addons.value = AddonsState.Downloading(
                         if (total > 0) (done.toDouble() / total).toFloat().coerceIn(0f, 1f) else 0f,
-                        "Downloading addonsâ€¦"
+                        "Downloading addons…"
                     )
-                    JobProgress.progress(app, JOB_ADDONS, done, total, "Downloadingâ€¦")
+                    JobProgress.progress(app, JOB_ADDONS, done, total, "Downloading…")
                 }
-                _addons.value = AddonsState.Downloading(1f, "Extracting into ${_installPath.value.substringAfterLast("/")}â€¦")
+                _addons.value = AddonsState.Downloading(1f, "Extracting into ${_installPath.value.substringAfterLast("/")}…")
                 val target = File(_installPath.value)
                 val count = unzipInto(zip, target)
                 patchMetamodConfig(target, _abi.value)
@@ -1159,7 +753,7 @@ private fun externalRoot(app: Application): File {
             onStatus("Game content archive already downloaded")
         } else {
             if (zip.exists()) zip.delete()
-            onStatus("Downloading game contentâ€¦")
+            onStatus("Downloading game content…")
             val tag = "extras"
             ReleaseRepository.downloadUrl(
                 ReleaseRepository.assetUrl(repo, tag, "game-assets.zip"),
@@ -1174,7 +768,7 @@ private fun externalRoot(app: Application): File {
             onStatus("Game content already extracted")
             return zip
         }
-        onStatus("Extracting game contentâ€¦")
+        onStatus("Extracting game content…")
         gameDir.mkdirs()
         unzipInto(zip, gameDir)
         val stillMissing = missingGameAssets(gameDir)
@@ -1298,7 +892,7 @@ private fun externalRoot(app: Application): File {
         }
         val leaf = tick.detail.substringAfterLast('/')
         return if (leaf.isNotBlank()) {
-            "${tick.step.name.lowercase()} Â· $leaf$progress"
+            "${tick.step.name.lowercase()} · $leaf$progress"
         } else {
             "${tick.step.name.lowercase()}$progress"
         }
@@ -1327,7 +921,7 @@ private fun externalRoot(app: Application): File {
     }
     fun startPatch(selectedComponentKeys: Set<String>? = null) {
         val src = _receivedSource.value ?: return
-        val b = loadedBundle ?: return
+        val b = bundleManager.loadedBundle ?: return
         val selAbi = _abi.value
         val bundleAbi = b.manifest.abi.ifBlank { selAbi }
         if (bundleAbi != selAbi) {
@@ -1340,7 +934,7 @@ private fun externalRoot(app: Application): File {
         val effectiveBundle = if (selectedComponentKeys == null) {
             b
         } else {
-            val kept = b.manifest.entries.filter { componentKeyFor(it.target) in selectedComponentKeys }
+            val kept = b.manifest.entries.filter { bundleManager.componentKeyFor(it.target) in selectedComponentKeys }
             b.withEntries(kept)
         }
         val customs = customLibEntries(b, selectedComponentKeys ?: emptySet())
@@ -1377,7 +971,7 @@ private fun externalRoot(app: Application): File {
         val out = workFile("patched.apk")
         if (out.exists()) out.delete()
         viewModelScope.launch(Dispatchers.IO) {
-            JobProgress.begin(app, JOB_PATCH, "Patching", "Analyzing the source APKâ€¦")
+            JobProgress.begin(app, JOB_PATCH, "Patching", "Analyzing the source APK…")
             _patch.value = PatchUiState.Running(ApkPatcher.Step.ANALYZE, 0f)
             try {
                 val gameDir = File(_installPath.value)
@@ -1391,7 +985,7 @@ private fun externalRoot(app: Application): File {
                             JobProgress.detail(app, JOB_PATCH, msg)
                         },
                         onProgress = { done, total ->
-                            JobProgress.progress(app, JOB_PATCH, done, total, "Downloading game contentâ€¦")
+                            JobProgress.progress(app, JOB_PATCH, done, total, "Downloading game content…")
                         },
                     )
                 }
@@ -1590,7 +1184,7 @@ private fun externalRoot(app: Application): File {
         }
     }
     fun patchSummary(): PatchSummary? {
-        val b = loadedBundle ?: return null
+        val b = bundleManager.loadedBundle ?: return null
         val src = _receivedSource.value ?: return null
         val abi = _abi.value
         val payload = b.files.entries
@@ -1600,7 +1194,7 @@ private fun externalRoot(app: Application): File {
             abi = abi,
             source = src.name,
             sourceSize = src.length(),
-            components = b.manifest.entries.groupBy { componentKeyFor(it.target) }.size,
+            components = b.manifest.entries.groupBy { bundleManager.componentKeyFor(it.target) }.size,
             entries = b.manifest.entries.size,
             payloadSize = payload,
         )
@@ -1620,7 +1214,7 @@ private fun externalRoot(app: Application): File {
                 val prefix = "lib/$abi/"
                 val present = zip?.entries?.keys?.count { it.startsWith(prefix) && it.endsWith(".so") } ?: 0
                 zip?.close()
-                val expected = loadedBundle?.manifest?.entries?.count { it.target.startsWith(prefix) } ?: present
+                val expected = bundleManager.loadedBundle?.manifest?.entries?.count { it.target.startsWith(prefix) } ?: present
                 val engine = File(_installPath.value, "engine.log")
                 val commit = if (engine.exists()) {
                     engine.useLines { seq ->
@@ -1759,7 +1353,7 @@ private fun externalRoot(app: Application): File {
             .apply()
     }
     private fun mb(bytes: Long): String =
-        "${(bytes / 1048576.0).let { "%.1f".format(it) }} MB"
+        "${(bytes / 1048576.0).let { "%.1f".format(java.util.Locale.US, it) }} MB"
     private val pluginIniManager = PluginIniManager(
         app = app,
         scope = viewModelScope,
@@ -1848,7 +1442,7 @@ private fun externalRoot(app: Application): File {
             }
             val gameDir = File(_installPath.value)
             if (!gameDir.exists()) return@launch
-            val bundle = loadedBundle ?: bundleProvider.loadCachedBundle(_abi.value) ?: return@launch
+            val bundle = bundleManager.loadedBundle ?: bundleProvider.loadCachedBundle(_abi.value) ?: return@launch
             var installed = 0
             for (entry in bundle.manifest.entries) {
                 if (!entry.target.startsWith("addons/")) continue
@@ -1924,7 +1518,7 @@ private fun externalRoot(app: Application): File {
         viewModelScope.launch(Dispatchers.IO) {
             val gameDir = File(_installPath.value)
             val addonsDir = File(gameDir, "addons")
-            val bundle = loadedBundle ?: bundleProvider.loadCachedBundle(_abi.value)
+            val bundle = bundleManager.loadedBundle ?: bundleProvider.loadCachedBundle(_abi.value)
             val expected = mutableSetOf<String>()
             if (bundle != null) {
                 for (entry in bundle.manifest.entries) {
