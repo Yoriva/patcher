@@ -6,13 +6,15 @@ stages:
 variables:
   GIT_DEPTH: "50"
   CACHE_FALLBACK_KEY: "ccache-ndk-r25c"
+  CS16_CLIENT_URL: "https://github.com/berkchy/cs16-client.git"
 
 build-release:
   stage: release
   interruptible: true
   rules:
-    - if: $CI_COMMIT_TAG =~ /^v/
     - if: $CI_COMMIT_TAG == "continuous"
+    - if: $CI_COMMIT_BRANCH == "master"
+      when: manual
   cache:
     - key:
         files:
@@ -33,20 +35,10 @@ build-release:
       export GH_REPO="berkchy/nexora"
 
       if [ -z "${GH_TOKEN:-}" ]; then
-        echo "ERROR: GH_TOKEN CI/CD variable is not set — cannot upload release assets."
+        echo "ERROR: GH_TOKEN CI/CD variable is not set - cannot upload release assets."
         exit 1
       fi
       export GH_TOKEN
-
-      if [ "$CI_COMMIT_TAG" = "continuous" ]; then
-        RID=$(gh api "/repos/$GH_REPO/releases/tags/continuous" --jq .id 2>/dev/null || true)
-        if [ -n "$RID" ]; then
-          if ! gh api --method PATCH "/repos/$GH_REPO/releases/$RID" -f tag_name=continuous >/dev/null 2>&1; then
-            echo "ERROR: GH_TOKEN cannot write the $GH_REPO continuous release (needs Contents read+write)."
-            exit 1
-          fi
-        fi
-      fi
 
       echo "== installing base tooling =="
       apt-get update -qq
@@ -58,6 +50,86 @@ build-release:
         https://github.com/cli/cli/releases/download/v2.62.0/gh_2.62.0_linux_amd64.deb
       apt-get install -y -qq /tmp/gh.deb
       export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+
+      echo "== submodules =="
+      git submodule update --init --recursive
+
+      echo "== Fetch cs16-client =="
+      PIN=$(tr -d '[:space:]' < cs16-client.pin)
+      test -n "$PIN" || { echo "cs16-client.pin is empty"; exit 1; }
+      rm -rf cs16-client
+      git clone "$CS16_CLIENT_URL" cs16-client
+      git -C cs16-client fetch origin "$PIN" 2>/dev/null || git -C cs16-client fetch origin
+      git -C cs16-client checkout "$PIN"
+      git -C cs16-client submodule update --init --recursive
+      test "$(git -C cs16-client rev-parse HEAD)" = "$PIN" || { echo "cs16-client is not at the pin"; exit 1; }
+
+      MSG=$(git log -1 --pretty=%s)
+      echo "Commit message: $MSG"
+      LOWER=$(echo "$MSG" | tr '[:upper:]' '[:lower:]')
+      NEEDS_ANDROID=false
+      NEEDS_LIBS=false
+      if echo "$LOWER" | grep -q '\[android\]'; then NEEDS_ANDROID=true; fi
+      if echo "$LOWER" | grep -q '\[libs\]'; then NEEDS_LIBS=true; fi
+      if echo "$LOWER" | grep -qE '\[android build\]|\[version build\]'; then NEEDS_ANDROID=true; fi
+      if echo "$LOWER" | grep -qE '\[bundle build\]'; then NEEDS_LIBS=true; fi
+
+      CONTINUOUS=false
+      if [ "$CI_COMMIT_TAG" = "continuous" ]; then
+        CONTINUOUS=true
+      fi
+      if [ -z "$CI_COMMIT_TAG" ] && [ "$CI_COMMIT_BRANCH" = "master" ]; then
+        CONTINUOUS=true
+      fi
+
+      if [ "$CONTINUOUS" = true ]; then
+        APP_VERSION_NAME="continuous-r${CI_PIPELINE_IID}"
+        BUNDLE_VERSION="$APP_VERSION_NAME"
+        APK_NAME="nexora_continuous.apk"
+        NEEDS_ANDROID=true
+        NEEDS_LIBS=true
+      else
+        APP_VERSION_NAME="$CI_COMMIT_TAG"
+        BUNDLE_VERSION="$CI_COMMIT_TAG"
+        APK_NAME="nexora_v${CI_COMMIT_TAG#v}.apk"
+      fi
+      APP_VERSION_CODE=$(date -u +%s)
+      export NEEDS_ANDROID NEEDS_LIBS APP_VERSION_NAME APP_VERSION_CODE APK_NAME BUNDLE_VERSION
+      echo "APK build: $NEEDS_ANDROID | Libs build: $NEEDS_LIBS"
+
+      if [ "$NEEDS_LIBS" = "true" ]; then
+        UP_AMXX=$(git ls-remote https://github.com/alliedmodders/amxmodx.git HEAD 2>/dev/null | cut -f1)
+        UP_MM=$(git ls-remote https://github.com/FWGS/metamod-fwgs.git HEAD 2>/dev/null | cut -f1)
+        UP_REAPI=$(git ls-remote https://github.com/rehlds/ReAPI.git HEAD 2>/dev/null | cut -f1)
+        UP_YAPB=$(git -C 3rdparty/yapb rev-parse HEAD 2>/dev/null)
+        UP_YAPB_UPSTREAM=$(git ls-remote https://github.com/yapb/yapb.git HEAD 2>/dev/null | cut -f1)
+        UP_RGDLL=$(git ls-remote https://github.com/berkchy/ReGameDLL_CS.git fix/first-spawn-equip 2>/dev/null | cut -f1)
+        UP_JSON=$(python3 -c "import json; print(json.dumps({'amxmodx':'$UP_AMXX','metamod':'$UP_MM','reapi':'$UP_REAPI','yapb':'$UP_YAPB','yapb_upstream':'$UP_YAPB_UPSTREAM','regamedll':'$UP_RGDLL'}))")
+      else
+        UP_JSON="{}"
+      fi
+      export UPSTREAMS_JSON="$UP_JSON"
+
+      SKIP_NATIVE=false
+      NATIVE_SHA_OUT=$(git rev-parse HEAD)
+      if [ "$CONTINUOUS" = "true" ] && [ -n "${UP_AMXX:-}" ]; then
+        META_JSON=$(curl -fsSL --max-time 30 "https://github.com/$GH_REPO/releases/download/continuous/build-meta.json" 2>/dev/null || true)
+        NATIVE_SHA=$(echo "$META_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('native_sha',''))" 2>/dev/null || true)
+        if [ -n "$NATIVE_SHA" ]; then
+          git fetch --depth 1 origin "$NATIVE_SHA" 2>/dev/null || NATIVE_SHA=""
+        fi
+        if [ -n "$NATIVE_SHA" ]; then
+          META_UP=$(echo "$META_JSON" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin).get('upstreams',{}),sort_keys=True))" 2>/dev/null || echo "")
+          CUR_UP=$(echo "$UP_JSON" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin),sort_keys=True))" 2>/dev/null || echo "")
+          DIFF_OUT=$(git diff --name-only "$NATIVE_SHA" HEAD -- android/ci patches cs16-client.pin cs16-client-launcher.patch 3rdparty .github/workflows .gitlab-ci.yml 2>/dev/null || echo "DIFF-FAILED")
+          if [ "$DIFF_OUT" != "DIFF-FAILED" ] && [ -z "$DIFF_OUT" ] && [ -n "$META_UP" ] && [ "$META_UP" = "$CUR_UP" ]; then
+            SKIP_NATIVE=true
+            NATIVE_SHA_OUT=$NATIVE_SHA
+          fi
+        fi
+      fi
+      export SKIP_NATIVE NATIVE_SHA_OUT
+      echo "Native skip: $SKIP_NATIVE (native_sha: $NATIVE_SHA_OUT)"
 
       echo "== Android SDK (fresh cmdline-tools; preinstalled ones are too old) =="
       CMDT=commandlinetools-linux-11076708_latest.zip
@@ -76,82 +148,31 @@ build-release:
       test -d "$ANDROID_HOME/build-tools/35.0.0"
       test -d "$ANDROID_NDK_HOME"
 
-      echo "== ccache =="
-      export CCACHE="$(command -v ccache || true)"
-      if [ -n "$CCACHE" ]; then
-        export CCACHE_DIR="$WS/.ccache"
-        export CCACHE_MAXSIZE=1G
-        export CCACHE_COMPILERTYPE=clang
-        export CCACHE_SLOPPINESS=time_macros
-        export CCACHE_BASEDIR="$WS"
-        ccache --zero-stats || true
-      fi
-
-      echo "== submodules =="
-      git submodule update --init --recursive
-      PIN=$(tr -d '[:space:]' < cs16-client.pin)
-      test -n "$PIN" || { echo "cs16-client.pin is empty"; exit 1; }
-      git clone https://github.com/Velaron/cs16-client.git cs16-client
-      git -C cs16-client fetch origin "$PIN" 2>/dev/null || git -C cs16-client fetch origin
-      git -C cs16-client checkout "$PIN"
-      git -C cs16-client submodule update --init --recursive
-      test "$(git -C cs16-client rev-parse HEAD)" = "$PIN" \
-        || { echo "cs16-client is not at the pin"; exit 1; }
-
-      MSG=$(git log -1 --pretty=%s)
-      echo "Commit message: $MSG"
-      LOWER=$(echo "$MSG" | tr '[:upper:]' '[:lower:]')
-      NEEDS_APK=false
-      HAS_MARKER=false
-      if echo "$LOWER" | grep -q '\[android build\]' || echo "$LOWER" | grep -q '\[version build\]'; then
-        NEEDS_APK=true
-      fi
-      if echo "$LOWER" | grep -qE '\[bundle build\]|\[android build\]|\[version build\]'; then
-        HAS_MARKER=true
-      fi
-      BUNDLE_VERSION="$CI_COMMIT_TAG"
-      if [ "$CI_COMMIT_TAG" = "continuous" ]; then
-        NEEDS_APK=true
-        HAS_MARKER=true
-        APP_VERSION_NAME="continuous-gl${CI_PIPELINE_IID}"
-        BUNDLE_VERSION="$APP_VERSION_NAME"
-        APK_NAME="nexora_continuous.apk"
-      else
-        APP_VERSION_NAME="$CI_COMMIT_TAG"
-        APK_NAME="nexora_v${CI_COMMIT_TAG#v}.apk"
-      fi
-      APP_VERSION_CODE=$(date -u +%s)
-      export NEEDS_APK HAS_MARKER BUNDLE_VERSION APP_VERSION_NAME APP_VERSION_CODE APK_NAME
-
-      SKIP_NATIVE=false
-      NATIVE_SHA_OUT=$(git rev-parse HEAD)
-      UP_AMXX=$(git ls-remote https://github.com/alliedmodders/amxmodx.git HEAD 2>/dev/null | cut -f1)
-      UP_MM=$(git ls-remote https://github.com/FWGS/metamod-fwgs.git HEAD 2>/dev/null | cut -f1)
-      UP_REAPI=$(git ls-remote https://github.com/rehlds/ReAPI.git HEAD 2>/dev/null | cut -f1)
-      UP_YAPB=$(git ls-remote https://github.com/yapb/yapb.git HEAD 2>/dev/null | cut -f1)
-      UP_RGDLL=$(git ls-remote https://github.com/berkchy/ReGameDLL_CS.git fix/first-spawn-equip 2>/dev/null | cut -f1)
-      UP_JSON=$(python3 -c "import json; print(json.dumps({'amxmodx':'$UP_AMXX','metamod':'$UP_MM','reapi':'$UP_REAPI','yapb':'$UP_YAPB','regamedll':'$UP_RGDLL'}))")
-      if [ "$CI_COMMIT_TAG" = "continuous" ] && [ -n "$UP_AMXX" ]; then
-        META_JSON=$(curl -fsSL --max-time 30 "https://github.com/${GH_REPO}/releases/download/continuous/build-meta.json" 2>/dev/null || true)
-        NATIVE_SHA=$(echo "$META_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('native_sha',''))" 2>/dev/null || true)
-        if [ -n "$NATIVE_SHA" ]; then
-          git fetch --depth 1 origin "$NATIVE_SHA" 2>/dev/null || NATIVE_SHA=""
-        fi
-        if [ -n "$NATIVE_SHA" ]; then
-          META_UP=$(echo "$META_JSON" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin).get('upstreams',{}),sort_keys=True))" 2>/dev/null || echo "")
-          CUR_UP=$(echo "$UP_JSON" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin),sort_keys=True))" 2>/dev/null || echo "")
-          DIFF_OUT=$(git diff --name-only "$NATIVE_SHA" HEAD -- android/ci patches cs16-client.pin cs16-client-launcher.patch 3rdparty .github/workflows .gitlab-ci.yml 2>/dev/null || echo "DIFF-FAILED")
-          if [ "$DIFF_OUT" != "DIFF-FAILED" ] && [ -z "$DIFF_OUT" ] && [ -n "$META_UP" ] && [ "$META_UP" = "$CUR_UP" ]; then
-            SKIP_NATIVE=true
-            NATIVE_SHA_OUT=$NATIVE_SHA
-          fi
+      if [ "$NEEDS_ANDROID" = "true" ] || [ "$NEEDS_LIBS" = "true" ]; then
+        echo "== ccache =="
+        export CCACHE="$(command -v ccache || true)"
+        if [ -n "$CCACHE" ]; then
+          export CCACHE_DIR="$WS/.ccache"
+          export CCACHE_MAXSIZE=1G
+          export CCACHE_COMPILERTYPE=clang
+          export CCACHE_SLOPPINESS=time_macros
+          export CCACHE_BASEDIR="$WS"
+          ccache --zero-stats || true
         fi
       fi
-      export SKIP_NATIVE NATIVE_SHA_OUT UPSTREAMS_JSON="$UP_JSON"
-      echo "Native skip: $SKIP_NATIVE (native_sha: $NATIVE_SHA_OUT)"
 
-      if [ "$SKIP_NATIVE" != "true" ]; then
+      if [ "$NEEDS_LIBS" = "true" ]; then
+        echo "== Check the client/engine ABI =="
+        python3 ./android/ci/check-engine-abi.py
+      fi
+
+      if [ "$NEEDS_LIBS" = "true" ]; then
+        echo "== Cross-compile core + modules + plugins =="
         for ABI in arm64-v8a armeabi-v7a; do
+          if [ "$SKIP_NATIVE" = "true" ]; then
+            echo "skip native for $ABI (restore)"
+            break
+          fi
           if RELEASE_VERSION="$BUNDLE_VERSION" bash ./android/ci/build-amxx.sh "$WS/src" "$ANDROID_NDK_HOME" \
               "$WS/build-out" "" "$ABI"; then
             echo "OK $ABI"
@@ -161,13 +182,14 @@ build-release:
               echo "ERROR: arm64-v8a cross-compile failed (required)"
               exit 1
             fi
-            echo "WARNING: armeabi-v7a cross-compile failed — v7a bundle will be skipped"
+            echo "WARNING: armeabi-v7a cross-compile failed - v7a bundle will be skipped"
             touch "$WS/v7a-missing"
           fi
         done
         if [ -n "${CCACHE:-}" ]; then ccache --show-stats || true; fi
-      else
-        set -eo pipefail
+
+        if [ "$SKIP_NATIVE" = "true" ]; then
+          echo "== Restore native outputs from release =="
         mkdir -p /tmp/prevso \
           "$WS/build-out/lib/arm64-v8a" \
           "$WS/build-out/lib/armeabi-v7a" \
@@ -175,7 +197,7 @@ build-release:
           "$WS/build-out/compiler/armeabi-v7a" \
           "$WS/build-out/plugins"
         cd /tmp/prevso
-        gh release download continuous --repo "$GH_REPO" \
+        gh release download libs --repo "$GH_REPO" \
           --pattern 'arm64-v8a__*' --pattern 'armeabi-v7a__*' --pattern 'compiler-*' \
           --clobber
         shopt -s nullglob
@@ -188,7 +210,6 @@ build-release:
           esac
         done
         cd "$WS"
-        set -e
         N64=$(ls "$WS/build-out/lib/arm64-v8a" | wc -l)
         echo "restored arm64 libs: $N64"
         [ "$N64" -ge 10 ] || { echo "ERROR: restore failed: too few arm64 libs"; exit 1; }
@@ -197,146 +218,225 @@ build-release:
         [ -f "$WS/build-out/compiler/arm64-v8a/amxxpc" ] || { echo "ERROR: restore failed: no compiler"; exit 1; }
         [ -f "$WS/build-out/lib/armeabi-v7a/libamxmodx.so" ] || touch "$WS/v7a-missing"
         [ -f "$WS/build-out/lib/armeabi-v7a/libcs_android_armv7l.so" ] || touch "$WS/v7a-missing"
+        fi
       fi
 
-      set -e
-      RGDLL="$WS/rgdll-src"
-      rm -rf "$RGDLL"
-      mkdir -p "$RGDLL"
-      curl -fsSL "https://codeload.github.com/berkchy/ReGameDLL_CS/tar.gz/refs/heads/fix/first-spawn-equip" \
-        | tar -xz -C "$RGDLL" --strip-components=1
-      python3 - "$RGDLL" <<'PY'
-      import glob, os, sys
-      root = sys.argv[1]
-      edits = (
-          ('-g0 -O3 -fno-stack-protector', '-g2 -O3 -fno-stack-protector'),
-          ('set(LINK_FLAGS "-s")', 'set(LINK_FLAGS "")'),
-      )
-      patched = []
-      for path in glob.glob(os.path.join(root, '**', 'CMakeLists.txt'), recursive=True):
-          text = open(path, encoding='utf-8').read()
-          if not any(old in text for old, _ in edits):
-              continue
-          for old, new in edits:
-              if old in text:
-                  text = text.replace(old, new)
-          open(path, 'w', encoding='utf-8').write(text)
-          patched.append(path)
-      if not patched:
-          sys.exit("ERROR: no gamedll CMakeLists.txt with the expected build flags in %s" % root)
-      print("patched ReGameDLL build flags for gamedata measurement:")
-      for path in patched:
-          print("  " + path)
-      PY
-      NDKBIN="$(echo "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin)"
-      TPL="$WS/addons/amxmodx/data/gamedata/common.games/custom/offsets-cstrike-replugged.arm64.txt"
-      for ABI in arm64-v8a armeabi-v7a; do
-        case "$ABI" in
-          arm64-v8a) NAME=libcs_android_arm64.so; VARIANT=arm64 ;;
-          armeabi-v7a) NAME=libcs_android_armv7l.so; VARIANT=arm32 ;;
-        esac
-        BUILD="$WS/rgdll-build-$ABI"
-        SO="$BUILD/regamedll/$NAME"
-        if cmake -S "$RGDLL" -B "$BUILD" \
-            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
-            -DCMAKE_C_COMPILER_LAUNCHER="${CCACHE:-}" \
-            -DCMAKE_CXX_COMPILER_LAUNCHER="${CCACHE:-}" \
-            -DANDROID_ABI="$ABI" \
-            -DANDROID_PLATFORM=android-21 \
-            -DXASH_COMPAT=ON \
-            -DCMAKE_BUILD_TYPE=Release &&
-           cmake --build "$BUILD" --target regamedll --parallel 2 &&
-           [ -f "$SO" ]; then
-          "$NDKBIN/llvm-readelf" -S "$SO" | grep -i "debug" || echo "  (no debug sections in $SO)"
-          python3 ./android/ci/gamedata-offsets.py dump "$TPL" \
-            --dwarfdump "$NDKBIN/llvm-dwarfdump" --so "$SO" --out "$BUILD/gamedll.dwarf"
-          echo "  dwarf dump: $(wc -c < "$BUILD/gamedll.dwarf") bytes"
-          if python3 ./android/ci/gamedata-offsets.py measure "$TPL" \
-              "$BUILD/gamedll.dwarf" "$BUILD/offsets-$VARIANT.txt"; then
-            if [ "$VARIANT" = "arm64" ]; then
-              python3 ./android/ci/gamedata-offsets.py check "$TPL" \
-                "$BUILD/offsets-$VARIANT.txt" ||
-                echo "WARNING: committed arm64 gamedata drifted from this build's DWARF (template kept)"
-            else
+      if [ "$NEEDS_ANDROID" = "true" ] && [ "$NEEDS_LIBS" != "true" ]; then
+        echo "== Restore on-device compilers from release =="
+        mkdir -p /tmp/prevpc \
+          "$WS/build-out/compiler/arm64-v8a" \
+          "$WS/build-out/compiler/armeabi-v7a"
+        cd /tmp/prevpc
+        gh release download libs --repo "$GH_REPO" \
+          --pattern 'compiler-*' --clobber
+        shopt -s nullglob
+        for f in *; do
+          case "$f" in
+            compiler-arm64-v8a__*) cp "$f" "$WS/build-out/compiler/arm64-v8a/${f#compiler-arm64-v8a__}" ;;
+            compiler-armeabi-v7a__*) cp "$f" "$WS/build-out/compiler/armeabi-v7a/${f#compiler-armeabi-v7a__}" ;;
+          esac
+        done
+        cd "$WS"
+        ls -l "$WS/build-out/compiler/arm64-v8a" || true
+        [ -f "$WS/build-out/compiler/arm64-v8a/amxxpc" ] || touch "$WS/arm64-compiler-missing"
+        [ -f "$WS/build-out/compiler/arm64-v8a/amxxpc32.so" ] || touch "$WS/arm64-compiler-missing"
+        [ -f "$WS/build-out/compiler/armeabi-v7a/amxxpc" ] || touch "$WS/v7a-missing"
+        [ -f "$WS/build-out/compiler/armeabi-v7a/amxxpc32.so" ] || touch "$WS/v7a-missing"
+      fi
+
+      if [ "$NEEDS_LIBS" = "true" ] && [ "$SKIP_NATIVE" != "true" ]; then
+        echo "== Build ReGameDLL libcs (first-spawn fix) =="
+        RGDLL="$WS/rgdll-src"
+        rm -rf "$RGDLL"
+        mkdir -p "$RGDLL"
+        RGDLL_BRANCH=fix/first-spawn-equip
+        curl -fsSL "https://api.github.com/repos/berkchy/ReGameDLL_CS/commits/$RGDLL_BRANCH" \
+          | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"][:12])' \
+          > "$WS/rgdll-sha" || echo unknown > "$WS/rgdll-sha"
+        echo "regamedll $RGDLL_BRANCH -> $(cat "$WS/rgdll-sha")"
+        curl -fsSL "https://codeload.github.com/berkchy/ReGameDLL_CS/tar.gz/refs/heads/$RGDLL_BRANCH" \
+          | tar -xz -C "$RGDLL" --strip-components=1
+        python3 - "$RGDLL" <<'PY'
+import glob, os, sys
+root = sys.argv[1]
+edits = (
+    ('-g0 -O3 -fno-stack-protector', '-g2 -O3 -fno-stack-protector'),
+    ('set(LINK_FLAGS "-s")', 'set(LINK_FLAGS "")'),
+)
+patched = []
+for path in glob.glob(os.path.join(root, '**', 'CMakeLists.txt'), recursive=True):
+    text = open(path, encoding='utf-8').read()
+    if not any(old in text for old, _ in edits):
+        continue
+    for old, new in edits:
+        if old in text:
+            text = text.replace(old, new)
+    open(path, 'w', encoding='utf-8').write(text)
+    patched.append(path)
+if not patched:
+    sys.exit("ERROR: no gamedll CMakeLists.txt with the expected build flags in %s" % root)
+print("patched ReGameDLL build flags for gamedata measurement:")
+for path in patched:
+    print("  " + path)
+PY
+        NDKBIN="$(echo "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin)"
+        TPL="$WS/addons/amxmodx/data/gamedata/common.games/custom/offsets-cstrike-replugged.arm64.txt"
+        for ABI in arm64-v8a armeabi-v7a; do
+          case "$ABI" in
+            arm64-v8a) NAME=libcs_android_arm64.so; VARIANT=arm64 ;;
+            armeabi-v7a) NAME=libcs_android_armv7l.so; VARIANT=arm32 ;;
+          esac
+          BUILD="$WS/rgdll-build-$ABI"
+          SO="$BUILD/regamedll/$NAME"
+          if cmake -S "$RGDLL" -B "$BUILD" \
+              -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+              -DCMAKE_C_COMPILER_LAUNCHER="${CCACHE:-}" \
+              -DCMAKE_CXX_COMPILER_LAUNCHER="${CCACHE:-}" \
+              -DANDROID_ABI="$ABI" \
+              -DANDROID_PLATFORM=android-21 \
+              -DXASH_COMPAT=ON \
+              -DCMAKE_BUILD_TYPE=Release &&
+             cmake --build "$BUILD" --target regamedll --parallel 2 &&
+             [ -f "$SO" ]; then
+            "$NDKBIN/llvm-readelf" -S "$SO" | grep -i "debug" || echo "  (no debug sections in $SO)"
+            python3 ./android/ci/gamedata-offsets.py dump "$TPL" \
+              --dwarfdump "$NDKBIN/llvm-dwarfdump" --so "$SO" --out "$BUILD/gamedll.dwarf"
+            echo "  dwarf dump: $(wc -c < "$BUILD/gamedll.dwarf") bytes"
+            if python3 ./android/ci/gamedata-offsets.py measure "$TPL" \
+                "$BUILD/gamedll.dwarf" "$BUILD/offsets-$VARIANT.txt"; then
+              case "$VARIANT" in
+                arm64) ABI_ARG=arm64-v8a ;;
+                *)     ABI_ARG=armeabi-v7a ;;
+              esac
               python3 ./android/ci/gamedata-offsets.py emit "$TPL" \
                 "$BUILD/offsets-$VARIANT.txt" \
                 "$(dirname "$TPL")/offsets-cstrike-replugged.$VARIANT.txt" \
-                --abi armeabi-v7a \
+                --abi "$ABI_ARG" \
                 --note "Generated by android/ci/gamedata-offsets.py from this build's libcs."
+            else
+              echo "WARNING: gamedata offset measurement failed for $ABI (shipping without an override)"
             fi
-          else
-            echo "WARNING: gamedata offset measurement failed for $ABI (shipping without an override)"
+            "$NDKBIN/llvm-strip" "$SO"
+            mkdir -p "$WS/build-out/lib/$ABI"
+            cp "$SO" "$WS/build-out/lib/$ABI/$NAME"
+            ls -l "$WS/build-out/lib/$ABI/$NAME"
+            continue
           fi
-          "$NDKBIN/llvm-strip" "$SO"
-          mkdir -p "$WS/build-out/lib/$ABI"
-          cp "$SO" "$WS/build-out/lib/$ABI/$NAME"
-          ls -l "$WS/build-out/lib/$ABI/$NAME"
-          continue
+          if [ "$ABI" = "arm64-v8a" ]; then
+            echo "ERROR: $NAME was not produced (required)"
+            exit 1
+          fi
+          echo "WARNING: $NAME was not produced - v7a bundle will be dropped"
+          touch "$WS/v7a-missing"
+        done
+      fi
+
+      if [ "$NEEDS_LIBS" = "true" ]; then
+        echo "== Package release bundles =="
+        PREV="$WS/prev-manifest"
+        mkdir -p "$PREV"
+        for f in manifest.json manifest-v7a.json; do
+          curl -fsSL -o "$PREV/$f" \
+            "https://github.com/$GH_REPO/releases/download/continuous/$f" || echo "no previous $f"
+        done
+
+        PRODUCER_ARGS=()
+        sub_sha() {
+          local path="$1" out
+          out="$(git rev-parse --verify --quiet "HEAD:$path" 2>/dev/null || true)"
+          [ -n "$out" ] && echo "$out" || echo "unknown"
+        }
+        dir_sha() {
+          local path="$1" out
+          out="$(git -C "$path" rev-parse --verify --quiet HEAD 2>/dev/null || true)"
+          [ -n "$out" ] && echo "$out" || echo "unknown"
+        }
+        PRODUCER_ARGS+=(--producer "cs16-client=$(dir_sha cs16-client)")
+        PRODUCER_ARGS+=(--producer "amxmodx=$(sub_sha 3rdparty/amxmodx)")
+        PRODUCER_ARGS+=(--producer "metamod=$(sub_sha 3rdparty/metamod-fwgs)")
+        PRODUCER_ARGS+=(--producer "yapb=$(sub_sha 3rdparty/yapb)")
+        if [ -f "$WS/rgdll-sha" ]; then
+          PRODUCER_ARGS+=(--producer "regamedll=$(cat "$WS/rgdll-sha")")
         fi
-        if [ "$ABI" = "arm64-v8a" ]; then
-          echo "ERROR: $NAME was not produced (required)"
+        echo "producer stamps: ${PRODUCER_ARGS[*]}"
+
+        RELEASE_VERSION="$BUNDLE_VERSION" python3 ./android/ci/gen-manifest.py \
+          arm64-v8a \
+          "$WS/build-out/lib/arm64-v8a" \
+          "$WS/incremental" \
+          --plugins-dir "$WS/build-out/plugins" \
+          --previous "$PREV/manifest.json" \
+          "${PRODUCER_ARGS[@]}"
+        mv "$WS/incremental/manifest.json" "$WS/manifest.json"
+
+        if [ ! -f "$WS/v7a-missing" ] && [ -f "$WS/build-out/lib/armeabi-v7a/libamxmodx.so" ]; then
+          RELEASE_VERSION="$BUNDLE_VERSION" python3 ./android/ci/gen-manifest.py \
+            armeabi-v7a \
+            "$WS/build-out/lib/armeabi-v7a" \
+            "$WS/incremental-v7a" \
+            --previous "$PREV/manifest-v7a.json" \
+            "${PRODUCER_ARGS[@]}"
+          mv "$WS/incremental-v7a/manifest.json" "$WS/manifest-v7a.json"
+        fi
+
+        cd "$WS"
+        zip -r amxx-addons.zip addons/ -x '*.gitignore' '*.git/*'
+
+        ASSETS_DIR="$WS/cs16-client/3rdparty/cs16client-extras"
+        if [ ! -d "$ASSETS_DIR" ]; then
+          echo "ERROR: client assets tree is missing at $ASSETS_DIR"
           exit 1
         fi
-        echo "WARNING: $NAME was not produced — v7a bundle will be dropped"
-        touch "$WS/v7a-missing"
-      done
+        echo "packaging game assets from $ASSETS_DIR"
+        (cd "$ASSETS_DIR" && zip -r -9 "$WS/game-assets.zip" . -x '*.gitignore' '*.git/*')
+        unzip -tq "$WS/game-assets.zip"
+        for f in touch.cfg touch_default/numbers.cfg BotProfile.db BotChatter.db \
+                 gfx/shell/btn_touch.bmp maps/tr_1.bsp sound/radio/bot/a.wav; do
+          unzip -l "$WS/game-assets.zip" "$f" | grep -q "$f" || {
+            echo "ERROR: $f missing from game-assets.zip"; exit 1; }
+        done
+        ls -la "$WS/game-assets.zip"
 
-      RELEASE_VERSION="$BUNDLE_VERSION" python3 ./android/ci/gen-manifest.py \
-        arm64-v8a \
-        "$WS/build-out/lib/arm64-v8a" \
-        "$WS/incremental" \
-        --plugins-dir "$WS/build-out/plugins"
-      mv "$WS/incremental/manifest.json" "$WS/manifest.json"
+        UPSTREAMS_JSON="$UPSTREAMS_JSON" NATIVE_SHA_OUT="$NATIVE_SHA_OUT" \
+        python3 - "$WS/build-meta.json" <<'PY'
+import json, os, subprocess, sys
+out = sys.argv[1]
+commit = subprocess.run(['git', 'rev-parse', 'HEAD'],
+                        capture_output=True, text=True).stdout.strip()
+try:
+    upstreams = json.loads(os.environ.get('UPSTREAMS_JSON', '{}'))
+except Exception:
+    upstreams = {}
+native_sha = os.environ.get('NATIVE_SHA_OUT') or commit
+json.dump({"commit": commit, "native_sha": native_sha,
+           "upstreams": upstreams}, open(out, 'w'))
+print(open(out).read())
+PY
 
-      if [ ! -f "$WS/v7a-missing" ] && \
-          [ -f "$WS/build-out/lib/armeabi-v7a/libamxmodx.so" ]; then
-        RELEASE_VERSION="$BUNDLE_VERSION" python3 ./android/ci/gen-manifest.py \
-          armeabi-v7a \
-          "$WS/build-out/lib/armeabi-v7a" \
-          "$WS/incremental-v7a"
-        mv "$WS/incremental-v7a/manifest.json" "$WS/manifest-v7a.json"
+        mkdir -p "$WS/compiler-assets"
+        cf="$WS/build-out/compiler"
+        [ -f "$cf/arm64-v8a/amxxpc" ] && cp "$cf/arm64-v8a/amxxpc" "$WS/compiler-assets/compiler-arm64-v8a__amxxpc"
+        [ -f "$cf/arm64-v8a/amxxpc32.so" ] && cp "$cf/arm64-v8a/amxxpc32.so" "$WS/compiler-assets/compiler-arm64-v8a__amxxpc32.so"
+        if [ ! -f "$WS/v7a-missing" ]; then
+          [ -f "$cf/armeabi-v7a/amxxpc" ] && cp "$cf/armeabi-v7a/amxxpc" "$WS/compiler-assets/compiler-armeabi-v7a__amxxpc"
+          [ -f "$cf/armeabi-v7a/amxxpc32.so" ] && cp "$cf/armeabi-v7a/amxxpc32.so" "$WS/compiler-assets/compiler-armeabi-v7a__amxxpc32.so"
+        fi
+        ls "$WS/compiler-assets" || true
       fi
 
-      cd "$WS"
-      zip -r amxx-addons.zip addons/ -x '*.gitignore' '*.git/*'
-
-      python3 - "$WS/build-meta.json" <<'PY'
-      import json, os, subprocess, sys
-      out = sys.argv[1]
-      commit = subprocess.run(['git', 'rev-parse', 'HEAD'],
-                              capture_output=True, text=True).stdout.strip()
-      try:
-          upstreams = json.loads(os.environ.get('UPSTREAMS_JSON', '{}'))
-      except Exception:
-          upstreams = {}
-      native_sha = os.environ.get('NATIVE_SHA_OUT') or commit
-      json.dump({"commit": commit, "native_sha": native_sha,
-                 "upstreams": upstreams}, open(out, 'w'))
-      print(open(out).read())
-      PY
-
-      mkdir -p "$WS/compiler-assets"
-      cf="$WS/build-out/compiler"
-      [ -f "$cf/arm64-v8a/amxxpc" ] && cp "$cf/arm64-v8a/amxxpc" "$WS/compiler-assets/compiler-arm64-v8a__amxxpc"
-      [ -f "$cf/arm64-v8a/amxxpc32.so" ] && cp "$cf/arm64-v8a/amxxpc32.so" "$WS/compiler-assets/compiler-arm64-v8a__amxxpc32.so"
-      if [ ! -f "$WS/v7a-missing" ]; then
-        [ -f "$cf/armeabi-v7a/amxxpc" ] && cp "$cf/armeabi-v7a/amxxpc" "$WS/compiler-assets/compiler-armeabi-v7a__amxxpc"
-        [ -f "$cf/armeabi-v7a/amxxpc32.so" ] && cp "$cf/armeabi-v7a/amxxpc32.so" "$WS/compiler-assets/compiler-armeabi-v7a__amxxpc32.so"
-      fi
-      ls "$WS/compiler-assets" || true
-
-      if [ "$NEEDS_APK" = "true" ]; then
+      if [ "$NEEDS_ANDROID" = "true" ]; then
+        echo "== Bundle debug signing keystore into app assets =="
         mkdir -p android/app/src/main/assets/keystore
         cp android/debug/patcher-release.p12 android/app/src/main/assets/keystore/debug.p12
         cp android/debug/debug_key.pem android/app/src/main/assets/keystore/debug_key.pem
         cp android/debug/debug_cert.pem android/app/src/main/assets/keystore/debug_cert.pem
 
+        echo "== Embed amxxpc compiler as native libs =="
         mkdir -p android/app/src/main/jniLibs/arm64-v8a
         cp "$WS/build-out/compiler/arm64-v8a/amxxpc" android/app/src/main/jniLibs/arm64-v8a/libamxxpc.so
         cp "$WS/build-out/compiler/arm64-v8a/amxxpc32.so" android/app/src/main/jniLibs/arm64-v8a/libamxxpc32.so
         chmod +x android/app/src/main/jniLibs/arm64-v8a/libamxxpc.so
-        if [ ! -f "$WS/v7a-missing" ] && \
-            [ -f "$WS/build-out/compiler/armeabi-v7a/amxxpc" ]; then
+        if [ ! -f "$WS/v7a-missing" ] && [ -f "$WS/build-out/compiler/armeabi-v7a/amxxpc" ]; then
           mkdir -p android/app/src/main/jniLibs/armeabi-v7a
           cp "$WS/build-out/compiler/armeabi-v7a/amxxpc" android/app/src/main/jniLibs/armeabi-v7a/libamxxpc.so
           cp "$WS/build-out/compiler/armeabi-v7a/amxxpc32.so" android/app/src/main/jniLibs/armeabi-v7a/libamxxpc32.so
@@ -344,28 +444,27 @@ build-release:
         fi
         ls -lh android/app/src/main/jniLibs/arm64-v8a/
 
-        (cd android && ./gradlew --no-daemon :app:assembleRelease --stacktrace)
+        echo "== Build the patcher APK =="
+        (cd android && APP_VERSION_NAME="$APP_VERSION_NAME" APP_VERSION_CODE="$APP_VERSION_CODE" \
+          ./gradlew --no-daemon :app:assembleRelease --stacktrace)
 
-        cd android/app/build/outputs/apk/release
-        APK=$(ls *.apk 2>/dev/null | head -1 || true)
-        if [ -n "$APK" ]; then
-          mv "$APK" "${APK_NAME:-nexora.apk}"
-          echo "Renamed: ${APK_NAME:-nexora.apk}"
-        fi
+        (cd android/app/build/outputs/apk/release && \
+          APK=$(ls *.apk 2>/dev/null | head -1) && \
+          [ -n "$APK" ] && mv "$APK" "${APK_NAME:-nexora.apk}")
         echo "${APP_VERSION_NAME:-unknown}" > "$WS/version.txt"
         cat "$WS/version.txt"
 
-        CLIENT_NDK=$(grep -oP 'ndkVersion\s*=\s*"\K[^"]+' cs16-client/android/app/build.gradle)
-        command -v ccache >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq ccache; }
-        if [ ! -d "$ANDROID_HOME/ndk/$CLIENT_NDK" ]; then
+        if [ ! -d "$ANDROID_HOME/ndk/$(grep -oP 'ndkVersion\s*=\s*"\K[^"]+' cs16-client/android/app/build.gradle)" ]; then
+          CLIENT_NDK=$(grep -oP 'ndkVersion\s*=\s*"\K[^"]+' cs16-client/android/app/build.gradle)
           yes | "$SDKM" --sdk_root="$ANDROID_HOME" --licenses >/dev/null 2>&1 || true
           yes | "$SDKM" --sdk_root="$ANDROID_HOME" --install "ndk;$CLIENT_NDK" || true
         fi
+        CLIENT_NDK=$(grep -oP 'ndkVersion\s*=\s*"\K[^"]+' cs16-client/android/app/build.gradle)
         test -d "$ANDROID_HOME/ndk/$CLIENT_NDK" || {
           echo "client NDK $CLIENT_NDK is missing"; exit 1; }
 
         KEYSTORE_FILE_PATH="$WS/signingkey.jks"
-        if [ -n "$CS16_SIGNING_KEY" ]; then
+        if [ -n "${CS16_SIGNING_KEY:-}" ]; then
           echo "$CS16_SIGNING_KEY" | base64 --decode > "$KEYSTORE_FILE_PATH"
           export KEYSTORE_FILE_PATH KEYSTORE_PASSWORD="$CS16_KEYSTORE_PASSWORD" \
                  KEY_ALIAS="$CS16_KEY_ALIAS" KEY_PASSWORD="$CS16_KEY_PASSWORD"
@@ -382,113 +481,105 @@ build-release:
              "$WS/CS16Client-Android.apk"
         fi
         ls -lh "$WS/CS16Client-Android.apk"
-        cd "$WS"
       fi
 
-      if [ "$CI_COMMIT_TAG" = "continuous" ]; then
+      export NEEDS_ANDROID NEEDS_LIBS CONTINUOUS MSG APK_NAME
+
+      if [ "$CONTINUOUS" = "true" ]; then
+        echo "== Release (rolling continuous) =="
         if ! gh release view continuous >/dev/null 2>&1; then
           gh release create continuous \
             --title "Nexora Continuous" \
             --notes "Nexora Continuous build"
         fi
-        if [ "$NEEDS_APK" = "true" ]; then
-          PRESERVE='^$'
-        else
-          PRESERVE='^(nexora_continuous\.apk|version\.txt|CS16Client-Android\.apk)$'
+        if [ "$NEEDS_ANDROID" = "true" ]; then
+          gh release upload continuous --clobber version.txt android/app/build/outputs/apk/release/*.apk 2>/dev/null || true
         fi
-        gh release view continuous --json assets | jq -r '.assets[] | .name' | while read -r name; do
-          [ -z "$name" ] && continue
-          if echo "$name" | grep -qE "$PRESERVE"; then
-            echo "Keeping: $name"
-          else
-            echo "Deleting: $name"
-            gh release delete-asset continuous "$name" -y || true
+
+        if [ "$NEEDS_LIBS" = "true" ]; then
+          if ! gh release view libs >/dev/null 2>&1; then
+            gh release create libs --title "Nexora Libs" --notes "Native libs and manifests (rolling)."
           fi
-        done
+          gh release upload libs --clobber manifest.json manifest-v7a.json build-meta.json \
+            incremental/arm64-v8a/*.so incremental-v7a/armeabi-v7a/*.so \
+            compiler-assets/* 2>/dev/null || true
+        fi
+
+        if [ "$NEEDS_LIBS" = "true" ]; then
+          if ! gh release view extras >/dev/null 2>&1; then
+            gh release create extras --title "Nexora Extras" --notes "Addons, game assets and client APK (rolling)."
+          fi
+          gh release upload extras --clobber amxx-addons.zip game-assets.zip 2>/dev/null || true
+        fi
+
         BODY="Nexora Continuous build ${APP_VERSION_NAME:-}
       Commit: ${MSG}
       Run: ${CI_PIPELINE_URL}
       Built: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        gh release edit continuous --title "Nexora Continuous" --notes "$BODY"
-        shopt -s nullglob
-        FILES=(amxx-addons.zip manifest.json manifest-v7a.json build-meta.json incremental/arm64-v8a/*.so incremental-v7a/armeabi-v7a/*.so compiler-assets/*)
-        if [ "$NEEDS_APK" = "true" ]; then
-          FILES+=(version.txt android/app/build/outputs/apk/release/*.apk CS16Client-Android.apk)
-        fi
-        gh release upload continuous --clobber "${FILES[@]}"
+        gh release edit continuous --title "Nexora Continuous" --notes "$BODY" 2>/dev/null || true
       else
-        shopt -s nullglob
-        FILES=(amxx-addons.zip manifest.json manifest-v7a.json build-meta.json
-               incremental/arm64-v8a/*.so incremental-v7a/armeabi-v7a/*.so
-               compiler-assets/*)
-        if [ "$NEEDS_APK" = "true" ]; then
-          FILES+=(version.txt android/app/build/outputs/apk/release/*.apk CS16Client-Android.apk)
+        if [ "$NEEDS_ANDROID" = "true" ] && [ -n "$CI_COMMIT_TAG" ]; then
+          echo "== Release (app APK) for tag $CI_COMMIT_TAG =="
+          EXISTING=$(gh release view "$CI_COMMIT_TAG" >/dev/null 2>&1 && echo yes || echo no)
+          if [ "$EXISTING" = "no" ]; then
+            gh release create "$CI_COMMIT_TAG" --title "$CI_COMMIT_TAG" --notes "$MSG" || true
+          fi
+          gh release upload "$CI_COMMIT_TAG" --clobber version.txt android/app/build/outputs/apk/release/*.apk || true
         fi
-        EXISTING=$(gh release view "$CI_COMMIT_TAG" >/dev/null 2>&1 && echo yes || echo no)
-        if [ "$EXISTING" = "no" ]; then
-          gh release create "$CI_COMMIT_TAG" --title "$CI_COMMIT_TAG" --notes "$MSG" || true
+        if [ "$NEEDS_LIBS" = "true" ] && [ -n "$CI_COMMIT_TAG" ]; then
+          EXISTING=$(gh release view "$CI_COMMIT_TAG" >/dev/null 2>&1 && echo yes || echo no)
+          if [ "$EXISTING" = "no" ]; then
+            gh release create "$CI_COMMIT_TAG" --title "$CI_COMMIT_TAG" --notes "$MSG" || true
+          fi
+          gh release upload "$CI_COMMIT_TAG" --clobber \
+            manifest.json manifest-v7a.json build-meta.json \
+            incremental/arm64-v8a/*.so incremental-v7a/armeabi-v7a/*.so \
+            compiler-assets/* amxx-addons.zip || true
         fi
-        gh release upload "$CI_COMMIT_TAG" --clobber "${FILES[@]}" || true
       fi
 
-      if [ -n "${DISCORD_WEBHOOK:-}" ] && [ "$CI_COMMIT_TAG" != "continuous" ]; then
-        VERSION="$CI_COMMIT_TAG"
+      if [ -n "${DISCORD_WEBHOOK:-}" ]; then
+        VERSION="${CI_COMMIT_TAG:-$APP_VERSION_NAME}"
         APK_FILE="nexora_v${VERSION#v}.apk"
-        if [ "$CI_COMMIT_TAG" = "continuous" ]; then
-          VERSION="${APP_VERSION_NAME:-continuous}"
+        if [ "$CONTINUOUS" = "true" ]; then
+          VERSION="$APP_VERSION_NAME"
           APK_FILE="nexora_continuous.apk"
         fi
         REPO="$GH_REPO"
         COMMIT_MSG=$(echo "$MSG" | head -c 500)
-        HAS_MARKER="$HAS_MARKER"
-        RELEASE_URL="https://github.com/${REPO}/releases/tag/${CI_COMMIT_TAG}"
-        if compgen -G "android/app/build/outputs/apk/release/*.apk" >/dev/null; then
-          APK_COUNT=$(ls android/app/build/outputs/apk/release/*.apk | wc -l)
-        else
-          APK_COUNT=0
-        fi
-        if [ "$APK_COUNT" -gt 0 ]; then
-          TITLE="Nexora v${VERSION} released"
-          if [ "$CI_COMMIT_TAG" = "continuous" ]; then
-            TITLE="Nexora Continuous build ${VERSION}"
-          fi
+        RELEASE_URL="https://github.com/${REPO}/releases/tag/${CI_COMMIT_TAG:-continuous}"
+        if [ "$NEEDS_ANDROID" = "true" ]; then
           STATUS_FIELD=":white_check_mark: App update ready"
           TYPE_FIELD="App + libs"
-          APK_URL="https://github.com/${REPO}/releases/download/${CI_COMMIT_TAG}/${APK_FILE}"
+          APK_COUNT=$(ls android/app/build/outputs/apk/release/*.apk 2>/dev/null | wc -l)
+          APK_URL="https://github.com/${REPO}/releases/download/${CI_COMMIT_TAG:-continuous}/${APK_FILE}"
           APK_FIELD=", { \"name\": \"Download\", \"value\": \"[${APK_FILE}](${APK_URL})\", \"inline\": true }"
-        elif [ "$HAS_MARKER" = "true" ]; then
-          TITLE="Nexora v${VERSION} libs & plugins update"
+        else
           STATUS_FIELD=":white_check_mark: Libs & plugins updated"
           TYPE_FIELD="Bundle (libs & plugins)"
           APK_FIELD=""
-        else
-          TITLE="Nexora v${VERSION} update info"
-          STATUS_FIELD=":information_source: Update posted"
-          TYPE_FIELD="Update info"
-          APK_FIELD=""
+        fi
+        TITLE="Nexora v${VERSION}"
+        if [ "$CONTINUOUS" = "true" ]; then
+          TITLE="Nexora Continuous build ${VERSION}"
         fi
         BODY=$(cat <<EOF
-        {
-          "embeds": [{
-            "title": "${TITLE}",
-            "description": "$COMMIT_MSG",
-            "color": 5763719,
-            "url": "${RELEASE_URL}",
-            "thumbnail": { "url": "attachment://thumbnail.jpg" },
-            "image": { "url": "attachment://image.jpg" },
-            "fields": [
-              { "name": "Status", "value": "${STATUS_FIELD}", "inline": true },
-              { "name": "Version", "value": "${VERSION}", "inline": true },
-              { "name": "Type", "value": "${TYPE_FIELD}", "inline": true }${APK_FIELD}
-            ]
-          }]
-        }
-      EOF
-      )
-        curl -fsSL -F "payload_json=$BODY" \
-          -F "thumbnail=@.github/assets/thumbnail.jpg" \
-          -F "image=@.github/assets/image.jpg" \
-          "$DISCORD_WEBHOOK" 2>&1 >/dev/null || { echo "Failed to send Discord webhook"; exit 0; }
+{
+  "embeds": [{
+    "title": "${TITLE}",
+    "description": "${COMMIT_MSG}",
+    "color": 5763719,
+    "url": "${RELEASE_URL}",
+    "fields": [
+      { "name": "Status", "value": "${STATUS_FIELD}", "inline": true },
+      { "name": "Version", "value": "${VERSION}", "inline": true },
+      { "name": "Type", "value": "${TYPE_FIELD}", "inline": true }${APK_FIELD}
+    ]
+  }]
+}
+EOF
+        )
+        curl -fsSL -F "payload_json=$BODY" "$DISCORD_WEBHOOK" 2>&1 >/dev/null || { echo "Failed to send Discord webhook"; exit 0; }
       fi
 
       echo "== done: ${APP_VERSION_NAME} =="
