@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -44,6 +45,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -175,11 +178,8 @@ class MainActivity : ComponentActivity() {
     }
 }
 private enum class Dest(val route: String) {
-    Patch("patch"),
+    Tabs("tabs"),
     Libraries("libraries"),
-    Compiler("compiler"),
-    Addons("addons"),
-    Store("store"),
     StoreLogin("store/login"),
     StoreRegister("store/register"),
     StoreVerifyEmail("store/verify-email"),
@@ -187,7 +187,6 @@ private enum class Dest(val route: String) {
     StoreProfile("store/profile/{username}"),
     StoreManage("store/manage"),
     StoreAdmin("store/admin"),
-    Plugins("plugins"),
 }
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -283,36 +282,22 @@ fun PatcherApp(vm: PatcherViewModel) {
     }
     val bottomNavItems = remember {
         listOf(
-            BottomNavItem(Dest.Patch.route, "Patch", Icons.Filled.RocketLaunch, Icons.Outlined.RocketLaunch),
-            BottomNavItem(Dest.Compiler.route, "Compiler", Icons.Filled.Code, Icons.Outlined.Code),
-            BottomNavItem(Dest.Addons.route, "Addons", Icons.Filled.Extension, Icons.Outlined.Extension),
-            BottomNavItem(Dest.Store.route, "Store", Icons.Filled.Storefront, Icons.Outlined.Storefront),
+            BottomNavItem(0, "Patch", Icons.Filled.RocketLaunch, Icons.Outlined.RocketLaunch),
+            BottomNavItem(1, "Compiler", Icons.Filled.Code, Icons.Outlined.Code),
+            BottomNavItem(2, "Addons", Icons.Filled.Extension, Icons.Outlined.Extension),
+            BottomNavItem(3, "Store", Icons.Filled.Storefront, Icons.Outlined.Storefront),
         )
     }
-    val mainTabRoutes = remember {
-        listOf(
-            Dest.Patch.route,
-            Dest.Compiler.route,
-            Dest.Addons.route,
-            Dest.Store.route,
-        )
-    }
-    val isMainTab = currentRoute in mainTabRoutes
+    val isMainTab = currentRoute == Dest.Tabs.route
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 4 })
+    val tabScope = rememberCoroutineScope()
     var showSettings by remember { mutableStateOf(false) }
     var showTheme by remember { mutableStateOf(false) }
-    val navigateToTab: (String) -> Unit = { route ->
-        if (currentRoute != route) {
-            nav.navigate(route) {
-                popUpTo(nav.graph.findStartDestination().id) {
-                    saveState = true
-                }
-                launchSingleTop = true
-                restoreState = true
-            }
-        }
+    BackHandler(
+        enabled = isMainTab && pagerState.currentPage != 0 && !showSettings && !showTheme && !showSetup,
+    ) {
+        tabScope.launch { pagerState.animateScrollToPage(0) }
     }
-    val swipeThreshold = with(LocalDensity.current) { 72.dp.toPx() }
-    val swipeEnabled = isMainTab && !showSettings && !showTheme && !showSetup
     val settingsRotation by animateFloatAsState(
         targetValue = if (showSettings) 90f else 0f,
         animationSpec = spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow),
@@ -403,10 +388,14 @@ fun PatcherApp(vm: PatcherViewModel) {
                         tonalElevation = 0.dp,
                     ) {
                         bottomNavItems.forEach { item ->
-                            val selected = currentRoute == item.route
+                            val selected = pagerState.currentPage == item.index
                             NavigationBarItem(
                                 selected = selected,
-                                onClick = { navigateToTab(item.route) },
+                                onClick = {
+                                    if (pagerState.currentPage != item.index) {
+                                        tabScope.launch { pagerState.animateScrollToPage(item.index) }
+                                    }
+                                },
                                 icon = {
                                     Icon(
                                         imageVector = if (selected) item.selectedIcon else item.unselectedIcon,
@@ -437,35 +426,11 @@ fun PatcherApp(vm: PatcherViewModel) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(padding)
-                    .pointerInput(swipeEnabled, currentRoute) {
-                        if (!swipeEnabled) return@pointerInput
-                        var drag = 0f
-                        detectHorizontalDragGestures(
-                            onDragStart = { drag = 0f },
-                            onDragEnd = {
-                                val index = mainTabRoutes.indexOf(currentRoute)
-                                if (index >= 0) {
-                                    when {
-                                        drag <= -swipeThreshold && index < mainTabRoutes.lastIndex ->
-                                            navigateToTab(mainTabRoutes[index + 1])
-                                        drag >= swipeThreshold && index > 0 ->
-                                            navigateToTab(mainTabRoutes[index - 1])
-                                    }
-                                }
-                                drag = 0f
-                            },
-                            onDragCancel = { drag = 0f },
-                            onHorizontalDrag = { change, amount ->
-                                drag += amount
-                                change.consume()
-                            },
-                        )
-                    },
+                    .padding(padding),
             ) {
                 NavHost(
                     navController = nav,
-                    startDestination = Dest.Patch.route,
+                    startDestination = Dest.Tabs.route,
                     modifier = Modifier.fillMaxSize(),
                     enterTransition = {
                         slideInHorizontally(
@@ -492,23 +457,30 @@ fun PatcherApp(vm: PatcherViewModel) {
                         )
                     },
                 ) {
-                    composable(Dest.Patch.route) {
-                        PatchScreen(
-                            vm = vm,
-                            onOpenLibraries = { nav.navigate(Dest.Libraries.route) },
-                        )
+                    composable(Dest.Tabs.route) {
+                        HorizontalPager(
+                            state = pagerState,
+                            modifier = Modifier.fillMaxSize(),
+                        ) { page ->
+                            when (page) {
+                                0 -> PatchScreen(
+                                    vm = vm,
+                                    onOpenLibraries = { nav.navigate(Dest.Libraries.route) },
+                                )
+                                1 -> CompilerScreen(vm = vm)
+                                2 -> AddonsScreen(vm)
+                                else -> {
+                                    val api = StoreApi(context = context)
+                                    StoreScreen(
+                                        api = api,
+                                        onBack = { },
+                                        onUserClick = { username -> nav.navigate("store/profile/$username") },
+                                    )
+                                }
+                            }
+                        }
                     }
                     composable(Dest.Libraries.route) { LibraryScreen(vm) }
-                    composable(Dest.Compiler.route) { CompilerScreen(vm = vm) }
-                    composable(Dest.Addons.route) { AddonsScreen(vm) }
-                    composable(Dest.Store.route) {
-                        val api = StoreApi(context = context)
-                        StoreScreen(
-                            api = api,
-                            onBack = { nav.popBackStack() },
-                            onUserClick = { username -> nav.navigate("store/profile/$username") },
-                        )
-                    }
                     composable(Dest.StoreLogin.route) {
                         val api = StoreApi(context = context)
                         com.pickle.patcher.ui.screens.StoreLoginScreen(
@@ -563,7 +535,6 @@ fun PatcherApp(vm: PatcherViewModel) {
                         val api = StoreApi(context = context)
                         StoreProfileScreen(api, username = username, onBack = { nav.popBackStack() }, onEditProfile = { })
                     }
-                    composable(Dest.Plugins.route) { AddonsScreen(vm) }
                 }
             }
         }
@@ -830,7 +801,7 @@ private fun PermissionRow(
     }
 }
 private data class BottomNavItem(
-    val route: String,
+    val index: Int,
     val title: String,
     val selectedIcon: androidx.compose.ui.graphics.vector.ImageVector,
     val unselectedIcon: androidx.compose.ui.graphics.vector.ImageVector,
