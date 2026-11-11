@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="nexora.jpg" alt="Nexora" width="180">
-
 # Nexora
 
 **AMX Mod X for Counter-Strike 1.6 on Android, without touching a single build file.**
@@ -9,7 +7,7 @@
 Pick your CS 1.6 APK, hit **Patch**, install the result. Metamod, AMXX, the
 modules, the bot and the plugin compiler all ride along.
 
-[![Android](https://img.shields.io/badge/android-8.0%2B-3DDC84?logo=android&style=flat-square)](https://developer.android.com)
+[![Android](https://img.shields.io/badge/android-7.0%2B-3DDC84?logo=android&style=flat-square)](https://developer.android.com)
 [![ABI](https://img.shields.io/badge/ABI-arm64--v8a%20%7C%20armeabi--v7a-3DDC84?style=flat-square)](#supported-platforms)
 [![License](https://img.shields.io/badge/license-Unlicense-3DDC84?style=flat-square)](#license)
 
@@ -23,26 +21,50 @@ Nexora takes the stock CS 1.6 Android client and rewrites it into a fully
 modded build. It injects the native AMXX stack, bundles a plugin compiler, and
 re-signs the APK so it installs over the original.
 
-<div align="center">
-  <img src="shots/nexora.shots.patcher.jpg" alt="Patch screen" width="260">
-  <img src="shots/nexora.shots.compiler.jpg" alt="Compiler screen" width="260">
-  <img src="shots/nexora.shots.addons.jpg" alt="Addons screen" width="260">
-</div>
-
-### The four screens
+### The screens
 
 | Screen | What it's for |
 |---|---|
 | **Patch** | Choose the source APK, see the mod bundle status, patch, sign, install |
-| **Compile** | Compile `.sma` to `.amxx` with the bundled `amxxpc` |
-| **Addons** | Install and manage the AMXX addons package |
-| **Plugins** | Edit `plugins.ini` without leaving the app |
+| **Compiler** | Compile `.sma` to `.amxx` with the bundled `amxxpc` |
+| **Addons** | Install and manage the AMXX addons package (metamod, amxmodx, yapb) |
+| **Store** | Browse and download custom plugins and libraries |
 
-<div align="center">
-  <img src="shots/nexora.shots.plugins.jpg" alt="plugins.ini editor" width="300">
-</div>
+### Before you start
 
----
+**Nexora patches the client shell.** The patched APK is not a full game — it is
+a launcher that depends on a Xash3D engine APK. You need one of these installed
+on the device first:
+
+- [Xash3D FWGS engine](https://github.com/Poggtru/engine) — any build that
+  matches the client (both `su.xash.engine` and `su.xash.engine.test` are
+  supported; the client queries both)
+
+Without the engine the patched app opens to a launcher screen that cannot start
+the game.
+
+Nexora also needs **all files access** (storage permission) to read your game
+directory and write the patched APK.
+
+## Requirements
+
+- **Android 7.0** (API 24) or newer
+- **arm64-v8a** or **armeabi-v7a** device
+- A Xash3D engine APK (see above)
+- A CS 1.6 client APK — the stock Nexora-built shell is downloaded
+  automatically, or use your own
+- Your game directory (usually `/sdcard/.xash/cstrike` — Nexora finds it
+  automatically)
+
+## Install
+
+1. Download the latest APK from [Releases](https://github.com/berkchy/nexora/releases).
+2. Install it, open **Patch** — the app downloads the client APK and the mod
+   bundle for your ABI.
+3. Open **Addons** and tap **Download & Install Addons** to install metamod,
+   AMX Mod X and YaPB into your game directory.
+4. Back in **Patch**, tap **Start Patch**, then **Install**.
+5. Launch the game via the **Xash engine** app (not the Nexora icon).
 
 ## Why it's built this way
 
@@ -51,11 +73,7 @@ re-signs the APK so it installs over the original.
 A patched APK is a large binary. Re-downloading 60 MB every night to change a
 few `.so` files is wasteful, so Nexora publishes a **manifest** alongside the
 release. On launch it compares the SHA-256 of every installed library with the
-manifest and only pulls down what actually changed, then patches the APK in
-place.
-
-That means a normal update transfers a handful of megabytes, not the whole
-bundle, and an interrupted update resumes instead of starting over.
+manifest and only pulls down what actually changed.
 
 ### ABI-aware
 
@@ -65,33 +83,31 @@ reports exactly what it is about to replace before it touches anything.
 
 ### Optional where it can be
 
-Not everything has to be fatal. `libclient_android_*.so` is optional on an APK
-that already carries a working client: the patcher replaces it in place rather
-than refusing, so an older game package still boots with the client it shipped
-with.
+`libclient_android_*.so` is optional on an APK that already carries a working
+client: the patcher replaces it in place rather than refusing.
 
----
+### Game folder auto-detection
 
-## Requirements
+The game directory is found automatically (`/sdcard/.xash/cstrike` by default,
+`/sdcard/xash/cstrike` as fallback). Everything Nexora writes — addons
+installation, metamod config, patch history — lands in the same directory the
+engine actually uses, so the game boots into a working AMXX setup.
 
-- **Android 8.0** (API 26) or newer
-- **arm64-v8a** or **armeabi-v7a** device
-- A CS 1.6 client APK — Google Play, APKMirror, or your own backup
-- Storage permission to write the patched APK and the game directory
+## Building from source
 
-## Install
+Local debug builds need two generated folders that CI creates at release time:
 
-1. Download the latest APK from [Releases](https://github.com/berkchy/nexora/releases).
-2. Allow **install from unknown sources** for whichever app opens it.
-3. Install Nexora, then open **Patch** and select your CS 1.6 APK.
-4. Patch, sign, install. Your account and game data survive — the app identity
-   is preserved.
+| Folder | How to create it |
+|---|---|
+| `android/app/src/main/jniLibs/<abi>/libamxxpc.so` + `libamxxpc32.so` | Download the `compiler-*` assets from the [`libs` release](https://github.com/berkchy/nexora/releases/tag/libs) and rename per CI (see `build-and-release-release.yml`) |
+| `android/app/src/main/assets/keystore/` | `cp android/debug/patcher-release.p12 android/app/src/main/assets/keystore/debug.p12` and the two `.pem` files |
 
-<div align="center">
-  <img src="shots/nexora.shots.about.jpg" alt="About dialog" width="300">
-</div>
+Then:
 
----
+```sh
+cd android
+./gradlew :app:assembleDebug
+```
 
 ## Supported platforms
 
@@ -104,21 +120,15 @@ The 64-bit build measures the ReGameDLL and engine struct offsets straight out
 of the DWARF it just produced, so the shipped offset tables can never drift
 from the binaries they describe.
 
-## Building from source
+## CI
 
-CI lives in `.github/workflows/` and splits by what a commit touches:
+`.github/workflows/` splits by what a commit touches:
 
-| Marker in the commit message | Builds |
+| Workflow | Builds |
 |---|---|
-| `[android]` | the patcher APK |
-| `[libs]` | the native bundle and manifests |
-| `[android] [libs]` | both |
-
-Cross-compilation is driven by `android/ci/build-amxx.sh`:
-
-```sh
-bash android/ci/build-amxx.sh "$PWD" "$NDK_ROOT" out
-```
+| `build-and-release.yml` | native bundle (AMXX, metamod, ReGameDLL), rolling `continuous` release |
+| `build-and-release-release.yml` | stable app APK on `v*` tags |
+| `build-client-apk.yml` | the CS16 client shell APK |
 
 ## License
 
