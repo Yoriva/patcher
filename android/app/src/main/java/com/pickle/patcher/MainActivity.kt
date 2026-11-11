@@ -46,6 +46,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -59,14 +60,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.filled.Storefront
-import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Extension
+import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.RocketLaunch
 import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material.icons.rounded.Settings
@@ -135,7 +135,7 @@ import com.pickle.patcher.data.StoreApi
 import com.pickle.patcher.patcher.AppUpdate
 import com.pickle.patcher.patcher.PatcherViewModel
 import com.pickle.patcher.ui.screens.AdminScreen
-import com.pickle.patcher.ui.screens.CompilerScreen
+import com.pickle.patcher.ui.screens.ToolsScreen
 import com.pickle.patcher.ui.screens.LibraryScreen
 import com.pickle.patcher.ui.screens.PatchScreen
 import com.pickle.patcher.ui.screens.PluginsScreen
@@ -285,7 +285,7 @@ fun PatcherApp(vm: PatcherViewModel) {
     val bottomNavItems = remember {
         listOf(
             BottomNavItem(0, "Patch", Icons.Filled.RocketLaunch, Icons.Outlined.RocketLaunch),
-            BottomNavItem(1, "Compiler", Icons.Filled.Code, Icons.Outlined.Code),
+            BottomNavItem(1, "Tools", Icons.Filled.Build, Icons.Outlined.Build),
             BottomNavItem(2, "Store", Icons.Filled.Storefront, Icons.Outlined.Storefront),
         )
     }
@@ -471,10 +471,11 @@ fun PatcherApp(vm: PatcherViewModel) {
                                     vm = vm,
                                     onOpenLibraries = { nav.navigate(Dest.Libraries.route) },
                                 )
-                                1 -> CompilerScreen(
+                                1 -> ToolsScreen(
                                     vm = vm,
                                     gameInstalled = clientInstalled,
                                     onGoToPatch = { tabScope.launch { pagerState.animateScrollToPage(0) } },
+                                    onOpenPluginConfig = { showPluginConfig = true },
                                 )
                                 else -> {
                                     val api = StoreApi(context = context)
@@ -577,9 +578,6 @@ fun PatcherApp(vm: PatcherViewModel) {
                                 }
                             }
                         },
-                        onRedownloadBundle = { vm.fetchAndDownloadBundle() },
-                        onReinstallAddons = { vm.fetchAndInstallAddons() },
-                        onOpenPluginConfig = { showPluginConfig = true },
                     )
                     AnimatedVisibility(
                         visible = showTheme,

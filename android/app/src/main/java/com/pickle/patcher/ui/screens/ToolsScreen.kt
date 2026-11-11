@@ -27,6 +27,9 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -58,15 +61,16 @@ import com.pickle.patcher.patcher.CompileState
 import com.pickle.patcher.patcher.PatcherViewModel
 import com.pickle.patcher.patcher.SmaSource
 @Composable
-fun CompilerScreen(
+fun ToolsScreen(
     vm: PatcherViewModel,
     gameInstalled: Boolean = true,
     onGoToPatch: () -> Unit = {},
+    onOpenPluginConfig: () -> Unit = {},
 ) {
     if (!gameInstalled) {
         LockedScreen(
             title = "Patch it first",
-            description = "Compiler becomes available after the game is patched and installed. Download the source APK on the Patch screen, build the patch, install the patched client — then come back here to build your plugins.",
+            description = "Tools become available after the game is patched and installed. Download the source APK on the Patch screen, build the patch, install the patched client — then come back here to run the tools.",
             ctaLabel = "Open Patch screen",
             onCta = onGoToPatch,
         )
@@ -104,6 +108,53 @@ fun CompilerScreen(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
+        SectionHeader(
+            title = "Tools",
+            caption = "Mod bundle, addons, plugin config",
+        )
+        GroupedItem(
+            title = "Re-download Mod Bundle",
+            subtitle = "Fetch latest libraries and configuration assets",
+            index = 0,
+            total = 3,
+            trailing = {
+                SmallButton(
+                    text = "Fetch",
+                    icon = Icons.Filled.Download,
+                    onClick = { vm.fetchAndDownloadBundle() },
+                )
+            },
+        )
+        GroupedItem(
+            title = "Reinstall Addons",
+            subtitle = "Re-fetch AMXX addon scripts and configs",
+            index = 1,
+            total = 3,
+            trailing = {
+                SmallButton(
+                    text = "Reinstall",
+                    icon = Icons.Filled.Extension,
+                    onClick = { vm.fetchAndInstallAddons() },
+                )
+            },
+        )
+        GroupedItem(
+            title = "Plugin Config",
+            subtitle = "Edit plugins.ini order and toggles",
+            index = 2,
+            total = 3,
+            trailing = {
+                SmallButton(
+                    text = "Edit",
+                    icon = Icons.Filled.Edit,
+                    onClick = onOpenPluginConfig,
+                )
+            },
+        )
+        SectionHeader(
+            title = "Compiler",
+            caption = "Build .sma plugins into .amxx",
+        )
         GroupedItem(
             title = if (scriptRoot != null) "Plugins folder found" else "Plugins folder",
             subtitle = scriptRoot ?: "Searching for the game folder…",
