@@ -14,9 +14,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.pickle.patcher.data.StoreApi
 import com.pickle.patcher.data.StoreSession
-import com.pickle.patcher.ui.theme.Accent
-import com.pickle.patcher.ui.theme.Gray40
-import com.pickle.patcher.ui.theme.Gray30
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Close
@@ -26,7 +23,6 @@ import java.security.MessageDigest
 @Composable
 fun StoreUploadScreen(
     api: StoreApi,
-    onBack: () -> Unit,
     onUploadSuccess: () -> Unit,
 ) {
     val context = LocalContext.current

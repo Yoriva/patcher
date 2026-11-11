@@ -1,18 +1,14 @@
 package com.pickle.patcher.ui.screens
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,28 +16,19 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -54,16 +41,12 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlin.math.PI
 import kotlin.math.sin
 fun getGroupedItemShape(
@@ -301,80 +284,7 @@ fun AppCard(
         }
     }
 }
-@Composable
-fun GroupedSettingCard(
-    title: String,
-    subtitle: String? = null,
-    icon: ImageVector? = null,
-    index: Int = 0,
-    total: Int = 1,
-    onClick: (() -> Unit)? = null,
-    modifier: Modifier = Modifier,
-    trailing: @Composable (() -> Unit)? = null,
-) {
-    val shape = getGroupedItemShape(index, total)
-    Card(
-        onClick = onClick ?: {},
-        enabled = onClick != null,
-        modifier = modifier.fillMaxWidth(),
-        shape = shape,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (icon != null) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-                Spacer(modifier = Modifier.width(16.dp))
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                if (!subtitle.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            if (trailing != null) {
-                Spacer(modifier = Modifier.width(12.dp))
-                trailing()
-            } else if (onClick != null) {
-                Spacer(modifier = Modifier.width(8.dp))
-                Icon(
-                    imageVector = Icons.Rounded.ChevronRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-        }
-    }
-}
+
 @Composable
 fun PrimaryButton(
     text: String,
@@ -438,109 +348,10 @@ fun SecondaryButton(
         )
     }
 }
-@Composable
-fun ExpressiveOutlinedButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    icon: @Composable (() -> Unit)? = null,
-) {
-    OutlinedButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier.height(44.dp),
-        shape = RoundedCornerShape(percent = 50),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-    ) {
-        if (icon != null) {
-            icon()
-            Spacer(Modifier.width(6.dp))
-        }
-        Text(
-            text,
-            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-        )
-    }
-}
-@Composable
-fun GhostButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-) {
-    TextButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier,
-        colors = ButtonDefaults.textButtonColors(
-            contentColor = MaterialTheme.colorScheme.primary,
-            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        ),
-    ) {
-        Text(
-            text,
-            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-        )
-    }
-}
-@Composable
-fun InfoRow(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier,
-    valueColor: Color = MaterialTheme.colorScheme.primary,
-) {
-    Row(
-        modifier = modifier.fillMaxWidth().padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            value,
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-            color = valueColor,
-        )
-    }
-}
-@Composable
-fun StatPill(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier,
-    accent: Color = MaterialTheme.colorScheme.primary,
-) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp).widthIn(min = 72.dp),
-        ) {
-            Text(
-                value,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = accent,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(1.dp))
-            Text(
-                label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
-        }
-    }
-}
+
+
+
+
 @Composable
 fun WavyProgressBar(
     progress: Float,
@@ -590,130 +401,5 @@ fun WavyProgressBar(
         }
     }
 }
-@Composable
-fun AppProgressBar(fraction: Float, modifier: Modifier = Modifier) {
-    val animated by animateFloatAsState(
-        targetValue = fraction.coerceIn(0f, 1f),
-        animationSpec = tween(400, easing = FastOutSlowInEasing),
-        label = "progress",
-    )
-    Column(modifier) {
-        LinearProgressIndicator(
-            progress = { animated },
-            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-            color = MaterialTheme.colorScheme.primary,
-            trackColor = MaterialTheme.colorScheme.secondaryContainer,
-            strokeCap = StrokeCap.Round,
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "${(animated * 100).toInt()}%",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-@Composable
-fun RingProgress(
-    fraction: Float,
-    modifier: Modifier = Modifier,
-    diameter: androidx.compose.ui.unit.Dp = 92.dp,
-    strokeWidth: androidx.compose.ui.unit.Dp = 8.dp,
-    label: String = "",
-) {
-    val animated by animateFloatAsState(
-        targetValue = fraction.coerceIn(0f, 1f),
-        animationSpec = tween(220),
-        label = "ring",
-    )
-    val trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
-    val progressColor = MaterialTheme.colorScheme.primary
-    Box(modifier = modifier.size(diameter), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.size(diameter)) {
-            val stroke = strokeWidth.toPx()
-            val inset = stroke / 2f
-            val arcSize = Size(size.width - stroke, size.height - stroke)
-            drawArc(
-                color = trackColor,
-                startAngle = -90f,
-                sweepAngle = 360f,
-                useCenter = false,
-                topLeft = Offset(inset, inset),
-                size = arcSize,
-                style = Stroke(width = stroke, cap = StrokeCap.Round),
-            )
-            if (animated > 0f) {
-                drawArc(
-                    color = progressColor,
-                    startAngle = -90f,
-                    sweepAngle = 360f * animated,
-                    useCenter = false,
-                    topLeft = Offset(inset, inset),
-                    size = arcSize,
-                    style = Stroke(width = stroke, cap = StrokeCap.Round),
-                )
-            }
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = "${(animated * 100).toInt()}%",
-                color = MaterialTheme.colorScheme.onSurface,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            if (label.isNotEmpty()) {
-                Text(
-                    text = label,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 11.sp,
-                )
-            }
-        }
-    }
-}
-@Composable
-fun MiniConsole(
-    lines: List<String>,
-    modifier: Modifier = Modifier,
-    visibleLines: Int = 10,
-) {
-    val scroll = rememberScrollState()
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLowest,
-    ) {
-        Column(
-            modifier = Modifier
-                .height((visibleLines * 18 + 20).dp)
-                .verticalScroll(scroll)
-                .padding(vertical = 12.dp, horizontal = 14.dp),
-        ) {
-            if (lines.isEmpty()) {
-                Text(
-                    text = "waiting…",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                    fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
-                )
-            }
-            lines.forEach { line ->
-                Text(
-                    text = line,
-                    color = if (line.startsWith("+")) {
-                        MaterialTheme.colorScheme.primary
-                    } else if (line.startsWith("!") || line.contains("error", ignoreCase = true)) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    fontSize = 12.sp,
-                    lineHeight = 17.sp,
-                    fontFamily = FontFamily.Monospace,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
-}
+
+

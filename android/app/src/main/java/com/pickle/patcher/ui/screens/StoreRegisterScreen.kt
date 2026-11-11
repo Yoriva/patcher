@@ -4,7 +4,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.Icons
@@ -12,14 +11,10 @@ import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.pickle.patcher.data.StoreApi
-import com.pickle.patcher.ui.theme.Accent
-import com.pickle.patcher.ui.theme.Gray40
-import com.pickle.patcher.ui.theme.Gray30
 import kotlinx.coroutines.launch
 @Composable
 fun StoreRegisterScreen(
     api: StoreApi,
-    onBack: () -> Unit,
     onRegisterSuccess: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()

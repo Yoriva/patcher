@@ -28,10 +28,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.pickle.patcher.data.StoreApi
-import com.pickle.patcher.ui.theme.Accent
-import com.pickle.patcher.ui.theme.Gray40
-import com.pickle.patcher.ui.theme.Gray30
-import com.pickle.patcher.ui.theme.WarnYellow
 import com.pickle.patcher.ui.MarkdownText
 import kotlinx.coroutines.launch
 import org.json.JSONArray
@@ -41,7 +37,6 @@ import android.widget.Toast
 @Composable
 fun StoreScreen(
     api: StoreApi,
-    onBack: () -> Unit,
     onUserClick: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -50,7 +45,6 @@ fun StoreScreen(
     var loading by remember { mutableStateOf(true) }
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var page by remember { mutableStateOf(1) }
     var detailItem by remember { mutableStateOf<JSONObject?>(null) }
     var showComments by remember { mutableStateOf(false) }
     var comments by remember { mutableStateOf<JSONArray?>(null) }
@@ -59,7 +53,7 @@ fun StoreScreen(
         scope.launch {
             if (isRefresh) refreshing = true else loading = true
             error = null
-            api.listItems(page).fold(
+            api.listItems(1).fold(
                 onSuccess = { json ->
                     items = json.optJSONArray("data")
                     loading = false
@@ -73,7 +67,7 @@ fun StoreScreen(
             )
         }
     }
-    LaunchedEffect(page) { load() }
+    LaunchedEffect(Unit) { load() }
     Column(Modifier.fillMaxSize()) {
         ScreenHeader(
             icon = Icons.Filled.ShoppingCart,
@@ -381,25 +375,30 @@ fun StoreScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    val token = com.pickle.patcher.data.StoreSession.token(context) ?: api.token
-                    if (token == null) {
-                        android.widget.Toast.makeText(context, "Log in to comment", android.widget.Toast.LENGTH_SHORT).show()
-                    } else if (!com.pickle.patcher.data.StoreSession.emailVerified(context)) {
-                        android.widget.Toast.makeText(context, "Verify your email to comment", android.widget.Toast.LENGTH_SHORT).show()
-                    } else if (commentText.isNotBlank()) {
-                        scope.launch {
-                            api.postComment(token, obj.optString("id"), commentText.trim()).onSuccess {
-                                commentText = ""
-                                api.getComments(obj.optString("id")).onSuccess { res ->
-                                    comments = res
+                val commentToken = com.pickle.patcher.data.StoreSession.token(context) ?: api.token
+                val canComment = commentToken != null && com.pickle.patcher.data.StoreSession.emailVerified(context) && commentText.isNotBlank()
+                TextButton(
+                    onClick = {
+                        val token = com.pickle.patcher.data.StoreSession.token(context) ?: api.token
+                        if (token == null) {
+                            android.widget.Toast.makeText(context, "Log in to comment", android.widget.Toast.LENGTH_SHORT).show()
+                        } else if (!com.pickle.patcher.data.StoreSession.emailVerified(context)) {
+                            android.widget.Toast.makeText(context, "Verify your email to comment", android.widget.Toast.LENGTH_SHORT).show()
+                        } else if (commentText.isNotBlank()) {
+                            scope.launch {
+                                api.postComment(token, obj.optString("id"), commentText.trim()).onSuccess {
+                                    commentText = ""
+                                    api.getComments(obj.optString("id")).onSuccess { res ->
+                                        comments = res
+                                    }
+                                    obj.put("commentsCount", obj.optInt("commentsCount", 0) + 1)
+                                    detailItem = detailItem?.let { JSONObject(it.toString()) }
                                 }
-                                obj.put("commentsCount", obj.optInt("commentsCount", 0) + 1)
-                                detailItem = detailItem?.let { JSONObject(it.toString()) }
                             }
                         }
-                    }
-                }) { Text("Post", color = MaterialTheme.colorScheme.primary) }
+                    },
+                    enabled = canComment,
+                ) { Text("Post", color = if (canComment) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }
             },
             dismissButton = {
                 TextButton(onClick = { showComments = false }) {
@@ -414,7 +413,6 @@ private fun StoreItemCard(obj: JSONObject, onUserClick: (String) -> Unit, onOpen
     Card(
         shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp, pressedElevation = 4.dp),
         modifier = Modifier.fillMaxWidth().clickable { onOpenDetail() },
     ) {

@@ -363,7 +363,7 @@ private fun BuildSection(
                 onClick = { showLog = !showLog },
                 modifier = Modifier.align(Alignment.CenterHorizontally),
             ) {
-                Text(if (showLog) "Hide Log" else "View Log")
+                Text(if (showLog) "Hide Build Log" else "View Build Log")
             }
             AnimatedVisibility(visible = showLog) {
                 Box(

@@ -1,6 +1,5 @@
 package com.pickle.patcher.ui.screens
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.items
@@ -12,11 +11,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pickle.patcher.data.StoreApi
 import com.pickle.patcher.data.StoreSession
-import com.pickle.patcher.ui.theme.Accent
-import com.pickle.patcher.ui.theme.AlertRed
-import com.pickle.patcher.ui.theme.Gray40
-import com.pickle.patcher.ui.theme.Gray30
-import com.pickle.patcher.ui.theme.WarnYellow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Close
@@ -26,7 +20,6 @@ import org.json.JSONObject
 @Composable
 fun StoreManageScreen(
     api: StoreApi,
-    onBack: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
@@ -44,6 +37,7 @@ fun StoreManageScreen(
                 onSuccess = { json ->
                     val profile = json.optJSONObject("profile")
                     items = profile?.optJSONArray("items")
+                    error = null
                     loading = false
                 },
                 onFailure = { t ->
@@ -72,7 +66,11 @@ fun StoreManageScreen(
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(error!!, color = MaterialTheme.colorScheme.error)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = { error = null; reload() }) { Text("Retry") }
+                }
             }
             else -> {
                 val list = items
@@ -174,6 +172,7 @@ fun StoreManageScreen(
             var description by remember { mutableStateOf(obj.optString("description")) }
             var version by remember { mutableStateOf(obj.optString("version")) }
             var logoUri by remember { mutableStateOf<android.net.Uri?>(null) }
+            var logoCleared by remember { mutableStateOf(false) }
             val existingLogo = obj.optString("logoUrl", "").takeIf { it.isNotBlank() }
             var removedLibs by remember { mutableStateOf(setOf<String>()) }
             var newLibs by remember { mutableStateOf<List<Triple<android.net.Uri, String, String>>>(emptyList()) }
@@ -188,8 +187,11 @@ fun StoreManageScreen(
             var linkInput by remember { mutableStateOf("") }
             var saving by remember { mutableStateOf(false) }
             var progressLabel by remember { mutableStateOf("") }
-            val logoPicker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
-                if (uri != null) logoUri = uri
+            val logoPicker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()            ) { uri ->
+                if (uri != null) {
+                    logoUri = uri
+                    logoCleared = false
+                }
             }
             val libPicker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()) { uris ->
                 if (uris.isNotEmpty()) {
@@ -224,19 +226,29 @@ fun StoreManageScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Button(onClick = { logoPicker.launch(arrayOf("image/*")) }) { Text("Pick Logo") }
                             Spacer(Modifier.width(8.dp))
+                            val effectiveLogo = if (logoCleared) null else existingLogo
                             Text(
                                 when {
                                     logoUri != null -> logoUri!!.lastPathSegment ?: "new logo"
-                                    existingLogo != null -> "current logo"
+                                    effectiveLogo != null -> "current logo"
+                                    logoCleared -> "logo will be removed"
                                     else -> "No logo"
                                 },
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 style = MaterialTheme.typography.bodySmall,
                             )
-                            if (logoUri != null || existingLogo != null) {
+                            if (logoUri != null || existingLogo != null || logoCleared) {
                                 Spacer(Modifier.width(8.dp))
-                                TextButton(onClick = { logoUri = null }) {
-                                    Text("Clear", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                TextButton(onClick = {
+                                    if (logoUri != null) {
+                                        logoUri = null
+                                    } else if (logoCleared) {
+                                        logoCleared = false
+                                    } else {
+                                        logoCleared = true
+                                    }
+                                }) {
+                                    Text(if (logoCleared) "Undo" else "Clear", color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
@@ -330,8 +342,9 @@ fun StoreManageScreen(
                             saving = true
                             scope.launch {
                                 val token = api.token ?: ""
-                                var logoUrl: String? = existingLogo
-                                var hasLogo = existingLogo != null
+                                val effectiveLogo = if (logoCleared) null else existingLogo
+                                var logoUrl: String? = if (logoCleared) "" else effectiveLogo
+                                var hasLogo = effectiveLogo != null
                                 var uploadedLogoUrl: String? = null
                                 if (logoUri != null) {
                                     val f = uriToFile(context, logoUri!!, "logo")

@@ -23,10 +23,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -134,6 +136,7 @@ fun PluginsScreen(vm: PatcherViewModel) {
     val dirty by vm.iniDirty.collectAsState()
     val savedAt by vm.iniSavedAt.collectAsState()
     var selected by remember { mutableStateOf<File?>(null) }
+    var showRevertConfirm by remember { mutableStateOf(false) }
     val pageScroll = rememberScrollState()
     val hScroll = rememberScrollState()
     val vScroll = rememberScrollState()
@@ -274,7 +277,7 @@ fun PluginsScreen(vm: PatcherViewModel) {
                     modifier = Modifier.weight(1f),
                 )
                 if (dirty) {
-                    SecondaryButton("Revert", onClick = { vm.revertPluginIni(file) })
+                    SecondaryButton("Revert", onClick = { showRevertConfirm = true })
                     Spacer(Modifier.width(8.dp))
                 }
                 PrimaryButton(
@@ -289,6 +292,24 @@ fun PluginsScreen(vm: PatcherViewModel) {
                 "Restart the game for changes to take effect.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (showRevertConfirm) {
+            AlertDialog(
+                onDismissRequest = { showRevertConfirm = false },
+                title = { Text("Discard changes") },
+                text = { Text("Unsaved changes to ${file?.name ?: "this file"} will be lost.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        file?.let(vm::revertPluginIni)
+                        showRevertConfirm = false
+                    }) {
+                        Text("Discard", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showRevertConfirm = false }) { Text("Cancel") }
+                },
             )
         }
     }

@@ -473,7 +473,6 @@ fun PatcherApp(vm: PatcherViewModel) {
                                     val api = StoreApi(context = context)
                                     StoreScreen(
                                         api = api,
-                                        onBack = { },
                                         onUserClick = { username -> nav.navigate("store/profile/$username") },
                                     )
                                 }
@@ -485,7 +484,6 @@ fun PatcherApp(vm: PatcherViewModel) {
                         val api = StoreApi(context = context)
                         com.pickle.patcher.ui.screens.StoreLoginScreen(
                             api = api,
-                            onBack = { nav.popBackStack() },
                             onLoginSuccess = { nav.popBackStack() },
                             onRegister = { nav.navigate(Dest.StoreRegister.route) },
                         )
@@ -494,7 +492,6 @@ fun PatcherApp(vm: PatcherViewModel) {
                         val api = StoreApi(context = context)
                         com.pickle.patcher.ui.screens.StoreRegisterScreen(
                             api = api,
-                            onBack = { nav.popBackStack() },
                             onRegisterSuccess = { email -> nav.navigate("store/verify-email?email=$email") },
                         )
                     }
@@ -515,13 +512,12 @@ fun PatcherApp(vm: PatcherViewModel) {
                         val api = StoreApi(context = context)
                         com.pickle.patcher.ui.screens.StoreUploadScreen(
                             api = api,
-                            onBack = { nav.popBackStack() },
                             onUploadSuccess = { nav.popBackStack() },
                         )
                     }
                     composable(Dest.StoreManage.route) {
                         val api = StoreApi(context = context)
-                        StoreManageScreen(api, onBack = { nav.popBackStack() })
+                        StoreManageScreen(api)
                     }
                     composable(Dest.StoreAdmin.route) {
                         val api = StoreApi(context = context)
@@ -533,7 +529,7 @@ fun PatcherApp(vm: PatcherViewModel) {
                     ) { backStack ->
                         val username = backStack.arguments?.getString("username") ?: ""
                         val api = StoreApi(context = context)
-                        StoreProfileScreen(api, username = username, onBack = { nav.popBackStack() }, onEditProfile = { })
+                        StoreProfileScreen(api, username = username, onBack = { nav.popBackStack() })
                     }
                 }
             }

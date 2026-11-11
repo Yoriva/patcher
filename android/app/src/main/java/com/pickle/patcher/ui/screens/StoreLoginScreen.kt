@@ -4,7 +4,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.Icons
@@ -12,15 +11,10 @@ import androidx.compose.material.icons.filled.Login
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.pickle.patcher.data.StoreApi
-import com.pickle.patcher.ui.theme.Accent
-import com.pickle.patcher.ui.theme.Gray40
-import com.pickle.patcher.ui.theme.Gray30
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 @Composable
 fun StoreLoginScreen(
     api: StoreApi,
-    onBack: () -> Unit,
     onLoginSuccess: () -> Unit,
     onRegister: () -> Unit,
     onNeedsVerification: (String) -> Unit = {},
@@ -100,7 +94,7 @@ fun StoreLoginScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 if (loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                else Text("Login")
+                else Text("Sign in")
             }
             Spacer(Modifier.height(8.dp))
             TextButton(onClick = onRegister, modifier = Modifier.fillMaxWidth()) {

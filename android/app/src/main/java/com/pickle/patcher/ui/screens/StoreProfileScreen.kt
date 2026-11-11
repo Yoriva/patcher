@@ -8,7 +8,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,17 +22,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.pickle.patcher.ui.MarkdownText
 import com.pickle.patcher.data.StoreApi
 import com.pickle.patcher.data.StoreSession
-import com.pickle.patcher.ui.theme.Accent
-import com.pickle.patcher.ui.theme.Gray40
-import com.pickle.patcher.ui.theme.Gray30
-import com.pickle.patcher.ui.theme.WarnYellow
-import com.pickle.patcher.ui.MarkdownText
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Logout
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -43,7 +37,6 @@ fun StoreProfileScreen(
     api: StoreApi,
     username: String,
     onBack: () -> Unit,
-    onEditProfile: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -58,6 +51,7 @@ fun StoreProfileScreen(
             api.getUserProfile(username).fold(
                 onSuccess = { json ->
                     profile = json.optJSONObject("profile")
+                    error = null
                     loading = false
                 },
                 onFailure = { t ->
@@ -117,7 +111,11 @@ fun StoreProfileScreen(
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(error!!, color = MaterialTheme.colorScheme.error)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = { error = null; load() }) { Text("Retry") }
+                }
             }
             profile != null -> {
                 val p = profile!!
@@ -255,11 +253,7 @@ fun StoreProfileScreen(
                     }
                     val desc = item.optString("description", "")
                     if (desc.isNotBlank()) {
-                        Text(
-                            desc,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        MarkdownText(desc, modifier = Modifier.fillMaxWidth())
                         Spacer(Modifier.height(8.dp))
                     }
                     Text(

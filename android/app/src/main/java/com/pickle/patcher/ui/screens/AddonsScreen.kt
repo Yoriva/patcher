@@ -26,29 +26,24 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pickle.patcher.patcher.AddonsState
 import com.pickle.patcher.patcher.PatcherViewModel
-import com.pickle.patcher.ui.theme.Accent
-import com.pickle.patcher.ui.theme.AlertRed
-import com.pickle.patcher.ui.theme.Gray40
-import com.pickle.patcher.ui.theme.Gray70
-import com.pickle.patcher.ui.theme.Gray80
-import com.pickle.patcher.ui.theme.Gray90
-import com.pickle.patcher.ui.theme.SuccessGreen
-import com.pickle.patcher.ui.theme.Gray30
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.HorizontalDivider
@@ -192,7 +187,7 @@ private fun AddonsPackagesContent(vm: PatcherViewModel) {
                         )
                         StatCard(
                             Stat(
-                                "MISSING",
+                                "Missing",
                                 "${missing + outdated}",
                                 if (missing + outdated > 0) Tone.Error else Tone.Neutral,
                             ),
@@ -384,14 +379,32 @@ private fun AddonsPackagesContent(vm: PatcherViewModel) {
 @Composable
 private fun PermissionCard() {
     val context = LocalContext.current
-    val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        Environment.isExternalStorageManager()
-    } else {
-        true
+    var hasPermission by remember {
+        mutableStateOf(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Environment.isExternalStorageManager()
+            } else {
+                true
+            }
+        )
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                hasPermission = Environment.isExternalStorageManager()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) { }
+    ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            hasPermission = Environment.isExternalStorageManager()
+        }
+    }
     AppCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(

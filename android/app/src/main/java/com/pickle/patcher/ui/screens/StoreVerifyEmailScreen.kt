@@ -17,9 +17,6 @@ import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.dp
 import com.pickle.patcher.data.StoreApi
 import com.pickle.patcher.data.StoreSession
-import com.pickle.patcher.ui.theme.Accent
-import com.pickle.patcher.ui.theme.Gray40
-import com.pickle.patcher.ui.theme.Gray30
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -161,17 +158,6 @@ fun StoreVerifyEmailScreen(
                 ) {
                     if (sending) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     else Text("Send verification code")
-                }
-            } else if (!codeSent && email.isNotBlank()) {
-                LaunchedEffect(Unit) {
-                    if (!sending) {
-                        sending = true
-                        api.resendVerification(email).fold(
-                            onSuccess = { codeSent = true; cooldown = 120 },
-                            onFailure = { t -> error = t.message ?: "Failed to send code" }
-                        )
-                        sending = false
-                    }
                 }
             } else {
                 Button(

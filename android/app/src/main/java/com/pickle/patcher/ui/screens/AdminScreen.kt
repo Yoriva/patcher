@@ -20,9 +20,6 @@ import coil.compose.AsyncImage
 import com.pickle.patcher.data.StoreApi
 import com.pickle.patcher.data.StoreSession
 import com.pickle.patcher.ui.theme.Accent
-import com.pickle.patcher.ui.theme.Gray40
-import com.pickle.patcher.ui.theme.WarnYellow
-import com.pickle.patcher.ui.theme.Gray30
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -152,6 +149,7 @@ private fun AdminPostCard(obj: JSONObject, api: StoreApi, token: String, onActio
     val status = obj.optString("status", "pending")
     var expanded by remember { mutableStateOf(false) }
     var previewFile by remember { mutableStateOf<JSONObject?>(null) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     val description = obj.optString("description", "").trim()
     val libs = obj.optJSONArray("libs")
     val libCount = libs?.length() ?: 0
@@ -330,7 +328,12 @@ private fun AdminPostCard(obj: JSONObject, api: StoreApi, token: String, onActio
                     PrimaryButton(
                         text = "Approve",
                         onClick = {
-                            scope.launch { api.adminPatchItem(token, id, "approved"); onAction() }
+                            scope.launch {
+                                api.adminPatchItem(token, id, "approved").onFailure { t ->
+                                    android.widget.Toast.makeText(context, t.message ?: "Could not approve", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                                onAction()
+                            }
                         },
                         modifier = Modifier.weight(1f),
                         icon = { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) },
@@ -340,16 +343,19 @@ private fun AdminPostCard(obj: JSONObject, api: StoreApi, token: String, onActio
                     SecondaryButton(
                         text = "Reject",
                         onClick = {
-                            scope.launch { api.adminPatchItem(token, id, "rejected"); onAction() }
+                            scope.launch {
+                                api.adminPatchItem(token, id, "rejected").onFailure { t ->
+                                    android.widget.Toast.makeText(context, t.message ?: "Could not reject", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                                onAction()
+                            }
                         },
                         modifier = Modifier.weight(1f),
                         icon = { Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(18.dp)) },
                     )
                 }
                 TextButton(
-                    onClick = {
-                        scope.launch { api.adminDeleteItem(token, id); onAction() }
-                    },
+                    onClick = { showDeleteConfirm = true },
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = MaterialTheme.colorScheme.error,
                     ),
@@ -410,6 +416,30 @@ private fun AdminPostCard(obj: JSONObject, api: StoreApi, token: String, onActio
                 )
             }
         }
+    }
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            icon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+            title = { Text("Delete post") },
+            text = { Text("This will permanently delete \"${obj.optString("title", "this post")}\". This cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        api.adminDeleteItem(token, id).onFailure { t ->
+                            android.widget.Toast.makeText(context, t.message ?: "Could not delete", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                        onAction()
+                    }
+                    showDeleteConfirm = false
+                }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+            },
+        )
     }
 }
 private fun listZipEntries(url: String): List<String> {
@@ -490,6 +520,7 @@ private fun AdminUsers(api: StoreApi, token: String) {
 }
 @Composable
 private fun AdminUserCard(obj: JSONObject, api: StoreApi, token: String, onAction: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     val id = obj.optString("id")
     val role = obj.optString("role", "user")
@@ -499,6 +530,7 @@ private fun AdminUserCard(obj: JSONObject, api: StoreApi, token: String, onActio
     val itemCount = obj.optJSONObject("_count")?.optInt("items") ?: 0
     val isOwner = role == "owner"
     val permsArr = obj.optJSONArray("permissions")
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     val initialPerms = remember { mutableSetOf<String>().apply {
         if (isOwner) addAll(listOf("post_uploader","post_approver","post_manager","user_manager"))
         else if (permsArr != null) for (i in 0 until permsArr.length()) add(permsArr.optString(i))
@@ -562,7 +594,10 @@ private fun AdminUserCard(obj: JSONObject, api: StoreApi, token: String, onActio
                     TextButton(onClick = {
                         scope.launch {
                             val newRole = if (role == "admin") "user" else "admin"
-                            api.adminPatchUser(token, id, role = newRole)
+                            val result = api.adminPatchUser(token, id, role = newRole)
+                            if (result.isFailure) {
+                                android.widget.Toast.makeText(context, result.exceptionOrNull()?.message ?: "Could not change role", android.widget.Toast.LENGTH_SHORT).show()
+                            }
                             onAction()
                         }
                     }) {
@@ -571,9 +606,7 @@ private fun AdminUserCard(obj: JSONObject, api: StoreApi, token: String, onActio
                             color = MaterialTheme.colorScheme.primary,
                         )
                     }
-                    TextButton(onClick = {
-                        scope.launch { api.adminDeleteUser(token, id); onAction() }
-                    }) {
+                    TextButton(onClick = { showDeleteConfirm = true }) {
                         Text("Delete", color = MaterialTheme.colorScheme.error)
                     }
                 }
@@ -603,14 +636,42 @@ private fun AdminUserCard(obj: JSONObject, api: StoreApi, token: String, onActio
             confirmButton = {
                 TextButton(onClick = {
                     scope.launch {
-                        api.adminPatchUser(token, id, permissions = perms.toList())
-                        showPerms = false
+                        val result = api.adminPatchUser(token, id, permissions = perms.toList())
+                        if (result.isFailure) {
+                            android.widget.Toast.makeText(context, result.exceptionOrNull()?.message ?: "Could not save permissions", android.widget.Toast.LENGTH_SHORT).show()
+                        } else {
+                            showPerms = false
+                        }
                         onAction()
                     }
                 }) { Text("Save", color = Accent) }
             },
             dismissButton = {
                 TextButton(onClick = { showPerms = false }) { Text("Cancel") }
+            },
+        )
+    }
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            icon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+            title = { Text("Delete user") },
+            text = { Text("This will permanently delete $username ($email). This cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        api.adminDeleteUser(token, id).onFailure { t ->
+                            android.widget.Toast.makeText(context, t.message ?: "Could not delete", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                        onAction()
+                    }
+                    showDeleteConfirm = false
+                }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
             },
         )
     }

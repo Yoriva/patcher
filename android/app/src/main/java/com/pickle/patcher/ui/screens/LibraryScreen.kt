@@ -70,6 +70,7 @@ fun LibraryScreen(vm: PatcherViewModel) {
         contract = ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris -> if (uris.isNotEmpty()) vm.addCustomLibs(uris) }
     var staleNames by remember { mutableStateOf(emptySet<String>()) }
+    var pendingRemove by remember { mutableStateOf<CustomLib?>(null) }
     LaunchedEffect(customLibs, abi) {
         staleNames = if (customLibs.isEmpty()) {
             emptySet()
@@ -129,12 +130,33 @@ fun LibraryScreen(vm: PatcherViewModel) {
                         total = customLibs.size,
                         abi = abi,
                         stale = staleNames.contains(lib.name),
-                        onRemove = { vm.removeCustomLib(lib.name) },
+                        onRemove = { pendingRemove = lib },
                     )
                 }
             }
         }
         Spacer(Modifier.height(16.dp))
+    }
+    pendingRemove?.let { lib ->
+        AlertDialog(
+            onDismissRequest = { pendingRemove = null },
+            icon = { Icon(Icons.Rounded.Close, contentDescription = null) },
+            title = { Text("Remove library") },
+            text = { Text("${lib.name} will be deleted from storage. This cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.removeCustomLib(lib.name)
+                    pendingRemove = null
+                }) {
+                    Text("Remove")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRemove = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
     problem?.let { message ->
         AlertDialog(
