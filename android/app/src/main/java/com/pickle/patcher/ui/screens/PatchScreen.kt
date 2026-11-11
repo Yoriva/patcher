@@ -424,7 +424,7 @@ internal fun GroupedItem(
     index: Int,
     total: Int,
     error: Boolean = false,
-    trailing: @Composable () -> Unit,
+    trailing: @Composable () -> Unit = {},
     footer: @Composable ColumnScope.() -> Unit = {},
 ) {
     Card(

@@ -2,7 +2,6 @@ package com.pickle.patcher.patcher
 import android.app.Application
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import androidx.lifecycle.AndroidViewModel
@@ -285,6 +284,15 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
             failPatch = { msg -> patchManager.failPatch(msg) },
         )
     }
+    private val _gameClientInstalled = MutableStateFlow(checkGameClientInstalled())
+    val gameClientInstalled: StateFlow<Boolean> = _gameClientInstalled.asStateFlow()
+    private fun checkGameClientInstalled(): Boolean = runCatching {
+        getApplication<Application>().packageManager.getPackageInfo(GAME_CLIENT_PACKAGE, 0)
+        true
+    }.getOrDefault(false)
+    fun refreshGameClientInstalled() {
+        _gameClientInstalled.value = checkGameClientInstalled()
+    }
     private val bundleManager: BundleManager by lazy {
         BundleManager(
             app = app,
@@ -361,15 +369,15 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     fun maxCompileWorkers(): Int = compilerManager.maxCompileWorkers()
     fun effectiveCompileWorkers(): Int = compilerManager.effectiveCompileWorkers()
     fun setCompileWorkers(count: Int) = compilerManager.setCompileWorkers(count)
-    fun refreshScripts() = compilerManager.refreshScripts()
+    fun refreshScripts() {
+        viewModelScope.launch(Dispatchers.IO) {
+            compilerManager.autoFindAmxxFolder(false)
+            compilerManager.autoFindAmxxFolder(true)
+            compilerManager.refreshScripts()
+        }
+    }
     fun startScriptWatcher() = compilerManager.startScriptWatcher()
     fun stopScriptWatcher() = compilerManager.stopScriptWatcher()
-    fun setScriptRoot(uri: Uri?) = compilerManager.setScriptRoot(uri)
-    fun setOutputRoot(uri: Uri?) = compilerManager.setOutputRoot(uri)
-    fun clearOutputRoot() = compilerManager.clearOutputRoot()
-    fun clearScriptRoot() = compilerManager.clearScriptRoot()
-    fun autoFindAmxxFolder(forOutput: Boolean): Boolean = compilerManager.autoFindAmxxFolder(forOutput)
-    fun autoFindTargetName(forOutput: Boolean): String = compilerManager.autoFindTargetName(forOutput)
     fun compile(source: SmaSource) = compilerManager.compile(source)
     fun compileAll(sources: List<SmaSource>) = compilerManager.compileAll(sources)
     val hasCachedBundle: Boolean get() = bundleManager.hasCachedBundle
@@ -535,6 +543,7 @@ private fun externalRoot(app: Application): File {
         const val APP_RELEASE_REPO = "berkchy/nexora"
         const val CLIENT_APK_REPO = APP_RELEASE_REPO
         const val CLIENT_APK_ASSET = "CS16Client-Android.apk"
+        const val GAME_CLIENT_PACKAGE = "su.xash.cs16client.nexora"
         const val CONTINUOUS_TAG = "continuous"
         const val CONTINUOUS_APK = "nexora_continuous.apk"
         const val RELEASE_APK = "nexora.apk"

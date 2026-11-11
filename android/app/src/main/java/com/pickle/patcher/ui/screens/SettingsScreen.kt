@@ -1,10 +1,4 @@
 package com.pickle.patcher.ui.screens
-import android.content.Intent
-import android.os.Build
-import android.os.Environment
-import android.provider.Settings
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -24,7 +18,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Speed
@@ -77,41 +70,8 @@ fun SettingsScreen(
     val patchWorkers by vm.patchWorkers.collectAsState()
     val maxWorkers = vm.maxCompileWorkers()
     val maxPatchWorkers = vm.maxPatchWorkers()
-    val scriptRoot by vm.scriptRoot.collectAsState()
-    val outputRoot by vm.outputRoot.collectAsState()
     val themeController = LocalThemeController.current
     val themeChoice by themeController.choice.collectAsState()
-    var pickForOutput by remember { mutableStateOf(false) }
-    val folderPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree(),
-    ) { uri ->
-        if (uri != null) {
-            if (pickForOutput) vm.setOutputRoot(uri) else vm.setScriptRoot(uri)
-        }
-        pickForOutput = false
-    }
-    val storagePermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
-            folderPicker.launch(null)
-        }
-    }
-    fun requestStorageAndPickFolder() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (Environment.isExternalStorageManager()) {
-                folderPicker.launch(null)
-            } else {
-                storagePermissionLauncher.launch(
-                    Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                        data = android.net.Uri.parse("package:${context.packageName}")
-                    },
-                )
-            }
-        } else {
-            folderPicker.launch(null)
-        }
-    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -267,36 +227,7 @@ fun SettingsScreen(
                 }
             }
         }
-        Spacer(Modifier.height(24.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                text = "Directories",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(start = 8.dp, bottom = 4.dp),
-            )
-            GroupedFolderCard(
-                title = "Plugins Directory (.sma)",
-                path = scriptRoot,
-                emptyLabel = "No directory selected",
-                icon = Icons.Filled.Folder,
-                index = 0,
-                total = 2,
-                onPick = { pickForOutput = false; requestStorageAndPickFolder() },
-                onClear = if (scriptRoot != null) ({ vm.clearScriptRoot() }) else null,
-            )
-            GroupedFolderCard(
-                title = "Output Directory (.amxx)",
-                path = outputRoot,
-                emptyLabel = "addons/amxmodx/plugins (default)",
-                icon = Icons.Filled.Folder,
-                index = 1,
-                total = 2,
-                onPick = { pickForOutput = true; requestStorageAndPickFolder() },
-                onClear = if (outputRoot != null) ({ vm.clearOutputRoot() }) else null,
-            )
-        }
+
         Spacer(Modifier.height(24.dp))
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
@@ -407,77 +338,7 @@ fun SettingsScreen(
     }
     }
 }
-@Composable
-private fun GroupedFolderCard(
-    title: String,
-    path: String?,
-    emptyLabel: String,
-    icon: ImageVector,
-    index: Int,
-    total: Int,
-    onPick: () -> Unit,
-    onClear: (() -> Unit)?,
-) {
-    Card(
-        onClick = onPick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = getGroupedItemShape(index, total),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-            Spacer(modifier = Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = path ?: emptyLabel,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (path != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                )
-            }
-            if (onClear != null) {
-                Spacer(modifier = Modifier.width(8.dp))
-                IconButton(
-                    onClick = onClear,
-                    modifier = Modifier.size(38.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Close,
-                        contentDescription = "Clear folder",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-            }
-        }
-    }
-}
+
 @Composable
 private fun GroupedActionCard(
     title: String,

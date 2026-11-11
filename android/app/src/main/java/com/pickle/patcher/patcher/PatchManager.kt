@@ -405,7 +405,7 @@ class PatchManager(
     }.getOrDefault(false)
 
     fun requestInstall() {
-        val target = "su.xash.cs16client.nexora"
+        val target = PatcherViewModel.GAME_CLIENT_PACKAGE
         if (isTargetInstalled(target)) {
             _pendingUninstall.value =
                 Intent(Intent.ACTION_UNINSTALL_PACKAGE, android.net.Uri.parse("package:$target"))
@@ -416,7 +416,7 @@ class PatchManager(
     }
 
     fun onUninstallFinished() {
-        if (isTargetInstalled("su.xash.cs16client.nexora")) return
+        if (isTargetInstalled(PatcherViewModel.GAME_CLIENT_PACKAGE)) return
         val out = outputApk()
         if (out != null && out.exists() && lastReport != null) {
             _pendingInstall.value = installIntentFor(out)

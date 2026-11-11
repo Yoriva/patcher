@@ -167,6 +167,7 @@ class MainActivity : ComponentActivity() {
             NexoraTheme(themeChoice, themeController) {
                 val vm: PatcherViewModel = viewModel()
                 LaunchedEffect(Unit) {
+                    vm.refreshGameClientInstalled()
                     vm.autoInstallAddons()
                     vm.scanAddonsStatus()
                 }
@@ -222,6 +223,7 @@ fun PatcherApp(vm: PatcherViewModel) {
             if (event == Lifecycle.Event.ON_RESUME) {
                 storageGranted = hasStorageAccess(context)
                 notificationsGranted = hasNotificationsAccess(context)
+                vm.refreshGameClientInstalled()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -261,6 +263,7 @@ fun PatcherApp(vm: PatcherViewModel) {
             vm.consumeDownloaded()
         }
     }
+    val clientInstalled by vm.gameClientInstalled.collectAsState()
     val pendingInstall by vm.pendingInstall.collectAsState()
     LaunchedEffect(pendingInstall) {
         pendingInstall?.let {
@@ -388,11 +391,13 @@ fun PatcherApp(vm: PatcherViewModel) {
                         tonalElevation = 0.dp,
                     ) {
                         bottomNavItems.forEach { item ->
+                            val locked = !clientInstalled && (item.index == 1 || item.index == 2)
                             val selected = pagerState.currentPage == item.index
                             NavigationBarItem(
                                 selected = selected,
+                                enabled = !locked,
                                 onClick = {
-                                    if (pagerState.currentPage != item.index) {
+                                    if (!locked && pagerState.currentPage != item.index) {
                                         tabScope.launch { pagerState.animateScrollToPage(item.index) }
                                     }
                                 },
@@ -467,8 +472,16 @@ fun PatcherApp(vm: PatcherViewModel) {
                                     vm = vm,
                                     onOpenLibraries = { nav.navigate(Dest.Libraries.route) },
                                 )
-                                1 -> CompilerScreen(vm = vm)
-                                2 -> AddonsScreen(vm)
+                                1 -> CompilerScreen(
+                                    vm = vm,
+                                    gameClientInstalled = clientInstalled,
+                                    onGoToPatch = { tabScope.launch { pagerState.animateScrollToPage(0) } },
+                                )
+                                2 -> AddonsScreen(
+                                    vm = vm,
+                                    gameClientInstalled = clientInstalled,
+                                    onGoToPatch = { tabScope.launch { pagerState.animateScrollToPage(0) } },
+                                )
                                 else -> {
                                     val api = StoreApi(context = context)
                                     StoreScreen(

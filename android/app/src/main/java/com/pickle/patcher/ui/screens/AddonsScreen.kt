@@ -50,7 +50,21 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.filled.Edit
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun AddonsScreen(vm: PatcherViewModel) {
+fun AddonsScreen(
+    vm: PatcherViewModel,
+    gameClientInstalled: Boolean = true,
+    onGoToPatch: () -> Unit = {},
+) {
+    if (!gameClientInstalled) {
+        LockedScreen(
+            title = "Patch it first",
+            description = "Addons install the mod files into your game directory. That step is available after you patch and install the client on the Patch screen.",
+            ctaLabel = "Open Patch screen",
+            onCta = onGoToPatch,
+        )
+        return
+    }
+
     var selectedTab by remember { mutableStateOf(0) }
     Column(modifier = Modifier.fillMaxSize()) {
         Surface(

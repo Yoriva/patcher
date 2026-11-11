@@ -2,8 +2,6 @@ package com.pickle.patcher.patcher
 
 import android.app.Application
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import com.pickle.patcher.data.BundleProvider
@@ -20,7 +18,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withPermit
 import java.io.File
-import java.net.URLDecoder
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.sync.Semaphore
 
@@ -76,15 +73,8 @@ class CompilerManager(
     )
 
     init {
-        val savedScripts = compilerPrefs.getString("script_root", null)
-        if (!savedScripts.isNullOrEmpty() && File(savedScripts).isDirectory) {
-            _scriptRoot.value = savedScripts
-            refreshScripts()
-        }
-        val savedOutput = compilerPrefs.getString("output_root", null)
-        if (!savedOutput.isNullOrEmpty() && File(savedOutput).isDirectory) {
-            _outputRoot.value = savedOutput
-        }
+        autoFindAmxxFolder(false)
+        autoFindAmxxFolder(true)
     }
 
     private fun initialCompileWorkers(): Int {
@@ -103,56 +93,6 @@ class CompilerManager(
         compilerPrefs.edit().putInt("compile_workers", clamped).apply()
     }
 
-    fun setScriptRoot(uri: Uri?) {
-        if (uri == null) return
-        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-        try {
-            app.contentResolver.takePersistableUriPermission(uri, flags)
-        } catch (_: Exception) {
-        }
-        val dir = uriToDir(uri) ?: let {
-            _compile.value = CompileState.Failed(
-                "Could not resolve the picked folder to a disk path.\n" +
-                    "Pick a folder on the device's internal storage (e.g. .../xash/cstrike/addons/amxmodx/scripting)."
-            )
-            return
-        }
-        _scriptRoot.value = dir.absolutePath
-        compilerPrefs.edit().putString("script_root", dir.absolutePath).apply()
-        _compile.value = CompileState.Idle
-        refreshScripts()
-    }
-
-    fun setOutputRoot(uri: Uri?) {
-        if (uri == null) return
-        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-        try {
-            app.contentResolver.takePersistableUriPermission(uri, flags)
-        } catch (_: Exception) {
-        }
-        val dir = uriToDir(uri) ?: let {
-            _compile.value = CompileState.Failed(
-                "Could not resolve the picked folder to a disk path.\n" +
-                    "Pick a folder on the device's internal storage."
-            )
-            return
-        }
-        _outputRoot.value = dir.absolutePath
-        compilerPrefs.edit().putString("output_root", dir.absolutePath).apply()
-    }
-
-    fun clearOutputRoot() {
-        _outputRoot.value = null
-        compilerPrefs.edit().remove("output_root").apply()
-    }
-
-    fun clearScriptRoot() {
-        _scriptRoot.value = null
-        _scripts.value = emptyList()
-        _compile.value = CompileState.Idle
-        compilerPrefs.edit().remove("script_root").apply()
-    }
-
     fun autoFindAmxxFolder(forOutput: Boolean): Boolean {
         val sub = if (forOutput) "plugins" else "scripting"
         val found = findAmxxFolder(sub) ?: return false
@@ -167,9 +107,6 @@ class CompilerManager(
         }
         return true
     }
-
-    fun autoFindTargetName(forOutput: Boolean): String =
-        "addons/amxmodx/" + if (forOutput) "plugins" else "scripting"
 
     private fun findAmxxRoots(): List<File> =
         gameRootCandidates.map(::File).filter { it.isDirectory }
@@ -193,30 +130,6 @@ class CompilerManager(
         return null
     }
 
-    private fun uriToDir(uri: Uri): File? {
-        val path = uri.path ?: return null
-        val marker = "/tree/"
-        val idx = path.indexOf(marker)
-        val doc = if (idx >= 0) path.substring(idx + marker.length) else path.trimStart('/')
-        val decoded = URLDecoder.decode(doc, Charsets.UTF_8.name())
-        val volumeSep = decoded.indexOf(':')
-        if (volumeSep < 0) return null
-        val volume = decoded.substring(0, volumeSep)
-        val rel = decoded.substring(volumeSep + 1).trimStart('/')
-        if (volume == "primary") {
-            return File(File(Environment.getExternalStorageDirectory(), ""), rel)
-        }
-        if (Build.VERSION.SDK_INT >= 30) {
-            val manager = app.getSystemService(Context.STORAGE_SERVICE) as android.os.storage.StorageManager
-            for (v in manager.storageVolumes) {
-                val dirPath = v.directory?.absolutePath ?: continue
-                if (v.uuid == volume && File(dirPath).isDirectory) {
-                    return File(File(dirPath, ""), rel)
-                }
-            }
-        }
-        return null
-    }
 
     fun refreshScripts() {
         scope.launch(Dispatchers.IO) {

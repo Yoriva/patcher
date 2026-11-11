@@ -1,13 +1,6 @@
 package com.pickle.patcher.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.content.Intent
-import android.net.Uri
-import android.os.Build
-import android.os.Environment
-import android.provider.Settings
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -29,10 +22,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -62,7 +55,20 @@ import com.pickle.patcher.patcher.CompileState
 import com.pickle.patcher.patcher.PatcherViewModel
 import com.pickle.patcher.patcher.SmaSource
 @Composable
-fun CompilerScreen(vm: PatcherViewModel) {
+fun CompilerScreen(
+    vm: PatcherViewModel,
+    gameClientInstalled: Boolean = true,
+    onGoToPatch: () -> Unit = {},
+) {
+    if (!gameClientInstalled) {
+        LockedScreen(
+            title = "Patch it first",
+            description = "Compiler becomes available after the game is patched and installed. Download the source APK on the Patch screen, build the patch, install the patched client — then come back here to build your plugins.",
+            ctaLabel = "Open Patch screen",
+            onCta = onGoToPatch,
+        )
+        return
+    }
     val scripts by vm.scripts.collectAsState()
     val compile by vm.compile.collectAsState()
     val scriptRoot by vm.scriptRoot.collectAsState()
@@ -71,34 +77,12 @@ fun CompilerScreen(vm: PatcherViewModel) {
     val selectedSources = scripts.filter { it.path in selected }
     val failures = (compile as? CompileState.Done)?.failures ?: emptyMap()
     val context = LocalContext.current
-    val folderPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree(),
-    ) { uri -> if (uri != null) vm.setScriptRoot(uri) }
-    val storagePermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
-            folderPicker.launch(null)
-        }
-    }
-    fun pickPluginsFolder() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (Environment.isExternalStorageManager()) {
-                folderPicker.launch(null)
-            } else {
-                storagePermissionLauncher.launch(
-                    Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                        data = Uri.parse("package:${context.packageName}")
-                    },
-                )
-            }
-        } else {
-            folderPicker.launch(null)
-        }
-    }
     DisposableEffect(Unit) {
         vm.startScriptWatcher()
         onDispose { vm.stopScriptWatcher() }
+    }
+    LaunchedEffect(scriptRoot) {
+        if (scriptRoot == null) vm.refreshScripts()
     }
     LaunchedEffect(scripts) {
         val available = scripts.mapTo(HashSet()) { it.path }
@@ -112,17 +96,10 @@ fun CompilerScreen(vm: PatcherViewModel) {
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         GroupedItem(
-            title = "Plugins folder",
-            subtitle = scriptRoot ?: "No folder selected",
+            title = if (scriptRoot != null) "Plugins folder found" else "Plugins folder",
+            subtitle = scriptRoot ?: "Searching for the game folder…",
             index = 0,
             total = 1,
-            trailing = {
-                SmallButton(
-                    text = if (scriptRoot == null) "Choose" else "Change",
-                    icon = Icons.Filled.FolderOpen,
-                    onClick = ::pickPluginsFolder,
-                )
-            },
         )
         PluginsSection(
             scriptRoot = scriptRoot,
@@ -140,6 +117,7 @@ fun CompilerScreen(vm: PatcherViewModel) {
                 }
             },
             onErrorClick = { name, message -> stampError = name to message },
+            onRetry = { vm.refreshScripts() },
         )
         BuildSection(
             compile = compile,
@@ -167,6 +145,7 @@ private fun PluginsSection(
     onToggle: (String) -> Unit,
     onSelectAll: () -> Unit,
     onErrorClick: (String, String) -> Unit,
+    onRetry: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
@@ -196,10 +175,14 @@ private fun PluginsSection(
             }
         }
         when {
-            scriptRoot == null -> EmptyCard(
-                "Pick the folder that holds your .sma plugin sources — usually addons/amxmodx/scripting.",
+            scriptRoot == null -> RetryCard(
+                text = "Game folder not detected yet. Install addons first, then tap Retry.",
+                onRetry = onRetry,
             )
-            scripts.isEmpty() -> EmptyCard("No .sma plugin sources found in this folder.")
+            scripts.isEmpty() -> RetryCard(
+                text = "No .sma plugin sources found in the detected folder.",
+                onRetry = onRetry,
+            )
             else -> Column {
                 scripts.forEachIndexed { index, source ->
                     ScriptRow(
@@ -322,8 +305,8 @@ private fun BuildSection(
         done != null && failures.isNotEmpty() -> "${done.ok} compiled · ${failures.size} failed"
         done != null -> "${done.ok} plugin${if (done.ok == 1) "" else "s"} compiled"
         selectedSources.isEmpty() -> when {
-            scriptRoot == null -> "Choose a plugins folder above."
-            scriptCount == 0 -> "No .sma plugin sources found in this folder."
+            scriptRoot == null -> "Waiting for the game folder to be detected…"
+            scriptCount == 0 -> "No .sma plugin sources found in the detected folder."
             else -> "Select one or more plugins above."
         }
         selectedSources.size == 1 -> selectedSources.first().name
@@ -371,6 +354,34 @@ private fun BuildSection(
                 ) {
                     LogBox(text = logText, error = failures.isNotEmpty())
                 }
+            }
+        }
+    }
+}
+@Composable
+private fun RetryCard(text: String, onRetry: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = getGroupedItemShape(0, 1),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 20.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                Button(onClick = onRetry) { Text("Retry") }
             }
         }
     }
