@@ -168,7 +168,6 @@ fun PluginsScreen(vm: PatcherViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(vScroll)
             .imePadding()
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -212,13 +211,11 @@ fun PluginsScreen(vm: PatcherViewModel) {
         Surface(
             shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surfaceContainerLowest,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().weight(1f),
         ) {
-            val editorHeight = (EditorLines * EditorLineHeight.value).dp + 16.dp
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(editorHeight)
                     .verticalScroll(vScroll)
                     .horizontalScroll(hScroll),
             ) {
@@ -247,15 +244,9 @@ fun PluginsScreen(vm: PatcherViewModel) {
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                when {
-                    dirty -> "unsaved changes"
-                    else -> file.name
-                },
+                if (dirty) "unsaved changes" else "saved",
                 style = MaterialTheme.typography.bodySmall,
-                color = when {
-                    dirty -> MaterialTheme.colorScheme.tertiary
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                },
+                color = if (dirty) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
             )
             if (dirty) {

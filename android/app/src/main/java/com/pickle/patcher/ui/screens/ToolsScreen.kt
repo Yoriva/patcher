@@ -106,61 +106,57 @@ fun ToolsScreen(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        SectionHeader(
-            title = "Tools",
-            caption = "Mod bundle, addons, plugin config",
-        )
-        GroupedItem(
-            title = "Re-download Mod Bundle",
-            subtitle = "Fetch latest libraries and configuration assets",
-            index = 0,
-            total = 3,
-            trailing = {
-                SmallButton(
-                    text = "Fetch",
-                    icon = Icons.Filled.Download,
-                    onClick = { vm.fetchAndDownloadBundle() },
-                )
-            },
-        )
-        GroupedItem(
-            title = "Reinstall Addons",
-            subtitle = "Re-fetch AMXX addon scripts and configs",
-            index = 1,
-            total = 3,
-            trailing = {
-                SmallButton(
-                    text = "Reinstall",
-                    icon = Icons.Filled.Extension,
-                    onClick = { vm.fetchAndInstallAddons() },
-                )
-            },
-        )
-        GroupedItem(
-            title = "Plugin Config",
-            subtitle = "Edit plugins.ini order and toggles",
-            index = 2,
-            total = 3,
-            trailing = {
-                SmallButton(
-                    text = "Edit",
-                    icon = Icons.Filled.Edit,
-                    onClick = onOpenPluginConfig,
-                )
-            },
-        )
-        SectionHeader(
-            title = "Compiler",
-            caption = "Build .sma plugins into .amxx",
-        )
-        GroupedItem(
-            title = if (scriptRoot != null) "Plugins folder found" else "Plugins folder",
-            subtitle = scriptRoot ?: "Searching for the game folder…",
-            index = 0,
-            total = 1,
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            GroupedItem(
+                title = "Re-download Mod Bundle",
+                subtitle = "Fetch latest libraries and configuration assets",
+                index = 0,
+                total = 3,
+                trailing = {
+                    SmallButton(
+                        text = "Fetch",
+                        icon = Icons.Filled.Download,
+                        onClick = { vm.fetchAndDownloadBundle() },
+                    )
+                },
+            )
+            GroupedItem(
+                title = "Reinstall Addons",
+                subtitle = "Re-fetch AMXX addon scripts and configs",
+                index = 1,
+                total = 3,
+                trailing = {
+                    SmallButton(
+                        text = "Reinstall",
+                        icon = Icons.Filled.Extension,
+                        onClick = { vm.fetchAndInstallAddons() },
+                    )
+                },
+            )
+            GroupedItem(
+                title = "Plugin Config",
+                subtitle = "Edit plugins.ini order and toggles",
+                index = 2,
+                total = 3,
+                trailing = {
+                    SmallButton(
+                        text = "Edit",
+                        icon = Icons.Filled.Edit,
+                        onClick = onOpenPluginConfig,
+                    )
+                },
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            GroupedItem(
+                title = if (scriptRoot != null) "Plugins folder found" else "Plugins folder",
+                subtitle = scriptRoot ?: "Searching for the game folder…",
+                index = 0,
+                total = 2,
+            )
         PluginsSection(
             scriptRoot = scriptRoot,
             scripts = scripts,
@@ -187,6 +183,7 @@ fun ToolsScreen(
             selectedSources = selectedSources,
             onCompile = { vm.compileAll(selectedSources) },
         )
+        }
         Spacer(Modifier.height(16.dp))
     }
     stampError?.let { (name, message) ->
