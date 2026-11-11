@@ -71,9 +71,9 @@ import com.pickle.patcher.patcher.PatchUiState
 import com.pickle.patcher.patcher.PatcherViewModel
 import com.pickle.patcher.patcher.SourceDownloadState
 import java.text.DecimalFormat
-internal val mbFmt = DecimalFormat("0.0")
+internal val mbFmt = DecimalFormat("0.0", java.text.DecimalFormatSymbols(java.util.Locale.US))
 internal fun Long.mb(): String = if (this < 1048576L) {
-    "%.0f KB".format(this / 1024.0)
+    "%.0f KB".format(java.util.Locale.US, this / 1024.0)
 } else {
     "${mbFmt.format(this / 1048576.0)} MB"
 }
@@ -201,9 +201,9 @@ private fun ClientRow(vm: PatcherViewModel, index: Int, total: Int) {
             ProgressFooter(
                 progress = progress,
                 left = if (downloading.total > 0) {
-                    "%.1f / %.1f MB".format(downloading.downloaded / 1048576.0, downloading.total / 1048576.0)
+                    "%.1f / %.1f MB".format(java.util.Locale.US, downloading.downloaded / 1048576.0, downloading.total / 1048576.0)
                 } else {
-                    "%.1f MB".format(downloading.downloaded / 1048576.0)
+                    "%.1f MB".format(java.util.Locale.US, downloading.downloaded / 1048576.0)
                 },
                 right = progress?.let { "${(it * 100).toInt()}%" }.orEmpty(),
             )
