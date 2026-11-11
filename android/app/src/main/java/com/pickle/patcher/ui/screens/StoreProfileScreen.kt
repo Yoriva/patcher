@@ -1,5 +1,4 @@
 package com.pickle.patcher.ui.screens
-
 import android.net.Uri
 import android.app.DownloadManager
 import android.content.Context
@@ -39,7 +38,6 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-
 @Composable
 fun StoreProfileScreen(
     api: StoreApi,
@@ -54,7 +52,6 @@ fun StoreProfileScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var showEdit by remember { mutableStateOf(false) }
     var detailItem by remember { mutableStateOf<JSONObject?>(null) }
-
     fun load(showLoading: Boolean = profile == null) {
         scope.launch {
             if (showLoading) loading = true
@@ -70,7 +67,6 @@ fun StoreProfileScreen(
             )
         }
     }
-
     LaunchedEffect(username) {
         load(showLoading = true)
         while (true) {
@@ -78,7 +74,6 @@ fun StoreProfileScreen(
             load(showLoading = false)
         }
     }
-
     Column(Modifier.fillMaxSize()) {
         val isOwn = profile?.optBoolean("isOwn", false) == true
         ScreenHeader(
@@ -110,7 +105,7 @@ fun StoreProfileScreen(
                     text = "Log out",
                     onClick = {
                         StoreSession.clear(context)
-                        val api2 = StoreApi("https://nexora-store-tawny.vercel.app", context)
+                        val api2 = StoreApi(context = context)
                         scope.launch { api2.logout() }
                         android.widget.Toast.makeText(context, "Logged out", android.widget.Toast.LENGTH_SHORT).show()
                         onBack()
@@ -119,7 +114,6 @@ fun StoreProfileScreen(
                 )
             }
         }
-
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -242,8 +236,6 @@ fun StoreProfileScreen(
             }
         }
     }
-
-
     detailItem?.let { item ->
         val libs = item.optJSONArray("libs")
         val libCount = libs?.length() ?: 0
@@ -335,7 +327,6 @@ fun StoreProfileScreen(
             },
         )
     }
-
     if (showEdit) {
         EditProfileDialog(
             api = api,
@@ -345,7 +336,6 @@ fun StoreProfileScreen(
         )
     }
 }
-
 @Composable
 private fun EditProfileDialog(api: StoreApi, username: String, onDismiss: () -> Unit, onSaved: () -> Unit) {
     val context = LocalContext.current
@@ -354,11 +344,9 @@ private fun EditProfileDialog(api: StoreApi, username: String, onDismiss: () -> 
     var avatarUri by remember { mutableStateOf<Uri?>(null) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) avatarUri = uri
     }
-
     fun uriToFile(uri: Uri): File? = try {
         val input = context.contentResolver.openInputStream(uri) ?: return null
         val name = uri.lastPathSegment?.substringAfterLast('/') ?: "avatar.png"
@@ -366,7 +354,6 @@ private fun EditProfileDialog(api: StoreApi, username: String, onDismiss: () -> 
         input.use { ins -> file.outputStream().use { outs -> ins.copyTo(outs) } }
         file
     } catch (_: Exception) { null }
-
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Edit Profile", color = MaterialTheme.colorScheme.onSurface) },

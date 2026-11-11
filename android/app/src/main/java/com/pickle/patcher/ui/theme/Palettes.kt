@@ -1,5 +1,4 @@
 package com.pickle.patcher.ui.theme
-
 import android.content.Context
 import android.os.Build
 import androidx.compose.material3.ColorScheme
@@ -9,7 +8,6 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-
 val keyColorOptions = listOf(
     0xFFF44336.toInt(),
     0xFFE91E63.toInt(),
@@ -27,7 +25,6 @@ val keyColorOptions = listOf(
     0xFF607D8F.toInt(),
     0xFFFF9CA8.toInt(),
 )
-
 fun ColorScheme.toAmoled(): ColorScheme = copy(
     background = Color.Black,
     surface = Color.Black,
@@ -38,7 +35,6 @@ fun ColorScheme.toAmoled(): ColorScheme = copy(
     surfaceContainerHigh = Color(0xFF1C1C1C),
     surfaceContainerHighest = Color(0xFF242424),
 )
-
 fun schemeForSeed(
     keyColor: Int,
     isDark: Boolean,
@@ -56,13 +52,11 @@ fun schemeForSeed(
     }
     return if (isDark && isAmoled) base.toAmoled() else base
 }
-
 private fun createM3SchemeFromSeed(seed: Color, isDark: Boolean, isAmoled: Boolean): ColorScheme {
     val hsv = FloatArray(3)
     android.graphics.Color.colorToHSV(seed.toArgb(), hsv)
     val h = hsv[0]
     val s = hsv[1].coerceIn(0.2f, 1f)
-
     return if (isDark) {
         val primary = Color.hsv(h, (s * 0.45f).coerceIn(0.15f, 0.6f), 0.95f)
         val primaryContainer = Color.hsv(h, (s * 0.75f).coerceIn(0.3f, 0.85f), 0.40f)
@@ -75,7 +69,6 @@ private fun createM3SchemeFromSeed(seed: Color, isDark: Boolean, isAmoled: Boole
         val surfaceContainerHigh = if (isAmoled) Color(0xFF1C1C1C) else Color.hsv(h, 0.08f, 0.18f)
         val surfaceContainerHighest = if (isAmoled) Color(0xFF242424) else Color.hsv(h, 0.08f, 0.22f)
         val bg = if (isAmoled) Color.Black else Color.hsv(h, 0.06f, 0.09f)
-
         darkColorScheme(
             primary = primary,
             onPrimary = Color.hsv(h, 0.9f, 0.2f),
@@ -110,7 +103,6 @@ private fun createM3SchemeFromSeed(seed: Color, isDark: Boolean, isAmoled: Boole
         val tertiary = Color.hsv((h + 45f) % 360f, (s * 0.6f).coerceIn(0.3f, 0.8f), 0.50f)
         val tertiaryContainer = Color.hsv((h + 45f) % 360f, (s * 0.2f).coerceIn(0.1f, 0.35f), 0.92f)
         val bg = Color.hsv(h, 0.02f, 0.99f)
-
         lightColorScheme(
             primary = primary,
             onPrimary = Color.White,

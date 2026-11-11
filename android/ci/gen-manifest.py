@@ -36,9 +36,6 @@ import sys
 VERSION = os.environ.get("RELEASE_VERSION", "1.10.0-dev")
 BUILD_ID = "unknown"
 
-# producer name -> the id of the sources that library is built from.
-# Filled from --producer on the command line. Empty means every file falls back
-# to the sha256 comparison.
 PRODUCERS: dict[str, str] = {}
 
 MODULES = [
@@ -46,7 +43,6 @@ MODULES = [
     "hamsandwich", "json", "nvault", "reapi", "regex", "sockets", "sqlite",
 ]
 
-# ABI -> (android runtime lib suffix, AMXX module suffix)
 ABI_MAP = {
     "arm64-v8a": ("arm64", "amd64"),
     "armeabi-v7a": ("armv7l", "arm"),
@@ -160,24 +156,14 @@ def collect_entries(libdir: str, abi: str, previous: dict) -> list:
     add(client_name, f"lib/{abi}/{client_name}", False, "CS16Client client DLL (crash handler)",
         producer="cs16-client")
 
-    # The main menu, built from the same tree as the client. The engine looks
-    # for cl_dlls/libmenu_android_<arch>.so first, then <gamelibdir>/ of the
-    # same name, and only falls back to libmenu.so out of the engine package.
-    # Shipping it under the first name is what makes the game package the menu
-    # comes from; without it every run used the stock menu from the engine
-    # app, which is not the one this tree builds.
     menu_name = f"libmenu_android_{suffix}.so"
     add(menu_name, f"lib/{abi}/{menu_name}", False, "CS16Client main menu (mainui_cpp)",
         producer="cs16-client")
 
-    # ReGameDLL game DLL, bundled as libcs. Shipped from the berkchy fork branch
-    # fix/first-spawn-equip; skipped silently when not present, then
-    # the patcher falls back to patching the base APK's libcs in place.
     libcs_name = "libcs_android_" + suffix + ".so"
     add(libcs_name, f"lib/{abi}/{libcs_name}", False, "ReGameDLL game DLL (first-spawn fix)",
         producer="regamedll")
 
-    # libmenu intentionally NOT shipped: the text-based menu is broken, stock stays.
     for mod in MODULES:
         modname = f"lib{mod}_amxx_{mod_suffix}.so"
         add(modname, f"lib/{abi}/{modname}", True, f"{mod} module", producer="amxmodx")
@@ -225,7 +211,6 @@ def main():
         print(f"unsupported ABI: {args.abi}", file=sys.stderr)
         sys.exit(1)
 
-    # Collect .so entries
     entries = collect_entries(args.libdir, args.abi, previous)
 
     manifest = {
@@ -235,14 +220,12 @@ def main():
         "files": entries,
     }
 
-    # Write manifest
     os.makedirs(args.outdir, exist_ok=True)
     manifest_path = os.path.join(args.outdir, "manifest.json")
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
     print(f"manifest: {manifest_path} ({len(entries)} files)")
 
-    # Stage individual .so files (ABI-prefixed to avoid conflicts)
     staged_dir = os.path.join(args.outdir, args.abi)
     os.makedirs(staged_dir, exist_ok=True)
     for entry in entries:
@@ -253,7 +236,6 @@ def main():
 
     print(f"staged: {staged_dir} ({len(entries)} files)")
 
-    # Stage plugins if provided
     if args.plugins_dir and os.path.isdir(args.plugins_dir):
         plugins_dir = os.path.join(args.outdir, "plugins")
         os.makedirs(plugins_dir, exist_ok=True)

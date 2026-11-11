@@ -1,6 +1,13 @@
 package com.pickle.patcher
-
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -25,6 +32,9 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,27 +44,36 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.RocketLaunch
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.RocketLaunch
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -70,6 +89,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -82,11 +102,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
@@ -100,12 +133,14 @@ import com.pickle.patcher.patcher.PatcherViewModel
 import com.pickle.patcher.ui.screens.AddonsScreen
 import com.pickle.patcher.ui.screens.AdminScreen
 import com.pickle.patcher.ui.screens.CompilerScreen
+import com.pickle.patcher.ui.screens.LibraryScreen
 import com.pickle.patcher.ui.screens.PatchScreen
 import com.pickle.patcher.ui.screens.SettingsScreen
 import com.pickle.patcher.ui.screens.StoreManageScreen
 import com.pickle.patcher.ui.screens.StoreProfileScreen
 import com.pickle.patcher.ui.screens.StoreScreen
 import com.pickle.patcher.ui.screens.TopBarBackButton
+import com.pickle.patcher.ui.screens.getGroupedItemShape
 import com.pickle.patcher.ui.screens.toDisplayVersion
 import com.pickle.patcher.ui.theme.Gray30
 import com.pickle.patcher.ui.theme.Gray40
@@ -113,10 +148,10 @@ import com.pickle.patcher.ui.theme.Gray60
 import com.pickle.patcher.ui.theme.NexoraTheme
 import com.pickle.patcher.ui.theme.ThemeController
 import com.pickle.patcher.ui.theme.ThemeScreen
+import coil.compose.SubcomposeAsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         CrashLog.install(applicationContext)
@@ -138,9 +173,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-
 private enum class Dest(val route: String) {
     Patch("patch"),
+    Libraries("libraries"),
     Compiler("compiler"),
     Addons("addons"),
     Store("store"),
@@ -151,11 +186,8 @@ private enum class Dest(val route: String) {
     StoreProfile("store/profile/{username}"),
     StoreManage("store/manage"),
     StoreAdmin("store/admin"),
-    Settings("settings"),
-    Theme("settings/theme"),
     Plugins("plugins"),
 }
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PatcherApp(vm: PatcherViewModel) {
@@ -166,7 +198,62 @@ fun PatcherApp(vm: PatcherViewModel) {
     val scope = rememberCoroutineScope()
     val update by vm.appUpdate.collectAsState()
     var showAbout by remember { mutableStateOf(false) }
-
+    val setupPrefs = remember {
+        context.getSharedPreferences("nexora_setup", Context.MODE_PRIVATE)
+    }
+    var showSetup by remember {
+        mutableStateOf(!setupPrefs.getBoolean("completed", false))
+    }
+    var storageGranted by remember { mutableStateOf(hasStorageAccess(context)) }
+    var notificationsGranted by remember { mutableStateOf(hasNotificationsAccess(context)) }
+    val notificationsPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { notificationsGranted = it }
+    val legacyStorageLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { result ->
+        storageGranted = result[Manifest.permission.WRITE_EXTERNAL_STORAGE] == true ||
+            result[Manifest.permission.READ_EXTERNAL_STORAGE] == true ||
+            hasStorageAccess(context)
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                storageGranted = hasStorageAccess(context)
+                notificationsGranted = hasNotificationsAccess(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val requestStorageAccess: () -> Unit = {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val appSettings = Intent(
+                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                Uri.parse("package:${context.packageName}"),
+            )
+            try {
+                context.startActivity(appSettings)
+            } catch (_: Exception) {
+                context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+            }
+        } else {
+            legacyStorageLauncher.launch(
+                arrayOf(
+                    Manifest.permission.READ_EXTERNAL_STORAGE,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                ),
+            )
+        }
+    }
+    val requestNotifications: () -> Unit = {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            notificationsPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            notificationsGranted = hasNotificationsAccess(context)
+        }
+    }
     LaunchedEffect(update) {
         val u = update
         if (u is PatcherViewModel.AppUpdate.Downloaded) {
@@ -174,7 +261,6 @@ fun PatcherApp(vm: PatcherViewModel) {
             vm.consumeDownloaded()
         }
     }
-
     val pendingInstall by vm.pendingInstall.collectAsState()
     LaunchedEffect(pendingInstall) {
         pendingInstall?.let {
@@ -182,7 +268,6 @@ fun PatcherApp(vm: PatcherViewModel) {
             vm.consumePendingInstall()
         }
     }
-
     val uninstallLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) {
@@ -195,7 +280,6 @@ fun PatcherApp(vm: PatcherViewModel) {
             vm.consumePendingUninstall()
         }
     }
-
     val bottomNavItems = remember {
         listOf(
             BottomNavItem(Dest.Patch.route, "Patch", Icons.Filled.RocketLaunch, Icons.Outlined.RocketLaunch),
@@ -204,7 +288,6 @@ fun PatcherApp(vm: PatcherViewModel) {
             BottomNavItem(Dest.Store.route, "Store", Icons.Filled.Storefront, Icons.Outlined.Storefront),
         )
     }
-
     val mainTabRoutes = remember {
         listOf(
             Dest.Patch.route,
@@ -213,39 +296,47 @@ fun PatcherApp(vm: PatcherViewModel) {
             Dest.Store.route,
         )
     }
-
     val isMainTab = currentRoute in mainTabRoutes
-
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        contentColor = MaterialTheme.colorScheme.onBackground,
-        topBar = {
-            if (currentRoute != Dest.StoreAdmin.route) {
-                TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.background,
-                        titleContentColor = MaterialTheme.colorScheme.onBackground,
-                        actionIconContentColor = MaterialTheme.colorScheme.onBackground,
-                        navigationIconContentColor = MaterialTheme.colorScheme.onBackground,
-                    ),
-                    navigationIcon = {
-                        AnimatedVisibility(
-                            visible = !isMainTab,
-                            enter = fadeIn(animationSpec = tween(220, delayMillis = 60)) + slideInHorizontally(initialOffsetX = { -it / 3 }, animationSpec = tween(220, delayMillis = 60)),
-                            exit = fadeOut(animationSpec = tween(140)),
-                        ) {
-                            TopBarBackButton(onClick = { nav.popBackStack() })
-                        }
-                    },
-                    title = {
-                        AnimatedContent(
-                            targetState = isMainTab,
-                            transitionSpec = {
-                                fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(160))
-                            },
-                            label = "titleCrossfade",
-                        ) { mainTab ->
-                            if (mainTab) {
+    var showSettings by remember { mutableStateOf(false) }
+    var showTheme by remember { mutableStateOf(false) }
+    val navigateToTab: (String) -> Unit = { route ->
+        if (currentRoute != route) {
+            nav.navigate(route) {
+                popUpTo(nav.graph.findStartDestination().id) {
+                    saveState = true
+                }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
+    val swipeThreshold = with(LocalDensity.current) { 72.dp.toPx() }
+    val swipeEnabled = isMainTab && !showSettings && !showTheme && !showSetup
+    val settingsRotation by animateFloatAsState(
+        targetValue = if (showSettings) 90f else 0f,
+        animationSpec = spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow),
+        label = "settingsRotation",
+    )
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
+            contentColor = MaterialTheme.colorScheme.onBackground,
+            topBar = {
+                if (currentRoute != Dest.StoreAdmin.route) {
+                    TopAppBar(
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.background,
+                            titleContentColor = MaterialTheme.colorScheme.onBackground,
+                            actionIconContentColor = MaterialTheme.colorScheme.onBackground,
+                            navigationIconContentColor = MaterialTheme.colorScheme.onBackground,
+                        ),
+                        navigationIcon = {
+                            if (!isMainTab) {
+                                TopBarBackButton(onClick = { nav.popBackStack() })
+                            }
+                        },
+                        title = {
+                            if (isMainTab) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.padding(vertical = 4.dp),
@@ -266,59 +357,10 @@ fun PatcherApp(vm: PatcherViewModel) {
                                         ),
                                         color = MaterialTheme.colorScheme.onBackground,
                                     )
-                                    Spacer(Modifier.width(10.dp))
-                                    val version by vm.bundleVersion.collectAsState()
-                                    val isUpdate = update is PatcherViewModel.AppUpdate.Available
-                                    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-                                    val dotAlpha by infiniteTransition.animateFloat(
-                                        initialValue = 0.45f,
-                                        targetValue = 1f,
-                                        animationSpec = infiniteRepeatable(
-                                            animation = tween(1200, easing = FastOutSlowInEasing),
-                                            repeatMode = RepeatMode.Reverse,
-                                        ),
-                                        label = "dotAlpha",
-                                    )
-
-                                    Surface(
-                                        shape = RoundedCornerShape(percent = 50),
-                                        color = if (isUpdate) {
-                                            MaterialTheme.colorScheme.primaryContainer
-                                        } else {
-                                            MaterialTheme.colorScheme.surfaceContainerHigh
-                                        },
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(6.dp)
-                                                    .graphicsLayer { alpha = dotAlpha }
-                                                    .clip(CircleShape)
-                                                    .background(
-                                                        if (isUpdate) MaterialTheme.colorScheme.primary
-                                                        else MaterialTheme.colorScheme.secondary,
-                                                    ),
-                                            )
-                                            Spacer(Modifier.width(6.dp))
-                                            Text(
-                                                text = if (isUpdate) "Update" else if (version.isNotBlank()) version.toDisplayVersion() else "Live",
-                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                                color = if (isUpdate) {
-                                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                                } else {
-                                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                                },
-                                            )
-                                        }
-                                    }
                                 }
                             } else {
                                 val title = when (currentRoute) {
-                                    Dest.Settings.route -> "Settings"
-                                    Dest.Theme.route -> "Theme"
+                                    Dest.Libraries.route -> "Libraries"
                                     Dest.StoreLogin.route -> "Sign In"
                                     Dest.StoreRegister.route -> "Register"
                                     Dest.StoreUpload.route -> "Upload Package"
@@ -334,188 +376,219 @@ fun PatcherApp(vm: PatcherViewModel) {
                                     color = MaterialTheme.colorScheme.onBackground,
                                 )
                             }
-                        }
-                    },
-                    actions = {
-                        var settingsRotationAngle by remember { mutableFloatStateOf(0f) }
-                        val settingsRotation by animateFloatAsState(
-                            targetValue = settingsRotationAngle,
-                            animationSpec = spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow),
-                            label = "settingsRotation",
-                        )
-                        AnimatedVisibility(
-                            visible = isMainTab,
-                            enter = fadeIn(animationSpec = tween(220, delayMillis = 60)),
-                            exit = fadeOut(animationSpec = tween(150)),
-                        ) {
-                            IconButton(
-                                onClick = {
-                                    settingsRotationAngle += 180f
-                                    scope.launch {
-                                        kotlinx.coroutines.delay(120)
-                                        nav.navigate(Dest.Settings.route) {
-                                            launchSingleTop = true
-                                        }
-                                    }
-                                },
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Settings,
-                                    contentDescription = "Settings",
-                                    tint = MaterialTheme.colorScheme.onBackground,
-                                    modifier = Modifier
-                                        .size(24.dp)
-                                        .graphicsLayer { rotationZ = settingsRotation },
-                                )
-                            }
-                        }
-                    },
-                )
-            }
-        },
-        bottomBar = {
-            if (isMainTab) {
-                NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    contentColor = MaterialTheme.colorScheme.onSurface,
-                    tonalElevation = 0.dp,
-                ) {
-                    bottomNavItems.forEach { item ->
-                        val selected = currentRoute == item.route
-                        NavigationBarItem(
-                            selected = selected,
-                            onClick = {
-                                if (currentRoute != item.route) {
-                                    nav.navigate(item.route) {
-                                        popUpTo(nav.graph.findStartDestination().id) {
-                                            saveState = true
-                                        }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
+                        },
+                        actions = {
+                            if (isMainTab) {
+                                IconButton(onClick = { showSettings = true }) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Settings,
+                                        contentDescription = "Settings",
+                                        tint = MaterialTheme.colorScheme.onBackground,
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .graphicsLayer { rotationZ = settingsRotation },
+                                    )
                                 }
-                            },
-                            icon = {
-                                Icon(
-                                    imageVector = if (selected) item.selectedIcon else item.unselectedIcon,
-                                    contentDescription = item.title,
-                                )
-                            },
-                            label = {
-                                Text(
-                                    text = item.title,
-                                    style = MaterialTheme.typography.labelMedium.copy(
-                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                    ),
-                                )
-                            },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                selectedTextColor = MaterialTheme.colorScheme.onBackground,
-                                indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
-                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                            ),
-                        )
+                            }
+                        },
+                    )
+                }
+            },
+            bottomBar = {
+                if (isMainTab) {
+                    NavigationBar(
+                        containerColor = MaterialTheme.colorScheme.background,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        tonalElevation = 0.dp,
+                    ) {
+                        bottomNavItems.forEach { item ->
+                            val selected = currentRoute == item.route
+                            NavigationBarItem(
+                                selected = selected,
+                                onClick = { navigateToTab(item.route) },
+                                icon = {
+                                    Icon(
+                                        imageVector = if (selected) item.selectedIcon else item.unselectedIcon,
+                                        contentDescription = item.title,
+                                    )
+                                },
+                                label = {
+                                    Text(
+                                        text = item.title,
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                        ),
+                                    )
+                                },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    selectedTextColor = MaterialTheme.colorScheme.onBackground,
+                                    indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
+                                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                                ),
+                            )
+                        }
                     }
                 }
-            }
-        },
-    ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            NavHost(
-                navController = nav,
-                startDestination = Dest.Patch.route,
-                modifier = Modifier.fillMaxSize(),
-                enterTransition = { fadeIn(animationSpec = tween(durationMillis = 200)) },
-                exitTransition = { fadeOut(animationSpec = tween(durationMillis = 180)) },
-                popEnterTransition = { fadeIn(animationSpec = tween(durationMillis = 200)) },
-                popExitTransition = { fadeOut(animationSpec = tween(durationMillis = 180)) },
+            },
+        ) { padding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .pointerInput(swipeEnabled, currentRoute) {
+                        if (!swipeEnabled) return@pointerInput
+                        var drag = 0f
+                        detectHorizontalDragGestures(
+                            onDragStart = { drag = 0f },
+                            onDragEnd = {
+                                val index = mainTabRoutes.indexOf(currentRoute)
+                                if (index >= 0) {
+                                    when {
+                                        drag <= -swipeThreshold && index < mainTabRoutes.lastIndex ->
+                                            navigateToTab(mainTabRoutes[index + 1])
+                                        drag >= swipeThreshold && index > 0 ->
+                                            navigateToTab(mainTabRoutes[index - 1])
+                                    }
+                                }
+                                drag = 0f
+                            },
+                            onDragCancel = { drag = 0f },
+                            onHorizontalDrag = { change, amount ->
+                                drag += amount
+                                change.consume()
+                            },
+                        )
+                    },
             ) {
-                composable(Dest.Patch.route) { PatchScreen(vm) }
-                composable(Dest.Compiler.route) {
-                    CompilerScreen(
-                        vm = vm,
-                        onOpenSettings = {
-                            nav.navigate(Dest.Settings.route) {
-                                popUpTo(nav.graph.findStartDestination().id) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
-                    )
+                NavHost(
+                    navController = nav,
+                    startDestination = Dest.Patch.route,
+                    modifier = Modifier.fillMaxSize(),
+                    enterTransition = {
+                        slideInHorizontally(
+                            initialOffsetX = { fullWidth -> (fullWidth * 0.25f).toInt() },
+                            animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+                        ) + fadeIn(animationSpec = tween(durationMillis = 250))
+                    },
+                    exitTransition = {
+                        slideOutHorizontally(
+                            targetOffsetX = { fullWidth -> (-fullWidth * 0.15f).toInt() },
+                            animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+                        ) + fadeOut(animationSpec = tween(durationMillis = 200))
+                    },
+                    popEnterTransition = {
+                        slideInHorizontally(
+                            initialOffsetX = { fullWidth -> (-fullWidth * 0.15f).toInt() },
+                            animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+                        )
+                    },
+                    popExitTransition = {
+                        slideOutHorizontally(
+                            targetOffsetX = { fullWidth -> fullWidth },
+                            animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+                        )
+                    },
+                ) {
+                    composable(Dest.Patch.route) {
+                        PatchScreen(
+                            vm = vm,
+                            onOpenLibraries = { nav.navigate(Dest.Libraries.route) },
+                        )
+                    }
+                    composable(Dest.Libraries.route) { LibraryScreen(vm) }
+                    composable(Dest.Compiler.route) { CompilerScreen(vm = vm) }
+                    composable(Dest.Addons.route) { AddonsScreen(vm) }
+                    composable(Dest.Store.route) {
+                        val api = StoreApi(context = context)
+                        StoreScreen(
+                            api = api,
+                            onBack = { nav.popBackStack() },
+                            onUserClick = { username -> nav.navigate("store/profile/$username") },
+                        )
+                    }
+                    composable(Dest.StoreLogin.route) {
+                        val api = StoreApi(context = context)
+                        com.pickle.patcher.ui.screens.StoreLoginScreen(
+                            api = api,
+                            onBack = { nav.popBackStack() },
+                            onLoginSuccess = { nav.popBackStack() },
+                            onRegister = { nav.navigate(Dest.StoreRegister.route) },
+                        )
+                    }
+                    composable(Dest.StoreRegister.route) {
+                        val api = StoreApi(context = context)
+                        com.pickle.patcher.ui.screens.StoreRegisterScreen(
+                            api = api,
+                            onBack = { nav.popBackStack() },
+                            onRegisterSuccess = { email -> nav.navigate("store/verify-email?email=$email") },
+                        )
+                    }
+                    composable(
+                        route = "store/verify-email?email={email}",
+                        arguments = listOf(navArgument("email") { type = NavType.StringType; defaultValue = "" }),
+                    ) { backStack ->
+                        val email = backStack.arguments?.getString("email") ?: ""
+                        val api = StoreApi(context = context)
+                        com.pickle.patcher.ui.screens.StoreVerifyEmailScreen(
+                            api = api,
+                            email = email,
+                            onBack = { nav.popBackStack() },
+                            onVerified = { nav.popBackStack() },
+                        )
+                    }
+                    composable(Dest.StoreUpload.route) {
+                        val api = StoreApi(context = context)
+                        com.pickle.patcher.ui.screens.StoreUploadScreen(
+                            api = api,
+                            onBack = { nav.popBackStack() },
+                            onUploadSuccess = { nav.popBackStack() },
+                        )
+                    }
+                    composable(Dest.StoreManage.route) {
+                        val api = StoreApi(context = context)
+                        StoreManageScreen(api, onBack = { nav.popBackStack() })
+                    }
+                    composable(Dest.StoreAdmin.route) {
+                        val api = StoreApi(context = context)
+                        AdminScreen(api, onBack = { nav.popBackStack() })
+                    }
+                    composable(
+                        route = Dest.StoreProfile.route,
+                        arguments = listOf(navArgument("username") { type = NavType.StringType }),
+                    ) { backStack ->
+                        val username = backStack.arguments?.getString("username") ?: ""
+                        val api = StoreApi(context = context)
+                        StoreProfileScreen(api, username = username, onBack = { nav.popBackStack() }, onEditProfile = { })
+                    }
+                    composable(Dest.Plugins.route) { AddonsScreen(vm) }
                 }
-                composable(Dest.Addons.route) { AddonsScreen(vm) }
-                composable(Dest.Store.route) {
-                    val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
-                    StoreScreen(
-                        api = api,
-                        onBack = { nav.popBackStack() },
-                        onUserClick = { username -> nav.navigate("store/profile/$username") },
-                    )
-                }
-                composable(Dest.StoreLogin.route) {
-                    val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
-                    com.pickle.patcher.ui.screens.StoreLoginScreen(
-                        api = api,
-                        onBack = { nav.popBackStack() },
-                        onLoginSuccess = { nav.popBackStack() },
-                        onRegister = { nav.navigate(Dest.StoreRegister.route) },
-                    )
-                }
-                composable(Dest.StoreRegister.route) {
-                    val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
-                    com.pickle.patcher.ui.screens.StoreRegisterScreen(
-                        api = api,
-                        onBack = { nav.popBackStack() },
-                        onRegisterSuccess = { email -> nav.navigate("store/verify-email?email=$email") },
-                    )
-                }
-                composable(
-                    route = "store/verify-email?email={email}",
-                    arguments = listOf(navArgument("email") { type = NavType.StringType; defaultValue = "" }),
-                ) { backStack ->
-                    val email = backStack.arguments?.getString("email") ?: ""
-                    val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
-                    com.pickle.patcher.ui.screens.StoreVerifyEmailScreen(
-                        api = api,
-                        email = email,
-                        onBack = { nav.popBackStack() },
-                        onVerified = { nav.popBackStack() },
-                    )
-                }
-                composable(Dest.StoreUpload.route) {
-                    val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
-                    com.pickle.patcher.ui.screens.StoreUploadScreen(
-                        api = api,
-                        onBack = { nav.popBackStack() },
-                        onUploadSuccess = { nav.popBackStack() },
-                    )
-                }
-                composable(Dest.StoreManage.route) {
-                    val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
-                    StoreManageScreen(api, onBack = { nav.popBackStack() })
-                }
-                composable(Dest.StoreAdmin.route) {
-                    val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
-                    AdminScreen(api, onBack = { nav.popBackStack() })
-                }
-                composable(
-                    route = Dest.StoreProfile.route,
-                    arguments = listOf(navArgument("username") { type = NavType.StringType }),
-                ) { backStack ->
-                    val username = backStack.arguments?.getString("username") ?: ""
-                    val api = StoreApi("https://nexora-store-tawny.vercel.app", context)
-                    StoreProfileScreen(api, username = username, onBack = { nav.popBackStack() }, onEditProfile = { })
-                }
-                composable(Dest.Settings.route) {
+            }
+        }
+        AnimatedVisibility(
+            visible = showSettings,
+            enter = slideInHorizontally(
+                initialOffsetX = { fullWidth -> fullWidth },
+                animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+            ) + fadeIn(animationSpec = tween(durationMillis = 250)),
+            exit = slideOutHorizontally(
+                targetOffsetX = { fullWidth -> fullWidth },
+                animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+            ) + fadeOut(animationSpec = tween(durationMillis = 250)),
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background,
+            ) {
+                Box(modifier = Modifier.fillMaxSize()) {
                     SettingsScreen(
                         vm = vm,
-                        onOpenTheme = {
-                            nav.navigate(Dest.Theme.route) {
-                                launchSingleTop = true
-                            }
+                        onBack = {
+                            showTheme = false
+                            showSettings = false
                         },
+                        onOpenTheme = { showTheme = true },
                         onOpenAbout = { showAbout = true },
                         onShareLogs = {
                             scope.launch(Dispatchers.IO) {
@@ -531,19 +604,45 @@ fun PatcherApp(vm: PatcherViewModel) {
                         },
                         onRedownloadBundle = { vm.fetchAndDownloadBundle() },
                     )
+                    AnimatedVisibility(
+                        visible = showTheme,
+                        enter = slideInHorizontally(
+                            initialOffsetX = { fullWidth -> fullWidth },
+                            animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+                        ) + fadeIn(animationSpec = tween(durationMillis = 250)),
+                        exit = slideOutHorizontally(
+                            targetOffsetX = { fullWidth -> fullWidth },
+                            animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+                        ) + fadeOut(animationSpec = tween(durationMillis = 250)),
+                    ) {
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            color = MaterialTheme.colorScheme.background,
+                        ) {
+                            ThemeScreen(
+                                onBack = { showTheme = false },
+                            )
+                        }
+                    }
                 }
-                composable(Dest.Theme.route) {
-                    ThemeScreen(onBack = { nav.popBackStack() })
-                }
-                composable(Dest.Plugins.route) { AddonsScreen(vm) }
             }
         }
+        if (showSetup) {
+            SetupScreen(
+                storageGranted = storageGranted,
+                notificationsGranted = notificationsGranted,
+                onRequestStorage = requestStorageAccess,
+                onRequestNotifications = requestNotifications,
+                onContinue = {
+                    setupPrefs.edit().putBoolean("completed", true).apply()
+                    showSetup = false
+                },
+            )
+        }
     }
-
     if (showAbout) {
         AboutDialog(version = appVersion(context), onDismiss = { showAbout = false })
     }
-
     val showUpdateDialog = update is PatcherViewModel.AppUpdate.Available ||
         update is PatcherViewModel.AppUpdate.Downloading ||
         update is PatcherViewModel.AppUpdate.UpToDate ||
@@ -552,46 +651,338 @@ fun PatcherApp(vm: PatcherViewModel) {
         UpdateDialog(vm, update)
     }
 }
-
+private fun hasStorageAccess(context: Context): Boolean =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        Environment.isExternalStorageManager()
+    } else {
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE,
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+private fun hasNotificationsAccess(context: Context): Boolean =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+    } else {
+        NotificationManagerCompat.from(context).areNotificationsEnabled()
+    }
+@Composable
+private fun SetupScreen(
+    storageGranted: Boolean,
+    notificationsGranted: Boolean,
+    onRequestStorage: () -> Unit,
+    onRequestNotifications: () -> Unit,
+    onContinue: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .safeDrawingPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.nexora_logo),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(CircleShape),
+            )
+            Spacer(Modifier.height(20.dp))
+            Text(
+                text = "Welcome to Nexora",
+                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onBackground,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "A quick setup before you start patching.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(32.dp))
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                PermissionRow(
+                    icon = Icons.Filled.Folder,
+                    title = "Storage access",
+                    subtitle = if (storageGranted) "Granted" else "Required to patch and save files",
+                    granted = storageGranted,
+                    index = 0,
+                    onRequest = onRequestStorage,
+                )
+                PermissionRow(
+                    icon = Icons.Filled.Notifications,
+                    title = "Notifications",
+                    subtitle = if (notificationsGranted) "Granted" else "Optional · build and update alerts",
+                    granted = notificationsGranted,
+                    index = 1,
+                    onRequest = onRequestNotifications,
+                )
+            }
+            Spacer(Modifier.height(32.dp))
+            Button(
+                onClick = onContinue,
+                enabled = storageGranted,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Text("Continue")
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = if (storageGranted) {
+                    "You can change these later in Settings."
+                } else {
+                    "Storage access is required to continue."
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+@Composable
+private fun PermissionRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    granted: Boolean,
+    index: Int,
+    onRequest: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = getGroupedItemShape(index, 2),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (granted) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.secondaryContainer
+                        },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = if (granted) Icons.Filled.CheckCircle else icon,
+                    contentDescription = null,
+                    tint = if (granted) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSecondaryContainer
+                    },
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (!granted) {
+                Spacer(Modifier.width(8.dp))
+                TextButton(onClick = onRequest) {
+                    Text("Allow")
+                }
+            }
+        }
+    }
+}
 private data class BottomNavItem(
     val route: String,
     val title: String,
     val selectedIcon: androidx.compose.ui.graphics.vector.ImageVector,
     val unselectedIcon: androidx.compose.ui.graphics.vector.ImageVector,
 )
-
 @Composable
 private fun AboutDialog(version: String, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Nexora") },
-        text = {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 6.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 420.dp),
+        ) {
             Column {
-                Text(
-                    "Version: $version",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    "AMXX bundle injection for CS 1.6 on Android: Pawn compiler, addons manager and patch engine.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    "github.com/berkchy/nexora",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    MaterialTheme.colorScheme.primaryContainer,
+                                    MaterialTheme.colorScheme.secondaryContainer,
+                                ),
+                            ),
+                        )
+                        .padding(vertical = 28.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Image(
+                            painter = painterResource(id = R.drawable.nexora_logo),
+                            contentDescription = null,
+                            modifier = Modifier.size(96.dp),
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Nexora",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Version $version",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                        )
+                    }
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        text = "AMXX bundle injection for CS 1.6 on Android. Includes a Pawn compiler, addons manager and patch engine.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Text(
+                        text = "Developers",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    DeveloperRow(name = "berkchy", role = "Founder", github = "berkchy")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    DeveloperRow(name = "nenquen", role = "UI Developer", github = "nenquen")
+                    Spacer(modifier = Modifier.height(20.dp))
+                    FilledTonalButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Close")
+                    }
+                }
+            }
+        }
+    }
+}
+@Composable
+private fun DeveloperRow(name: String, role: String, github: String) {
+    val uriHandler = LocalUriHandler.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .clickable { uriHandler.openUri("https://github.com/$github") }
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        GithubAvatar(username = github)
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = name,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(modifier = Modifier.height(1.dp))
+            Text(
+                text = role,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            modifier = Modifier.size(16.dp),
+        )
+    }
+}
+@Composable
+private fun GithubAvatar(username: String) {
+    SubcomposeAsyncImage(
+        model = "https://github.com/$username.png?size=200",
+        contentDescription = "$username GitHub avatar",
+        contentScale = ContentScale.Crop,
+        modifier = Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.secondaryContainer),
+        loading = {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(18.dp),
                 )
             }
         },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
+        error = {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = username.take(1).uppercase(),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
         },
     )
 }
-
 @Composable
 private fun appVersion(context: android.content.Context): String {
     val pm = context.packageManager
@@ -607,7 +998,6 @@ private fun appVersion(context: android.content.Context): String {
         "unknown"
     }
 }
-
 private fun formatBytes(bytes: Long): String {
     if (bytes <= 0) return "0 B"
     val kb = bytes.toDouble() / 1024.0
@@ -616,9 +1006,7 @@ private fun formatBytes(bytes: Long): String {
     if (mb < 1024.0) return "%.1f MB".format(mb)
     return "%.2f GB".format(mb / 1024.0)
 }
-
 private fun formatSpeed(bps: Long): String = "${formatBytes(bps)}/s"
-
 @Composable
 private fun UpdateDialog(vm: PatcherViewModel, state: PatcherViewModel.AppUpdate) {
     AlertDialog(

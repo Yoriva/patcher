@@ -1,5 +1,4 @@
 package com.pickle.patcher.ui.screens
-
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -24,7 +23,6 @@ import com.pickle.patcher.ui.theme.Gray30
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
-
 @Composable
 fun StoreVerifyEmailScreen(
     api: StoreApi,
@@ -42,14 +40,12 @@ fun StoreVerifyEmailScreen(
     var codeSent by remember { mutableStateOf(false) }
     var cooldown by remember { mutableStateOf(120) }
     var sending by remember { mutableStateOf(false) }
-
     LaunchedEffect(cooldown) {
         if (cooldown > 0) {
             delay(1000)
             cooldown--
         }
     }
-
     LaunchedEffect(Unit) {
         if (email.isBlank()) {
             api.me().getOrNull()?.optJSONObject("user")?.optString("email")?.let { em ->
@@ -65,7 +61,6 @@ fun StoreVerifyEmailScreen(
             }
         }
     }
-
     LaunchedEffect(email) {
         if (email.isNotBlank() && !codeSent) {
             sending = true
@@ -76,7 +71,6 @@ fun StoreVerifyEmailScreen(
             sending = false
         }
     }
-
     Column(
         Modifier
             .fillMaxSize()
@@ -101,7 +95,6 @@ fun StoreVerifyEmailScreen(
             statusTone = if (success) Tone.Primary else Tone.Secondary,
         )
         Spacer(Modifier.height(20.dp))
-
         AppCard {
             if (email.isBlank()) {
                 OutlinedTextField(
@@ -114,7 +107,6 @@ fun StoreVerifyEmailScreen(
                 )
                 Spacer(Modifier.height(12.dp))
             }
-
             if (codeSent) {
                 OutlinedTextField(
                     value = code,
@@ -145,7 +137,6 @@ fun StoreVerifyEmailScreen(
                 )
             }
             Spacer(Modifier.height(16.dp))
-
             if (!codeSent && email.isBlank()) {
                 Button(
                     onClick = {

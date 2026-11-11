@@ -1,33 +1,10 @@
-# GitLab CI port of .github/workflows/build-and-release.yml (tag-triggered).
-#
-# Distribution stays on GitHub: the pipeline builds here and uploads all
-# release assets to the berkchy/nexora "continuous" GitHub release, so the
-# in-app updater is unchanged. Required CI/CD variable (Settings > CI/CD):
-#   GH_TOKEN  — fine-grained PAT with contents:read+write on berkchy/nexora
-# Optional:
-#   DISCORD_WEBHOOK — same payload as the GitHub workflow
-#
-# Client APK signing (Settings > CI/CD > Variables), masked + protected. The
-# same keystore the GitHub workflow uses; without them the pipeline still runs
-# and publishes the unsigned debug variant instead.
-#   CS16_SIGNING_KEY      — base64 of signingkey.jks
-#   CS16_KEYSTORE_PASSWORD
-#   CS16_KEY_ALIAS
-#   CS16_KEY_PASSWORD
-#
-# versionName/versionCode: versionCode = epoch seconds so the code is
-# monotonically increasing across BOTH CI providers (GitHub run numbers and
-# GitLab pipeline IIDs are independent counters and would collide/downgrade).
 image: ubuntu:22.04
 
 stages:
   - release
 
 variables:
-  # Enough history for the native skip guard's `git diff NATIVE_SHA..HEAD`.
   GIT_DEPTH: "50"
-  # Fallback ccache key when android/ci/build-amxx.sh changes (parity with
-  # the GitHub restore-keys prefix).
   CACHE_FALLBACK_KEY: "ccache-ndk-r25c"
 
 build-release:
@@ -55,19 +32,12 @@ build-release:
       WS="$CI_PROJECT_DIR"
       export GH_REPO="berkchy/nexora"
 
-      ############################################################
-      # Preconditions — fail fast before spending 30+ min building
-      ############################################################
       if [ -z "${GH_TOKEN:-}" ]; then
         echo "ERROR: GH_TOKEN CI/CD variable is not set — cannot upload release assets."
         exit 1
       fi
       export GH_TOKEN
 
-      ############################################################
-      # Release write preflight — a read-only PAT only fails at the
-      # upload step, after the whole build is spent.
-      ############################################################
       if [ "$CI_COMMIT_TAG" = "continuous" ]; then
         RID=$(gh api "/repos/$GH_REPO/releases/tags/continuous" --jq .id 2>/dev/null || true)
         if [ -n "$RID" ]; then
@@ -78,16 +48,12 @@ build-release:
         fi
       fi
 
-      ############################################################
-      # Tooling: everything the ubuntu:22.04 image is missing
-      ############################################################
       echo "== installing base tooling =="
       apt-get update -qq
       DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
         ca-certificates curl wget git unzip zip jq xz-utils file \
         python3 cmake ninja-build ccache pkg-config build-essential \
         openjdk-17-jdk-headless
-      # GitHub CLI (release upload/download)
       curl -fsSL -o /tmp/gh.deb \
         https://github.com/cli/cli/releases/download/v2.62.0/gh_2.62.0_linux_amd64.deb
       apt-get install -y -qq /tmp/gh.deb
@@ -121,9 +87,6 @@ build-release:
         ccache --zero-stats || true
       fi
 
-      ############################################################
-      # Submodules (3rdparty/hlsdk, 3rdparty/mm-p) + the cs16-client clone
-      ############################################################
       echo "== submodules =="
       git submodule update --init --recursive
       PIN=$(tr -d '[:space:]' < cs16-client.pin)
@@ -135,9 +98,6 @@ build-release:
       test "$(git -C cs16-client rev-parse HEAD)" = "$PIN" \
         || { echo "cs16-client is not at the pin"; exit 1; }
 
-      ############################################################
-      # Detect build type (parity with the GitHub "Detect build type" step)
-      ############################################################
       MSG=$(git log -1 --pretty=%s)
       echo "Commit message: $MSG"
       LOWER=$(echo "$MSG" | tr '[:upper:]' '[:lower:]')
@@ -160,14 +120,9 @@ build-release:
         APP_VERSION_NAME="$CI_COMMIT_TAG"
         APK_NAME="nexora_v${CI_COMMIT_TAG#v}.apk"
       fi
-      # Monotonic across CI providers (GitHub run_number stays far below this
-      # until 2038; see android/app/build.gradle.kts versionCode comment).
       APP_VERSION_CODE=$(date -u +%s)
       export NEEDS_APK HAS_MARKER BUNDLE_VERSION APP_VERSION_NAME APP_VERSION_CODE APK_NAME
 
-      ############################################################
-      # Native skip guard (reuse previous .so set when native inputs unchanged)
-      ############################################################
       SKIP_NATIVE=false
       NATIVE_SHA_OUT=$(git rev-parse HEAD)
       UP_AMXX=$(git ls-remote https://github.com/alliedmodders/amxmodx.git HEAD 2>/dev/null | cut -f1)
@@ -195,9 +150,6 @@ build-release:
       export SKIP_NATIVE NATIVE_SHA_OUT UPSTREAMS_JSON="$UP_JSON"
       echo "Native skip: $SKIP_NATIVE (native_sha: $NATIVE_SHA_OUT)"
 
-      ############################################################
-      # Cross-compile core + modules + plugins (both ABIs)
-      ############################################################
       if [ "$SKIP_NATIVE" != "true" ]; then
         for ABI in arm64-v8a armeabi-v7a; do
           if RELEASE_VERSION="$BUNDLE_VERSION" bash ./android/ci/build-amxx.sh "$WS/src" "$ANDROID_NDK_HOME" \
@@ -215,9 +167,6 @@ build-release:
         done
         if [ -n "${CCACHE:-}" ]; then ccache --show-stats || true; fi
       else
-        ########################################################
-        # Restore native outputs from the previous GitHub release
-        ########################################################
         set -eo pipefail
         mkdir -p /tmp/prevso \
           "$WS/build-out/lib/arm64-v8a" \
@@ -250,22 +199,12 @@ build-release:
         [ -f "$WS/build-out/lib/armeabi-v7a/libcs_android_armv7l.so" ] || touch "$WS/v7a-missing"
       fi
 
-      ############################################################
-      # Build ReGameDLL libcs (first-spawn fix)
-      ############################################################
       set -e
       RGDLL="$WS/rgdll-src"
       rm -rf "$RGDLL"
       mkdir -p "$RGDLL"
-      # Fetched as a tarball rather than a clone: the gamedata measurement needs
-      # a specific file out of the tree, and a shallow clone that comes back
-      # without its checkout used to fail much later, in the build.
       curl -fsSL "https://codeload.github.com/berkchy/ReGameDLL_CS/tar.gz/refs/heads/fix/first-spawn-equip" \
         | tar -xz -C "$RGDLL" --strip-components=1
-      # The gamedll measures its own cstrike pdata offsets out of the debug info
-      # it compiles with, but the fork builds with -g0 and strips at link time.
-      # Keep -g1 (class layouts, no locals) and skip the -s; the debug sections
-      # are removed again below, so nothing but the table changes.
       python3 - "$RGDLL" <<'PY'
       import glob, os, sys
       root = sys.argv[1]
@@ -308,9 +247,6 @@ build-release:
             -DCMAKE_BUILD_TYPE=Release &&
            cmake --build "$BUILD" --target regamedll --parallel 2 &&
            [ -f "$SO" ]; then
-          # Measure this build's cstrike pdata offsets straight out of the
-          # DWARF the build just emitted, so the table can never drift from
-          # the shipped gamedll (DW_AT_data_member_location == offsetof).
           "$NDKBIN/llvm-readelf" -S "$SO" | grep -i "debug" || echo "  (no debug sections in $SO)"
           python3 ./android/ci/gamedata-offsets.py dump "$TPL" \
             --dwarfdump "$NDKBIN/llvm-dwarfdump" --so "$SO" --out "$BUILD/gamedll.dwarf"
@@ -331,7 +267,6 @@ build-release:
           else
             echo "WARNING: gamedata offset measurement failed for $ABI (shipping without an override)"
           fi
-          # Measurement scaffolding only: the shipped gamedll is stripped again.
           "$NDKBIN/llvm-strip" "$SO"
           mkdir -p "$WS/build-out/lib/$ABI"
           cp "$SO" "$WS/build-out/lib/$ABI/$NAME"
@@ -346,9 +281,6 @@ build-release:
         touch "$WS/v7a-missing"
       done
 
-      ############################################################
-      # Package release bundles
-      ############################################################
       RELEASE_VERSION="$BUNDLE_VERSION" python3 ./android/ci/gen-manifest.py \
         arm64-v8a \
         "$WS/build-out/lib/arm64-v8a" \
@@ -368,8 +300,6 @@ build-release:
       cd "$WS"
       zip -r amxx-addons.zip addons/ -x '*.gitignore' '*.git/*'
 
-      # build-meta.json: lets the next run's skip guard know which commit +
-      # upstream SHAs the native outputs correspond to.
       python3 - "$WS/build-meta.json" <<'PY'
       import json, os, subprocess, sys
       out = sys.argv[1]
@@ -395,9 +325,6 @@ build-release:
       fi
       ls "$WS/compiler-assets" || true
 
-      ############################################################
-      # Build the patcher APK
-      ############################################################
       if [ "$NEEDS_APK" = "true" ]; then
         mkdir -p android/app/src/main/assets/keystore
         cp android/debug/patcher-release.p12 android/app/src/main/assets/keystore/debug.p12
@@ -428,10 +355,6 @@ build-release:
         echo "${APP_VERSION_NAME:-unknown}" > "$WS/version.txt"
         cat "$WS/version.txt"
 
-        # The stock client APK the patcher adopts. Built from the pinned
-        # cs16-client clone with its own gradle project; cs16-client pins a
-        # different NDK than the .so build and its continuous build type hands
-        # ccache to CMake, so both are guaranteed here.
         CLIENT_NDK=$(grep -oP 'ndkVersion\s*=\s*"\K[^"]+' cs16-client/android/app/build.gradle)
         command -v ccache >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq ccache; }
         if [ ! -d "$ANDROID_HOME/ndk/$CLIENT_NDK" ]; then
@@ -462,9 +385,6 @@ build-release:
         cd "$WS"
       fi
 
-      ############################################################
-      # Release (rolling continuous) → GitHub release assets
-      ############################################################
       if [ "$CI_COMMIT_TAG" = "continuous" ]; then
         if ! gh release view continuous >/dev/null 2>&1; then
           gh release create continuous \
@@ -497,7 +417,6 @@ build-release:
         fi
         gh release upload continuous --clobber "${FILES[@]}"
       else
-        # Version tag (v*) — parity with softprops/action-gh-release.
         shopt -s nullglob
         FILES=(amxx-addons.zip manifest.json manifest-v7a.json build-meta.json
                incremental/arm64-v8a/*.so incremental-v7a/armeabi-v7a/*.so
@@ -512,11 +431,6 @@ build-release:
         gh release upload "$CI_COMMIT_TAG" --clobber "${FILES[@]}" || true
       fi
 
-      ############################################################
-      # Notify Discord (optional). Only release tags (v*) announce; the
-      # rolling `continuous` tag is the channel players already follow and
-      # goes out silently.
-      ############################################################
       if [ -n "${DISCORD_WEBHOOK:-}" ] && [ "$CI_COMMIT_TAG" != "continuous" ]; then
         VERSION="$CI_COMMIT_TAG"
         APK_FILE="nexora_v${VERSION#v}.apk"

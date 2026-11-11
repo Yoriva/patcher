@@ -1,5 +1,4 @@
 package com.pickle.patcher.patcher
-
 import android.app.Application
 import android.content.Context
 import android.content.Intent
@@ -10,7 +9,6 @@ import android.os.SystemClock
 import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.pickle.patcher.CrashLog
 import com.pickle.patcher.data.BundleProvider
 import com.pickle.patcher.data.IncrementalUpdateManager
 import com.pickle.patcher.data.NEXORA_ROOT
@@ -42,34 +40,25 @@ import java.io.File
 import java.io.IOException
 import java.net.URLDecoder
 import com.pickle.patcher.jobs.JobProgress
-
 data class SourceInfo(
     val name: String,
     val sizeBytes: Long,
     val entryCount: Int,
     val abis: List<String> = emptyList(),
 )
-
-/** Progress of the "download the client APK from GitHub" action. */
 sealed interface SourceDownloadState {
     data object Fetching : SourceDownloadState
     data class Downloading(val downloaded: Long, val total: Long) : SourceDownloadState
     data class Done(val name: String) : SourceDownloadState
     data class Failed(val message: String) : SourceDownloadState
-
-    /** The cached APK is not what GitHub serves any more. */
     data class Outdated(
         val name: String,
         val localSize: Long,
         val remoteSize: Long,
-        /** Which check tripped: size, content hash, or build date. */
         val reason: String,
     ) : SourceDownloadState
-
-    /** The cached APK is broken (truncated download, unreadable zip). */
     data class Corrupt(val name: String, val reason: String) : SourceDownloadState
 }
-
 sealed interface BundleState {
     data object None : BundleState
     data object Loaded : BundleState
@@ -83,14 +72,12 @@ sealed interface BundleState {
     ) : BundleState
     data class DownloadError(val message: String) : BundleState
 }
-
 sealed interface AddonsState {
     data object None : AddonsState
     data class Downloading(val percent: Float, val step: String) : AddonsState
     data class Done(val message: String) : AddonsState
     data class Error(val message: String) : AddonsState
 }
-
 sealed interface PatchUiState {
     data object Idle : PatchUiState
     data class Running(
@@ -108,11 +95,9 @@ sealed interface PatchUiState {
     ) : PatchUiState
     data class Failed(val message: String) : PatchUiState
 }
-
 data class SmaSource(val path: String, val name: String, val hasInclude: Boolean) {
     val scriptDir: String get() = File(path).parentFile?.absolutePath.orEmpty()
 }
-
 data class LibInfo(
     val name: String,
     val localSize: Long,
@@ -121,61 +106,142 @@ data class LibInfo(
     val downloading: Boolean = false,
     val downloadProgress: Float = -1f,
 )
-
 sealed interface CompileState {
     data object Idle : CompileState
     data class Compiling(val source: String) : CompileState
-    data class Done(val log: String, val failures: Map<String, String> = emptyMap()) : CompileState
+    data class Done(
+        val log: String,
+        val failures: Map<String, String> = emptyMap(),
+        val ok: Int = 0,
+        val total: Int = 0,
+    ) : CompileState
     data class Failed(val message: String) : CompileState
 }
-
 class PatcherViewModel(app: Application) : AndroidViewModel(app) {
-
     private val bundleProvider = BundleProvider(app)
-
-    /** The application context, for the job notifications. */
     private val app: Application = app
-
     private val _source = MutableStateFlow<SourceInfo?>(null)
     val source: StateFlow<SourceInfo?> = _source.asStateFlow()
-
     private val _receivedSource: MutableStateFlow<File?> = MutableStateFlow(null)
-
     private val _sourceDownload = MutableStateFlow<SourceDownloadState?>(null)
     val sourceDownload: StateFlow<SourceDownloadState?> = _sourceDownload.asStateFlow()
-
     private val _bundle = MutableStateFlow<BundleState>(BundleState.None)
     val bundle: StateFlow<BundleState> = _bundle.asStateFlow()
-
-    /**
-     * The ABI of the phone the patcher runs on. There is no ABI picker: a
-     * 32-bit phone cannot load arm64 modules and patching one in would only
-     * produce an APK that dies at startup, so the device decides and the source
-     * APK is only allowed to narrow it down, never widen it.
-     */
     private val deviceAbi: String =
         Build.SUPPORTED_ABIS.firstOrNull { it in SUPPORTED_ABIS } ?: SUPPORTED_ABIS.first()
-
-    /** ABI every patch step uses. Fixed by the device architecture. */
     private val _abi = MutableStateFlow(deviceAbi)
     val abi: StateFlow<String> = _abi.asStateFlow()
-
+    private val _autoDetectedAbi = MutableStateFlow(deviceAbi)
+    val autoDetectedAbi: StateFlow<String> = _autoDetectedAbi.asStateFlow()
+    fun autoDetectAbi(): String {
+        try {
+            _receivedSource.value?.let { file ->
+                val info = ZipAnalyzer.analyze(file)
+                val supported = info.abis.filter { it in SUPPORTED_ABIS }
+                if (supported.size == 1) return supported.first()
+                val nameLower = file.name.lowercase()
+                if (nameLower.contains("arm64") || nameLower.contains("aarch64") || nameLower.contains("v8a")) return "arm64-v8a"
+                if (nameLower.contains("arm32") || nameLower.contains("v7a") || nameLower.contains("armeabi")) return "armeabi-v7a"
+            }
+        } catch (_: Throwable) {
+        }
+        try {
+            val cachedSource = cachedClientApk()
+            if (cachedSource != null && cachedSource.isFile) {
+                val info = ZipAnalyzer.analyze(cachedSource)
+                val supported = info.abis.filter { it in SUPPORTED_ABIS }
+                if (supported.size == 1) return supported.first()
+                val nameLower = cachedSource.name.lowercase()
+                if (nameLower.contains("arm64") || nameLower.contains("aarch64") || nameLower.contains("v8a")) return "arm64-v8a"
+                if (nameLower.contains("arm32") || nameLower.contains("v7a") || nameLower.contains("armeabi")) return "armeabi-v7a"
+            }
+        } catch (_: Throwable) {
+        }
+        val path = try { _installPath.value } catch (_: Throwable) { null }
+        val detectedRoot = runCatching { resolveGameRoot() }.getOrNull()
+        val gameDir = File(path ?: ((detectedRoot ?: "/storage/emulated/0/.xash") + "/cstrike"))
+        val historyCandidates = buildList {
+            add(File(gameDir, "patch-history.json"))
+            if (detectedRoot != null) {
+                add(File(detectedRoot, "cstrike/patch-history.json"))
+                add(File(detectedRoot, "patch-history.json"))
+            }
+            add(File("/sdcard/xash/cstrike/patch-history.json"))
+            add(File("/sdcard/cstrike/patch-history.json"))
+            add(File("/sdcard/xash/patch-history.json"))
+            add(File("/sdcard/.xash/cstrike/patch-history.json"))
+        }
+        for (historyFile in historyCandidates) {
+            if (historyFile.isFile) {
+                try {
+                    val content = historyFile.readText()
+                    if (content.contains("\"abi\":\"arm64-v8a\"")) return "arm64-v8a"
+                    if (content.contains("\"abi\":\"armeabi-v7a\"")) return "armeabi-v7a"
+                } catch (_: Throwable) {
+                }
+            }
+        }
+        val potentialLibFiles = buildList {
+            add(File(gameDir, "cl_dlls/client.so"))
+            add(File(gameDir, "dlls/cs.so"))
+            add(File(gameDir, "libxash.so"))
+            if (detectedRoot != null) {
+                add(File(detectedRoot, "cstrike/cl_dlls/client.so"))
+                add(File(detectedRoot, "cstrike/dlls/cs.so"))
+                add(File(detectedRoot, "libxash.so"))
+            }
+            add(File("/sdcard/xash/cstrike/cl_dlls/client.so"))
+            add(File("/sdcard/xash/libxash.so"))
+            add(File("/sdcard/.xash/cstrike/cl_dlls/client.so"))
+            add(File("/sdcard/.xash/cstrike/dlls/cs.so"))
+        }
+        for (libFile in potentialLibFiles) {
+            if (libFile.isFile && libFile.length() >= 20) {
+                try {
+                    libFile.inputStream().use { stream ->
+                        val header = ByteArray(20)
+                        if (stream.read(header) == 20 &&
+                            header[0] == 0x7F.toByte() && header[1] == 'E'.code.toByte() &&
+                            header[2] == 'L'.code.toByte() && header[3] == 'F'.code.toByte()
+                        ) {
+                            val elfClass = header[4].toInt()
+                            val machine = (header[18].toInt() and 0xFF) or ((header[19].toInt() and 0xFF) shl 8)
+                            if (elfClass == 2 || machine == 183) return "arm64-v8a"
+                            if (elfClass == 1 || machine == 40) return "armeabi-v7a"
+                        }
+                    }
+                } catch (_: Throwable) {
+                }
+            }
+        }
+        try {
+            val root = externalRoot
+            val arm64Dir = File(root, "libs/arm64-v8a")
+            val arm32Dir = File(root, "libs/armeabi-v7a")
+            val arm64Count = arm64Dir.listFiles { f -> f.isFile && f.extension.equals("so", ignoreCase = true) }?.size ?: 0
+            val arm32Count = arm32Dir.listFiles { f -> f.isFile && f.extension.equals("so", ignoreCase = true) }?.size ?: 0
+            if (arm64Count > 0 && arm32Count == 0) return "arm64-v8a"
+            if (arm32Count > 0 && arm64Count == 0) return "armeabi-v7a"
+        } catch (_: Throwable) {
+        }
+        return deviceAbi
+    }
+    fun runAutoDetectAbi() {
+        val detected = autoDetectAbi()
+        _autoDetectedAbi.value = detected
+        if (detected in SUPPORTED_ABIS && detected != _abi.value) {
+            setAbi(detected)
+        }
+    }
     val supportedAbis: List<String> = SUPPORTED_ABIS
     val isDeviceAbi: String get() = deviceAbi
-
     val sourceAbis: List<String> get() = _source.value?.abis ?: emptyList()
     val loadedBundleAbi: String? get() = loadedBundle?.manifest?.abi?.ifBlank { null }
-
-    /**
-     * Picks the ABI to patch for: the device's own one whenever the source APK
-     * ships it, otherwise the only one the APK does have.
-     */
     private fun resolveAbi(sourceAbis: List<String>): String? = when {
         sourceAbis.isEmpty() -> null
         deviceAbi in sourceAbis -> deviceAbi
         else -> sourceAbis.first()
     }
-
     fun setAbi(abi: String) {
         if (abi !in SUPPORTED_ABIS || abi == _abi.value) return
         _abi.value = abi
@@ -186,19 +252,13 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch(Dispatchers.IO) {
             applyGamedataAbiPolicy(File(_installPath.value), abi)
-            // Installed libraries live in libs/<abi>/, so an ABI that was
-            // already set up rebuilds its bundle from disk instead of being
-            // asked to download one it already has.
             if (loadedBundle == null) useCachedBundle()
             refreshAbiStatus()
         }
         scanLibs(autoLoad = true)
     }
-
     private val _addons = MutableStateFlow<AddonsState>(AddonsState.None)
     val addons: StateFlow<AddonsState> = _addons.asStateFlow()
-
-    /** Per-ABI state so the target card can show every option's status at once. */
     data class AbiStatus(
         val abi: String,
         val inSource: Boolean,
@@ -210,7 +270,6 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         val installed: Boolean get() = hasBundle && libCount > 0
     }
-
     data class PatchHistoryEntry(
         val time: Long,
         val abi: String,
@@ -220,7 +279,6 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
         val verified: Boolean,
         val ok: Boolean,
     )
-
     data class PatchSummary(
         val abi: String,
         val source: String,
@@ -229,7 +287,6 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
         val entries: Int,
         val payloadSize: Long,
     )
-
     sealed interface PatchCheck {
         data object Idle : PatchCheck
         data object Running : PatchCheck
@@ -243,19 +300,15 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
         ) : PatchCheck
         data class Failed(val message: String) : PatchCheck
     }
-
     private val _patchLog = MutableStateFlow<List<String>>(emptyList())
     val patchLog: StateFlow<List<String>> = _patchLog.asStateFlow()
     private val _patchHistory = MutableStateFlow<List<PatchHistoryEntry>>(emptyList())
     val patchHistory: StateFlow<List<PatchHistoryEntry>> = _patchHistory.asStateFlow()
     private val _patchCheck = MutableStateFlow<PatchCheck>(PatchCheck.Idle)
-
     private val _bundleVersion = MutableStateFlow("")
     val bundleVersion: StateFlow<String> = _bundleVersion.asStateFlow()
     private val _updateAvailable = MutableStateFlow(false)
     val updateAvailable: StateFlow<Boolean> = _updateAvailable.asStateFlow()
-
-    /** True once per bundle version, so the intro can replay after an update. */
     fun shouldReplayIntro(version: String): Boolean {
         if (version.isBlank()) return false
         if (_bundleVersion.value != version) {
@@ -271,11 +324,9 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
         return false
     }
     val patchCheck: StateFlow<PatchCheck> = _patchCheck.asStateFlow()
-
     private val _abiStatus = MutableStateFlow<List<AbiStatus>>(emptyList())
     val abiStatus: StateFlow<List<AbiStatus>> = _abiStatus.asStateFlow()
     private var downloadingAbi: String? = null
-
     fun refreshAbiStatus() {
         val sourceAbis = _source.value?.abis ?: emptyList()
         val selected = _abi.value
@@ -297,108 +348,60 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
     }
-
     private val _libs = MutableStateFlow<List<LibInfo>>(emptyList())
     private val _customLibs = MutableStateFlow<List<CustomLib>>(emptyList())
     val customLibs: StateFlow<List<CustomLib>> = _customLibs.asStateFlow()
     val libs: StateFlow<List<LibInfo>> = _libs.asStateFlow()
-
-    /** True while a manual remote lib-status check is in flight. */
     private val _libsChecking = MutableStateFlow(false)
     val libsChecking: StateFlow<Boolean> = _libsChecking.asStateFlow()
-
-    /** Manual "Check updates" for libs: compares local .so files with the release. */
     fun refreshLibStatus() {
         scanLibs(checkRemote = true)
     }
-
     private val _scripts = MutableStateFlow<List<SmaSource>>(emptyList())
     val scripts: StateFlow<List<SmaSource>> = _scripts.asStateFlow()
-
-    /** Root folder the user picked via SAF; null until a folder is selected. */
     private val _scriptRoot = MutableStateFlow<String?>(null)
     val scriptRoot: StateFlow<String?> = _scriptRoot.asStateFlow()
-
-    /** .amxx output folder picked by the user; null = "<scripts>/compiled". */
     private val _outputRoot = MutableStateFlow<String?>(null)
     val outputRoot: StateFlow<String?> = _outputRoot.asStateFlow()
-
     private val compilerPrefs by lazy {
         getApplication<Application>().getSharedPreferences("compiler_prefs", Context.MODE_PRIVATE)
     }
-
     private val patcherPrefs by lazy {
         getApplication<Application>().getSharedPreferences("patcher_prefs", Context.MODE_PRIVATE)
     }
-
-    // How many amxxpc processes may run at once. Defaults to every core but one
-    // so the UI and the game keep a core, and is clamped on read because the
-    // device may have fewer cores than when the setting was saved.
     private val _compileWorkers = MutableStateFlow(0)
     val compileWorkers: StateFlow<Int> = _compileWorkers.asStateFlow()
-
     private val _patchWorkers = MutableStateFlow(0)
     val patchWorkers: StateFlow<Int> = _patchWorkers.asStateFlow()
-
     init {
         val saved = compilerPrefs.getInt("compile_workers", 0)
         _compileWorkers.value = if (saved > 0) saved.coerceIn(1, maxCompileWorkers()) else maxCompileWorkers()
         val savedPatch = patcherPrefs.getInt("patch_workers", 0)
         _patchWorkers.value = if (savedPatch > 0) savedPatch.coerceIn(1, maxPatchWorkers()) else maxPatchWorkers()
     }
-
-    /** Upper bound for the worker slider: never more than the usable cores. */
     fun maxCompileWorkers(): Int = Runtime.getRuntime().availableProcessors().coerceAtLeast(2)
-
-    /** Worker count actually used by a compile run. */
     fun effectiveCompileWorkers(): Int =
         _compileWorkers.value.coerceIn(1, maxCompileWorkers())
-
-    /** Persists the worker count; the slider calls this on every change. */
     fun setCompileWorkers(count: Int) {
         val clamped = count.coerceIn(1, maxCompileWorkers())
         if (clamped == _compileWorkers.value) return
         _compileWorkers.value = clamped
         compilerPrefs.edit().putInt("compile_workers", clamped).apply()
     }
-
     fun maxPatchWorkers(): Int = Runtime.getRuntime().availableProcessors().coerceAtLeast(2)
-
     fun effectivePatchWorkers(): Int =
         _patchWorkers.value.coerceIn(1, maxPatchWorkers())
-
     fun setPatchWorkers(count: Int) {
         val clamped = count.coerceIn(1, maxPatchWorkers())
         if (clamped == _patchWorkers.value) return
         _patchWorkers.value = clamped
         patcherPrefs.edit().putInt("patch_workers", clamped).apply()
     }
-
-    // Declared before init: useCachedBundle() runs synchronously in init and
-    // reads these (Kotlin initializes properties in textual order).
     private var loadedBundle: Bundle? = null
     private var lastReport: ApkPatcher.PatchReport? = null
-
     val hasCachedBundle: Boolean get() = bundleProvider.hasCachedBundle(_abi.value)
-
     val repo = "berkchy/nexora"
-
-    /**
-     * Everything the patcher downloads lives here, not under
-     * Android/data/<pkg>/files.
-     *
-     * Android deletes that directory when the app is uninstalled, and the APK
-     * is uninstalled and reinstalled constantly here: every patch cycle
- * *uninstalls the client, wipes the folder with it, and downloads ~145 MB of
- * libraries again. Shared storage has no such rule, so the download survives
- * and a reinstall is instant.
-     *
- * Falls back to the external files dir when MANAGE_EXTERNAL_STORAGE has not
- * been granted, because without it /sdcard is not writable and failing to a
- * private folder still works - just slowly, and only until the next reinstall.
- */
 private val externalRoot: File = externalRoot(app)
-
 private fun externalRoot(app: Application): File {
         val sd = File(Environment.getExternalStorageDirectory(), NEXORA_ROOT)
         return if (
@@ -410,25 +413,14 @@ private fun externalRoot(app: Application): File {
             app.getExternalFilesDir(null) ?: app.cacheDir
         }
     }
-
     private val workDir = File(externalRoot, "patcher")
-
-    // The downloaded client APK lives next to the patch output, so both show up
-    // under /sdcard/nexora and neither is hidden in app-private storage.
     private val sourceCacheDir = File(externalRoot, "apk-source")
-
-    /**
-     * A file in [workDir] with the directory created. The external files dir
-     * only materializes once something writes into it, and opening the output
-     * APK before that fails with ENOENT.
-     */
+    private val legacySourceDir = File(getApplication<Application>().filesDir, "apk-source")
     private fun workFile(name: String): File {
         workDir.mkdirs()
         return File(workDir, name)
     }
-
     private val libsDir = File(externalRoot, "libs")
-
     init {
         val savedScripts = compilerPrefs.getString("script_root", null)
         if (!savedScripts.isNullOrEmpty() && File(savedScripts).isDirectory) {
@@ -439,54 +431,17 @@ private fun externalRoot(app: Application): File {
         if (!savedOutput.isNullOrEmpty() && File(savedOutput).isDirectory) {
             _outputRoot.value = savedOutput
         }
-        // Manual-update mode: on launch only show what is already on disk.
-        // No network calls here — the user triggers "Download" and
-        // "Update check" explicitly.
         scanLibs()
         useCachedBundle()
         scanCustomLibs()
+        runAutoDetectAbi()
     }
-
     private val _compile = MutableStateFlow<CompileState>(CompileState.Idle)
     val compile: StateFlow<CompileState> = _compile.asStateFlow()
-
     private val _releaseNote = MutableStateFlow<String?>(null)
     val releaseNote: StateFlow<String?> = _releaseNote.asStateFlow()
-
     private val _patch = MutableStateFlow<PatchUiState>(PatchUiState.Idle)
     val patch: StateFlow<PatchUiState> = _patch.asStateFlow()
-
-    data class CrashLogEntry(
-        val fileName: String,
-        val modified: String,
-        val sizeBytes: Long,
-        val content: String,
-    )
-
-    private val _crashLog = MutableStateFlow<CrashLogEntry?>(null)
-    val crashLog: StateFlow<CrashLogEntry?> = _crashLog.asStateFlow()
-
-    fun refreshCrashLog() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val file = CrashLog.latestFile(getApplication())
-            _crashLog.value = file?.let {
-                CrashLogEntry(
-                    fileName = it.name,
-                    modified = java.text.SimpleDateFormat(
-                        "yyyy-MM-dd HH:mm:ss", java.util.Locale.US
-                    ).format(it.lastModified()),
-                    sizeBytes = it.length(),
-                    content = it.readText().take(1 shl 20),
-                )
-            }
-        }
-    }
-
-    /**
-     * Loads the bundled signing key. Prefers the PEM pair (PKCS#8 key + X.509 cert)
-     * because [SigningKeystore.loadPem] uses only [KeyFactory]/[CertificateFactory],
-     * which are always available on Android; falls back to the PKCS12 container.
-     */
     private fun loadSigningKeystore(): SigningKeystore {
         val assets = getApplication<Application>().assets
         val keyPem = runCatching {
@@ -502,16 +457,8 @@ private fun externalRoot(app: Application): File {
             SigningKeystore.loadBytes(p12)
         }
     }
-
-    /**
-     * The client APK the patcher would use: the canonical name first, then the
-     * newest APK in either cache location. Both places are checked because the
-     * cache moved from internal storage to Android/data, and an APK dropped in
-     * by hand under a different name still has to be compared against GitHub
-     * instead of looking like there is no client at all.
-     */
     private fun cachedClientApk(): File? {
-        val candidates = (listOf(sourceCacheDir, legacySourceDir)).flatMap { dir ->
+        val candidates = listOfNotNull(sourceCacheDir, legacySourceDir).flatMap { dir ->
             dir.listFiles { f -> f.isFile && f.extension.equals("apk", ignoreCase = true) }
                 ?.toList()
                 ?: emptyList()
@@ -520,20 +467,6 @@ private fun externalRoot(app: Application): File {
         return candidates.firstOrNull { it.name == CLIENT_APK_ASSET }
             ?: candidates.maxByOrNull { it.lastModified() }
     }
-
-    /** Where the cache lived before it moved next to the patch output. */
-    private val legacySourceDir = File(getApplication<Application>().filesDir, "apk-source")
-
-    /**
-     * Null when the file is a usable client APK, otherwise why it is not.
-     * A download that died halfway leaves a zip the analyzer cannot read, so
-     * this is what tells "needs another download" apart from "good to patch".
-     *
-     * An APK with no lib/ at all is fine: that is the shell we ship, which
-     * carries neither the client nor the menu because both are injected from
-     * the bundle afterwards. Only an APK that does carry native libraries and
-     * has none we can use is a problem.
-     */
     private fun apkProblem(file: File): String? = try {
         val info = ZipAnalyzer.analyze(file)
         if (info.abis.isNotEmpty() && info.abis.none { it in SUPPORTED_ABIS }) {
@@ -544,15 +477,6 @@ private fun externalRoot(app: Application): File {
     } catch (t: Throwable) {
         t.message?.takeIf { it.isNotBlank() } ?: "unreadable archive"
     }
-
-    /**
-     * Analyzes an APK already sitting in app storage and adopts it as the
-     * source. Shared by the SAF path and the GitHub download path, so both
-     * validate the ABI the same way.
-     *
-     * A source with no lib/ entry narrows nothing, so the device ABI stands.
-     * That is the shell APK's normal case, not a malformed download.
-     */
     private fun useSourceFile(file: File, label: String) {
         val info = ZipAnalyzer.analyze(file)
         val supported = info.abis.filter { it in SUPPORTED_ABIS }
@@ -571,18 +495,13 @@ private fun externalRoot(app: Application): File {
             } else if (_abi.value !in supported) {
                 resolveAbi(supported)?.let { setAbi(it) }
             }
+        } else {
+            runAutoDetectAbi()
         }
         _source.value = SourceInfo(label, file.length(), info.entryCount, supported)
         _receivedSource.value = file
         refreshAbiStatus()
     }
-
-    /**
-     * Checks the cached client APK against the current GitHub release whenever
-     * the source card shows up: a good APK is adopted without any tap, an
-     * outdated one is reported as updatable and a broken one as corrupt, so the
-     * patcher never runs against half a download.
-     */
     fun refreshSourceApkStatus() {
         if (_sourceDownload.value is SourceDownloadState.Fetching ||
             _sourceDownload.value is SourceDownloadState.Downloading
@@ -616,7 +535,6 @@ private fun externalRoot(app: Application): File {
                 )
                 else -> SourceDownloadState.Done(CLIENT_APK_ASSET)
             }
-            // A cached APK that passed every check becomes the source by itself.
             if (_sourceDownload.value is SourceDownloadState.Done &&
                 cached != null &&
                 _receivedSource.value?.absolutePath != cached.absolutePath &&
@@ -626,16 +544,6 @@ private fun externalRoot(app: Application): File {
             }
         }
     }
-
-    /**
-     * Every reason the cached APK differs from the asset on GitHub. An empty list
-     * means they are the same build.
-     *
-     * Three independent checks, any of which is enough to offer the update,
-     * because each one can be blind on its own: the length is the same for two
-     * consecutive client builds, the date is unusable when the file was copied
-     * around, and the fingerprint is only known for a file this app downloaded.
-     */
     private fun outdatedReasons(
         cached: File,
         remote: ReleaseRepository.RemoteInfo,
@@ -643,11 +551,8 @@ private fun externalRoot(app: Application): File {
     ): List<String> {
         val reasons = mutableListOf<String>()
         val localSize = cached.length()
-
         if (recorded != null) {
-            // Something replaced or truncated the file after it was downloaded.
             if (recorded.size != localSize) reasons += "size changed since download"
-            // The release asset itself moved on: different content or a rebuild.
             if (remote.etag.isNotEmpty() && recorded.etag.isNotEmpty() &&
                 remote.etag != recorded.etag
             ) {
@@ -659,8 +564,6 @@ private fun externalRoot(app: Application): File {
                 reasons += "rebuilt since download"
             }
         } else {
-            // No stamp: the APK was put there by hand. Length and date are all
-            // there is, and either one disagreeing means it is not the release.
             if (remote.size > 0L && localSize != remote.size) {
                 reasons += "size differs from GitHub"
             }
@@ -670,14 +573,9 @@ private fun externalRoot(app: Application): File {
                 reasons += "older than the GitHub build"
             }
         }
-
         return reasons
     }
-
-    /** What the cached APK was downloaded from, for the checks above. */
     private data class SourceStamp(val size: Long, val etag: String, val lastModifiedMillis: Long)
-
-    /** What the cached APK was downloaded from, or null if unknown. */
     private fun readSourceStamp(cached: File): SourceStamp? {
         val file = File(cached.parentFile ?: return null, "${cached.name}.stamp")
         if (!file.isFile) return null
@@ -692,7 +590,6 @@ private fun externalRoot(app: Application): File {
             null
         }
     }
-
     private fun writeSourceStamp(cached: File, remote: ReleaseRepository.RemoteInfo?) {
         try {
             cached.parentFile?.mkdirs()
@@ -700,21 +597,9 @@ private fun externalRoot(app: Application): File {
                 "${cached.length()} ${remote?.etag.orEmpty()} ${remote?.lastModifiedMillis ?: 0L}"
             )
         } catch (_: Throwable) {
-            // The stamp only sharpens the update check; losing it means the next
-            // check falls back to size and timestamps.
         }
     }
-
-    /**
-     * Downloads the client APK from our Continuous release into
-     * filesDir/apk-source and adopts it. The patcher already talks to that
-     * release for the native libraries, so this reuses the same quota-free
-     * download path instead of asking the user to hunt for a file.
-     */
     fun downloadSourceApk() {
-        // Only an in-flight download blocks a new one. Returning early on any
-        // non-null state is what made the Update button do nothing: the status
-        // check always leaves a state behind.
         if (_sourceDownload.value is SourceDownloadState.Fetching ||
             _sourceDownload.value is SourceDownloadState.Downloading
         ) {
@@ -739,8 +624,6 @@ private fun externalRoot(app: Application): File {
                     _sourceDownload.value = SourceDownloadState.Downloading(done, size)
                     JobProgress.progress(app, JOB_CLIENT_APK, done, size, "Downloading…")
                 }
-                // A short read means the connection died mid-file: keep the
-                // broken bytes out of the cache and say so.
                 if (total > 0 && part.length() != total) {
                     part.delete()
                     throw IOException(
@@ -774,11 +657,9 @@ private fun externalRoot(app: Application): File {
             }
         }
     }
-
     fun clearSourceDownloadState() {
         _sourceDownload.value = null
     }
-
     fun useCachedBundle() {
         val abi = _abi.value
         val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, abi)
@@ -791,7 +672,6 @@ private fun externalRoot(app: Application): File {
             refreshAbiStatus()
             return
         }
-        // Fallback: the cached bundle for this ABI
         val b = bundleProvider.loadCachedBundle(abi)
         if (b != null) {
             loadedBundle = b
@@ -799,17 +679,10 @@ private fun externalRoot(app: Application): File {
             scanLibs()
         }
     }
-
     fun useLoadedBundle() {
         val b = loadedBundle ?: return
         _bundle.value = BundleState.Ready("Loaded", b.manifest.entries.size, b.manifest.version)
     }
-
-    /**
-     * Lists local libs instantly (offline). When [checkRemote] is true it also
-     * fetches the release manifest and marks outdated files — that network
-     * check only runs from explicit user actions (Update check / Check updates).
-     */
     fun scanLibs(autoLoad: Boolean = false, checkRemote: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
             val abi = _abi.value
@@ -821,9 +694,6 @@ private fun externalRoot(app: Application): File {
                     ?.toMap()
                     ?: emptyMap()
             } else emptyMap()
-
-            // Read the lib list from the local libs/<abi>/ directory first so the
-            // UI has something instantly, even offline. Manifest refines below.
             _libs.value = localFiles.keys.sorted().map { name ->
                 val f = localFiles[name] ?: return@map null
                 LibInfo(
@@ -833,9 +703,6 @@ private fun externalRoot(app: Application): File {
                     upToDate = true,
                 )
             }.filterNotNull()
-
-            // API-free: newest tag via redirect + per-ABI manifest asset list.
-            // Only on explicit user request (checkRemote) — never on launch.
             var tagName = "live"
             var assets: List<IncrementalUpdateManager.AssetInfo> = emptyList()
             if (checkRemote) {
@@ -847,7 +714,6 @@ private fun externalRoot(app: Application): File {
                     _libsChecking.value = false
                 }
             }
-
             if (assets.isNotEmpty()) {
                 val releaseMap = assets.associateBy { it.cleanName }
                 val allNames = (localFiles.keys + releaseMap.keys).distinct().sorted()
@@ -869,9 +735,6 @@ private fun externalRoot(app: Application): File {
             }
             val outdated = _libs.value.filter { !it.upToDate && it.releaseSize > 0 }
             if (autoLoad && outdated.isEmpty() && assets.isNotEmpty()) {
-                // Everything on disk is up to date — auto-load the bundle so the
-                // user can patch straight away. (Guard on a fresh release list,
-                // otherwise a failed check could auto-load stale libs.)
                 val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, abi)
                 if (files.isNotEmpty()) {
                     val b = buildBundleFromFileMap(files, abi)
@@ -882,13 +745,11 @@ private fun externalRoot(app: Application): File {
             }
         }
     }
-
     fun refreshSingleLib(libName: String) {
         viewModelScope.launch(Dispatchers.IO) {
             downloadLib(libName)
         }
     }
-
     private suspend fun downloadLib(libName: String) {
         try {
             val tagName = "libs"
@@ -917,7 +778,6 @@ private fun externalRoot(app: Application): File {
             }
         }
     }
-
     fun fetchAndDownloadBundle() {
         if (_bundle.value is BundleState.Downloading) return
         downloadingAbi = _abi.value
@@ -928,15 +788,12 @@ private fun externalRoot(app: Application): File {
             try {
                 val tagName = "libs"
                 _releaseNote.value = tagName
-
                 val assets = IncrementalUpdateManager.fetchReleaseAssets(tagName, _abi.value)
                 if (assets.isEmpty()) throw IOException("No .so assets found for ABI ${_abi.value}")
                 _bundle.update { BundleState.Downloading(0.1f, tagName) }
-
                 val diff = IncrementalUpdateManager.diff(
                     assets, libsDir, _abi.value, appliedBuilds(_abi.value)
                 )
-
                 if (diff.toDownload.isEmpty()) {
                     val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, _abi.value)
                     if (files.isEmpty()) throw IOException("No .so files found in libs/")
@@ -946,21 +803,14 @@ private fun externalRoot(app: Application): File {
                     _bundle.value = BundleState.Loaded
                     loadedBundle = b
                     scanLibs()
-                    // Nothing changed, so no job was ever announced: leaving a
-                    // notification up for a download that never happened is
-                    // exactly what used to look like a stuck progress bar.
                     return@launch
                 }
                 JobProgress.begin(app, JOB_LIBS, "Libraries", "Downloading ${diff.toDownload.size} files…")
                 jobStarted = true
-
-                // Download changed files with per-lib progress
                 IncrementalUpdateManager.downloadChanged(
                     diff.toDownload, libsDir, _abi.value,
                     onFileStart = { index, asset ->
                         markLibDownloading(asset.cleanName, 0f)
-                        // Name the file being fetched; the notification used to
-                        // say only "Downloading 19 files…" for the whole run.
                         JobProgress.detail(app, JOB_LIBS, asset.cleanName)
                         _bundle.update {
                             BundleState.Downloading(
@@ -974,10 +824,6 @@ private fun externalRoot(app: Application): File {
                     },
                     onFileProgress = { index, asset, fileProgress ->
                         markLibDownloading(asset.cleanName, fileProgress)
-                        // Count bytes, not files: with a handful of .so files the
-                        // per-file counter sits still for the whole download and
-                        // the bar looks frozen. Fold the per-file fraction into
-                        // the reported position so it always creeps forward.
                         val overall =
                             (index + fileProgress.coerceIn(0f, 1f)) / diff.toDownload.size.toFloat()
                         JobProgress.progress(
@@ -1002,7 +848,6 @@ private fun externalRoot(app: Application): File {
                         }
                     },
                 )
-
                 val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, _abi.value)
                 if (files.isEmpty()) throw IOException("No .so files found after download")
                 val b = buildBundleFromFileMap(files, _abi.value)
@@ -1018,7 +863,6 @@ private fun externalRoot(app: Application): File {
                 refreshAbiStatus()
                 JobProgress.finish(app, JOB_LIBS, "Libraries ready")
             } catch (t: Throwable) {
-                // Offline fallback: if there are already libs on disk, load them.
                 val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, _abi.value)
                 if (files.isNotEmpty()) {
                     val b = buildBundleFromFileMap(files, _abi.value)
@@ -1039,19 +883,14 @@ private fun externalRoot(app: Application): File {
             }
         }
     }
-
     private fun markLibDownloading(name: String, progress: Float) {
         _libs.value = _libs.value.map {
             if (it.name == name) it.copy(downloading = true, downloadProgress = progress) else it
         }
     }
-
-    /** Builds a disk-backed Bundle: lib bytes stay on disk, streamed one file
-     * at a time during patching (low-RAM safe). */
     private fun buildBundleFromFileMap(files: Map<String, File>, abi: String): Bundle {
         val suffix = if (abi == "arm64-v8a") "arm64" else "armv7l"
         val modSuffix = if (abi == "arm64-v8a") "amd64" else "arm"
-
         val entries = files.keys.map { targetPath ->
             val name = targetPath.substringAfterLast("/")
             val desc = when {
@@ -1072,7 +911,6 @@ private fun externalRoot(app: Application): File {
                 description = desc,
             )
         }
-
         val manifest = com.pickle.patcher.lib.BundleManifest(
             version = "live",
             game = "cs16client",
@@ -1081,8 +919,6 @@ private fun externalRoot(app: Application): File {
         )
         return Bundle(manifest, emptyMap(), files)
     }
-
-    /** A group of bundle entries the user can toggle individually before patching. */
     data class PatchComponent(
         val key: String,
         val label: String,
@@ -1092,42 +928,26 @@ private fun externalRoot(app: Application): File {
         override fun equals(other: Any?): Boolean = other is PatchComponent && other.key == key
         override fun hashCode(): Int = key.hashCode()
     }
-
-    /**
-     * A .so the user brought themselves, to be embedded alongside the bundle.
-     *
-     * [file] is a copy under filesDir, not the SAF uri: the picker grant is
-     * temporary and patching can happen much later than the pick.
-     */
     data class CustomLib(
         val name: String,
         val file: File,
         val machineName: String,
-        /** True when this file lands where a bundle entry would land. */
         val shadows: String?,
     ) {
         override fun equals(other: Any?): Boolean = other is CustomLib && other.name == name
         override fun hashCode(): Int = name.hashCode()
     }
-
     private fun customLibDir(): File =
         File(getApplication<Application>().filesDir, "custom-libs").apply { mkdirs() }
-
-
-    /** The component a custom lib would shadow, for the badge in the dialog. */
     private fun shadowedBy(target: String): String? {
-        val b = loadedBundle ?: return null
-        val key = b.manifest.entries.firstOrNull { it.target == target }?.let { componentKeyFor(it.target) }
-        return key?.let { labelForComponent(it) }
+        val b = loadedBundle
+        if (b != null) {
+            val key = b.manifest.entries.firstOrNull { it.target == target }?.let { componentKeyFor(it.target) }
+            return key?.let { labelForComponent(it) }
+        }
+        val key = componentKeyFor(target)
+        return if (key == "other") null else labelForComponent(key)
     }
-
-    /**
-     * Validates and stores the picked files.
-     *
-     * Every rejection is collected rather than thrown, so picking four wrong
-     * libraries says all four are wrong in one message instead of making the
-     * user re-pick to discover the next one.
-     */
     private fun displayName(uri: android.net.Uri): String? {
         if (uri.scheme == "content") {
             try {
@@ -1144,14 +964,12 @@ private fun externalRoot(app: Application): File {
         }
         return uri.lastPathSegment?.substringAfterLast('/')
     }
-
     fun addCustomLibs(uris: List<android.net.Uri>) {
         if (uris.isEmpty()) return
         val abi = _abi.value
         val existing = _customLibs.value.map { it.name }.toMutableSet()
         val rejected = ArrayList<String>()
         val added = ArrayList<CustomLib>()
-
         for (uri in uris) {
             val name = displayName(uri)
             if (name.isNullOrBlank() || !name.endsWith(".so")) {
@@ -1159,12 +977,9 @@ private fun externalRoot(app: Application): File {
                 continue
             }
             if (!existing.add(name)) {
-                // Two files with the same name would fight over one path in the
-                // APK, and the second would silently win.
                 rejected += "$name: already added"
                 continue
             }
-
             val target = File(customLibDir(), name)
             try {
                 app.contentResolver.openInputStream(uri)?.use { input ->
@@ -1178,7 +993,6 @@ private fun externalRoot(app: Application): File {
                 rejected += "$name: ${t.message ?: "copy failed"}"
                 continue
             }
-
             when (val verdict = com.pickle.patcher.lib.validateElf(target, abi)) {
                 is com.pickle.patcher.lib.ElfVerdict.Rejected -> {
                     target.delete()
@@ -1196,7 +1010,6 @@ private fun externalRoot(app: Application): File {
                 }
             }
         }
-
         if (added.isNotEmpty()) _customLibs.value = _customLibs.value + added
         if (rejected.isNotEmpty()) {
             _customLibProblem.value = if (added.isEmpty()) {
@@ -1206,19 +1019,11 @@ private fun externalRoot(app: Application): File {
             }
         }
     }
-
     private val _customLibProblem = MutableStateFlow<String?>(null)
     val customLibProblem: StateFlow<String?> = _customLibProblem.asStateFlow()
-
     fun dismissCustomLibProblem() {
         _customLibProblem.value = null
     }
-
-    /**
-     * Drops the file and its copy on disk. Kept next to the checkbox in the
-     * patch dialog on purpose: deciding a library is not wanted should not
-     * cost a trip back to the patch screen.
-     */
     fun removeCustomLib(name: String) {
         _customLibs.value = _customLibs.value.filterNot {
             if (it.name == name) {
@@ -1229,12 +1034,6 @@ private fun externalRoot(app: Application): File {
             }
         }
     }
-
-    /**
-     * Reads the custom-libs directory back into state. Files are validated
-     * again on the way in, because the user may have changed the ABI since
-     * they were added and a stale one must not be injected silently.
-     */
     private fun scanCustomLibs() {
         val abi = _abi.value
         val dir = customLibDir()
@@ -1253,19 +1052,9 @@ private fun externalRoot(app: Application): File {
         }
         _customLibs.value = loaded
     }
-
-    /**
-     * Custom libraries as bundle entries, replacing any bundle entry that
-     * targets the same path.
-     *
-     * Replacing rather than appending matters: the repacker removes source
-     * entries that shadow a bundle target and then adds the bundle's, so two
-     * entries with one path would write the archive entry twice.
-     */
     fun customLibEntries(bundle: Bundle, selected: Set<String>): List<Pair<String, File>> =
         _customLibs.value
             .map { "lib/${_abi.value}/${it.name}" to it.file }
-
     private fun labelForComponent(key: String): String = when (key) {
         "amxx" -> "AMX Mod X core"
         "metamod" -> "Metamod HL1"
@@ -1276,8 +1065,6 @@ private fun externalRoot(app: Application): File {
         "modules" -> "AMXX modules"
         else -> "Bundle files"
     }
-
-    /** Rejects custom libraries that no longer match the target ABI. */
     fun staleCustomLibs(): List<CustomLib> {
         val abi = _abi.value
         return _customLibs.value.filter {
@@ -1285,8 +1072,6 @@ private fun externalRoot(app: Application): File {
             verdict !is com.pickle.patcher.lib.ElfVerdict.Ok
         }
     }
-
-    /** Categorizes a bundle target path into a selectable component key. */
     private fun componentKeyFor(target: String): String {
         val name = target.substringAfterLast("/")
         return when {
@@ -1300,8 +1085,6 @@ private fun externalRoot(app: Application): File {
             else -> "other"
         }
     }
-
-    /** Components included in the current patch, derived from the loaded bundle. */
     fun patchComponents(): List<PatchComponent> {
         val b = loadedBundle ?: return emptyList()
         val order = listOf("amxx", "metamod", "yapb", "client", "menu", "modules", "game", "other")
@@ -1319,16 +1102,6 @@ private fun externalRoot(app: Application): File {
             }
             .sortedBy { order.indexOf(it.key) }
     }
-
-    /**
-     * Attempt incremental update: fetch manifest.json, compare hashes, download only changed .so files.
-     * Returns true if incremental update succeeded, false if we should fall back to legacy bundle zip.
-     */
-    /**
-     * Downloads only the addons package (plugins + modules + configs) from the
-     * latest release and extracts it into the device's cstrike folder. The full
-     * mod bundle itself is fetched during patching, not here.
-     */
     fun fetchAndInstallAddons() {
         viewModelScope.launch(Dispatchers.IO) {
             _addons.value = AddonsState.Downloading(0f, "Resolving latest release…")
@@ -1369,30 +1142,9 @@ private fun externalRoot(app: Application): File {
             }
         }
     }
-
-    /**
-     * Legacy entry point (Patch tab / Addons Manager). Addons no longer ship
-     * inside the mod bundle — they are a separate amxx-addons.zip release
-     * asset — so installing always fetches the latest addons package.
-     */
     fun installAddonsFromBundle() {
         fetchAndInstallAddons()
     }
-
-    /**
-     * Files that have to be present in the game directory before the game can
-     * start. The client APK is a shell that carries only the menu library -
-     * nexora injects libclient into it at patch time and never had the content
-     * inside it - so this is the check that stands between the user and a
-     * silent game with no sound, no menu graphics and no touch controls.
-     *
-     * touch.cfg, the touch_default/numbers.cfg layout and the bot databases are
-     * read by path, and the gfx/shell bitmaps are what the menu draws itself
-     * with; one missing file in each group is enough to tell a complete
-     * install from a half-finished one without walking 26 MB of tree. Each
-     * entry has to be a real file - touch_default is a directory, so naming
-     * it would have been satisfied by the extract alone.
-     */
     private val requiredGameAssets = listOf(
         "touch.cfg",
         "touch_default/numbers.cfg",
@@ -1402,31 +1154,13 @@ private fun externalRoot(app: Application): File {
         "maps/tr_1.bsp",
         "sound/radio/bot/a.wav",
     )
-
     private fun missingGameAssets(gameDir: File): List<String> =
         requiredGameAssets.filterNot { File(gameDir, it).isFile }
-
-    /**
-     * True when the source APK still ships the content itself.
-     *
-     * Older client APKs (and the googlePlay flavor, which is still standalone)
-     * carry assets/, so their installs are already complete and the 26 MB
-     * download would be pure waste. Only the shell needs this.
-     */
     private fun sourceApkShipsAssets(apk: File): Boolean = runCatching {
         java.util.zip.ZipFile(apk).use { zf ->
             zf.getEntry("assets/touch.cfg") != null
         }
     }.getOrDefault(false)
-
-    /**
-     * True when [zip] carries every file we require, i.e. it is safe to inject.
-     *
-     * Size alone is not enough: a download cut short by a dropped connection is
-     * still a file, and reusing it would produce an APK that is missing part of
-     * its own content. Reading the entries is the check that actually answers
-     * the question.
-     */
     private fun zipIsComplete(zip: File): Boolean {
         if (!zip.isFile || zip.length() == 0L) return false
         return runCatching {
@@ -1435,32 +1169,12 @@ private fun externalRoot(app: Application): File {
             }
         }.getOrDefault(false)
     }
-
-    /**
-     * Makes sure game-assets.zip is on disk, and hands back its path so the
-     * patch can write it into the APK.
-     *
-     * A cached copy is reused as-is. It only gets refetched when it is missing
-     * or fails the entry check, so a second patch does not pull 14 MB that is
-     * already sitting on disk - which, now that the cache lives under
-     * /sdcard/nexora rather than in the app's cache dir, survives reinstalls.
-     *
-     * Re-checking entries rather than just their size is the point: a download
-     * cut short by a dropped connection is still a file, and injecting that
-     * would ship an APK quietly missing part of its own content.
-     *
-     * The extract is skipped when the game directory is already complete too,
-     * but the zip is still returned: the copy that matters is the one going
-     * into the APK, and that needs the archive even when the directory is
-     * already populated.
-     */
     private suspend fun ensureGameAssetsZip(
         gameDir: File,
         onStatus: (String) -> Unit,
         onProgress: (done: Long, total: Long) -> Unit,
     ): File? {
         val zip = File(bundleProvider.cacheDir(), "game-assets.zip")
-
         if (zipIsComplete(zip)) {
             onStatus("Game content archive already downloaded")
         } else {
@@ -1476,15 +1190,10 @@ private fun externalRoot(app: Application): File {
                 throw IOException("game-assets.zip came back empty or incomplete")
             }
         }
-
-        // The engine reads the content from the client package, so the archive
-        // is what the patch needs; the extract is for the filesystem side and
-        // only worth doing when the directory is actually short of it.
         if (missingGameAssets(gameDir).isEmpty()) {
             onStatus("Game content already extracted")
             return zip
         }
-
         onStatus("Extracting game content…")
         gameDir.mkdirs()
         unzipInto(zip, gameDir)
@@ -1497,7 +1206,6 @@ private fun externalRoot(app: Application): File {
         }
         return zip
     }
-
     private fun unzipInto(zip: File, target: File): Int {
         var count = 0
         java.util.zip.ZipFile(zip).use { zf ->
@@ -1509,13 +1217,9 @@ private fun externalRoot(app: Application): File {
                     throw IOException("Unsafe path in addons zip: $name")
                 }
                 if (entry.isDirectory) {
-                    // Create empty dirs too (e.g. addons/amxmodx/plugins/) —
-                    // skipping them leaves amxx without its plugins folder.
                     out.mkdirs()
                     return@forEach
                 }
-                // User-edited config files are extracted only when missing — a
-                // fresh download must never clobber the user's own settings.
                 if (PROTECTED_ADDON_CONFIGS.contains(name) && out.exists()) return@forEach
                 out.parentFile?.mkdirs()
                 zf.getInputStream(entry).use { input ->
@@ -1526,24 +1230,6 @@ private fun externalRoot(app: Application): File {
         }
         return count
     }
-
-    /**
-     * Ensures addons/metamod/config.ini has the correct [gamedll] line for the
-     * selected ABI.  The stock config shipped in amxx-addons.zip hard-codes the
-     * arm64 name; on arm32 this causes a FATAL ERROR.  If the file already
-     * exists we patch in-place; otherwise we create it from scratch.
-     */
-    /**
-     * Writes the metamod config for the selected game.
-     *
-     * Counter-Strike gets the ReGameDLL game dll and both plugins. Condition Zero
-     * gets neither: libcs_android_*.so is ReGameDLL_CS, it only speaks
-     * Counter-Strike, and pointing czero at it took the engine into a game dll
-     * that knows none of its entities. The user report was a SIGSEGV inside
-     * libyapb right after a wall of "non-existent cvar yb_*" warnings, which is
-     * YaPB walking czero with Counter-Strike offsets. A mod without a matching
-     * game dll stays untouched instead of crashing.
-     */
     private fun patchMetamodConfig(gameDir: File, abi: String) {
         val suffix = when (abi) {
             "arm64-v8a" -> "arm64"
@@ -1552,7 +1238,6 @@ private fun externalRoot(app: Application): File {
         }
         val isCounterStrike = gameDir.name == GAME_CSTRIKE
         val metamodDir = File(gameDir, "addons/metamod").apply { mkdirs() }
-
         val configFile = File(metamodDir, "config.ini")
         val gamedllLine = "gamedll dlls/libcs_android_${suffix}.so"
         if (isCounterStrike) {
@@ -1565,7 +1250,6 @@ private fun externalRoot(app: Application): File {
                 configFile.writeText("$gamedllLine\n")
             }
         } else {
-            // No gamedll line at all: metamod then loads nothing.
             if (configFile.exists()) {
                 configFile.writeText(
                     configFile.readLines()
@@ -1574,9 +1258,6 @@ private fun externalRoot(app: Application): File {
                 )
             }
         }
-
-        // The plugin list decides what runs, and YaPB only supports
-        // Counter-Strike: loading it elsewhere is what crashed czero.
         val pluginsFile = File(metamodDir, "plugins.ini")
         val plugins = if (isCounterStrike) {
             buildString {
@@ -1598,14 +1279,6 @@ private fun externalRoot(app: Application): File {
         }
         pluginsFile.writeText(plugins)
     }
-
-    /**
-     * AMXX parses *every* *.txt in addons/amxmodx/data/gamedata/common.games/custom,
-     * and the ReGameDLL member layout is ABI-specific (pointer size, member
-     * order), so the wrong variant silently corrupts cstrike pdata. The per-ABI
-     * files ship as offsets-cstrike-replugged.<abi>.txt; the one matching the
-     * installed ABI is kept as *.txt and the other is renamed out of the scan.
-     */
     private fun applyGamedataAbiPolicy(gameDir: File, abi: String): Boolean {
         val customDir = File(gameDir, "addons/amxmodx/data/gamedata/common.games/custom")
         val files = customDir.listFiles() ?: return false
@@ -1613,8 +1286,6 @@ private fun externalRoot(app: Application): File {
         var changed = false
         for (file in files) {
             if (!file.isFile) continue
-            // Pre-per-ABI installs still carry the untagged arm64 table; left
-            // in place it would keep overriding offsets on a 32-bit gamedll.
             if (file.name == LEGACY_GAMEDATA_NAME) {
                 if (file.delete()) changed = true
                 continue
@@ -1628,23 +1299,17 @@ private fun externalRoot(app: Application): File {
         }
         return changed
     }
-
-    /** One console line per meaningful event; null keeps the console quiet. */
     private fun logLine(tick: ApkPatcher.Progress): String? {
         val detail = tick.detail
         val leaf = detail.substringAfterLast('/')
         return when {
             tick.kind == "add" -> "+ $leaf"
-            // The content is ~700 files; listing them would bury the 13
-            // libraries that are the interesting part of the report.
             tick.kind == "asset" -> null
             tick.kind == "keep" && (detail.startsWith("lib/") || detail.startsWith("addons/")) -> "  $leaf"
             tick.kind.isEmpty() && detail.isNotBlank() -> "\u2192 ${tick.step.name.lowercase()} \u00b7 $detail"
             else -> null
         }
     }
-
-    /** One line for the notification, from the same tick the log line uses. */
     private fun patchStepLabel(tick: ApkPatcher.Progress): String {
         val progress = if (tick.total > 0) {
             " ${(tick.fraction * 100).toInt()}%"
@@ -1658,8 +1323,6 @@ private fun externalRoot(app: Application): File {
             "${tick.step.name.lowercase()}$progress"
         }
     }
-
-    /** Deterministic per-stage counters, carried forward between ticks. */
     private fun stepCounters(
         tick: ApkPatcher.Progress,
         prev: PatchUiState.Running?,
@@ -1668,12 +1331,8 @@ private fun externalRoot(app: Application): File {
         val entries = if (tick.total > 0) "${tick.index}/${tick.total}" else ""
         return mapOf("libs" to libs.toString(), "entries" to entries)
     }
-
-    /** A patched APK that is about to be replaced, waiting for the user. */
     private val _replacePrompt = MutableStateFlow<File?>(null)
     val replacePrompt: StateFlow<File?> = _replacePrompt.asStateFlow()
-
-    /** Called from the delete dialog: throw the old APK away and patch again. */
     fun confirmReplaceAndPatch(selectedComponentKeys: Set<String>? = null) {
         val old = _replacePrompt.value
         _replacePrompt.value = null
@@ -1683,11 +1342,9 @@ private fun externalRoot(app: Application): File {
         }
         startPatch(selectedComponentKeys)
     }
-
     fun dismissReplacePrompt() {
         _replacePrompt.value = null
     }
-
     fun startPatch(selectedComponentKeys: Set<String>? = null) {
         val src = _receivedSource.value ?: return
         val b = loadedBundle ?: return
@@ -1700,23 +1357,12 @@ private fun externalRoot(app: Application): File {
             )
             return
         }
-        // No check that the source has a lib/<abi>/ directory. The shell client APK
-        // has none - that is the point of it, the client and the menu are
-        // injected here - and the repacker writes the directory entries itself
-        // for every folder the bundle lands in.
-        //
-        // Filter the bundle down to the user-selected components. A null selection
-        // means "everything" (keeps the pre-dialog behaviour).
         val effectiveBundle = if (selectedComponentKeys == null) {
             b
         } else {
             val kept = b.manifest.entries.filter { componentKeyFor(it.target) in selectedComponentKeys }
             b.withEntries(kept)
         }
-
-        // A custom library whose target matches a bundle entry replaces it, so
-        // the user's own build is what lands in the APK. Re-checked here
-        // because the ABI can have changed since the file was picked.
         val customs = customLibEntries(b, selectedComponentKeys ?: emptySet())
         val finalBundle = if (customs.isEmpty()) {
             effectiveBundle
@@ -1725,8 +1371,6 @@ private fun externalRoot(app: Application): File {
             val keptEntries = effectiveBundle.manifest.entries.filterNot { it.target in customTargets }
             val addedEntries = customs.map { (target, file) ->
                 com.pickle.patcher.lib.BundleManifest.BundleEntry(
-                    // Synthetic source: the bytes come from diskFiles, keyed the
-                    // same way, so nothing is read into memory.
                     source = "custom/${file.name}",
                     target = target,
                     method = com.pickle.patcher.lib.BundleManifest.Compression.STORED,
@@ -1741,7 +1385,6 @@ private fun externalRoot(app: Application): File {
                 diskFiles = effectiveBundle.diskFiles + extraDisk,
             )
         }
-
         if (finalBundle.manifest.entries.isEmpty()) {
             _patch.value = PatchUiState.Failed("No patch components selected.")
             return
@@ -1752,23 +1395,12 @@ private fun externalRoot(app: Application): File {
                 return
             }
         val out = workFile("patched.apk")
-        // No prompt: a stale result is simply overwritten.
         if (out.exists()) out.delete()
-
         viewModelScope.launch(Dispatchers.IO) {
             JobProgress.begin(app, JOB_PATCH, "Patching", "Analyzing the source APK…")
             _patch.value = PatchUiState.Running(ApkPatcher.Step.ANALYZE, 0f)
             try {
-                // The shell APK carries no game content, and the engine reads
-                // it from the client *package* - XashActivity hands it a
-                // getCallingPackage() AssetManager - so the content has to be
-                // fetched before patching and written back into the APK. A
-                // patched APK without it starts and then plays silently with
-                // a blank menu and no touch controls.
                 val gameDir = File(_installPath.value)
-                // An APK that still carries assets/ needs nothing: the engine
-                // finds the content inside the package already. Only the shell -
-                // which has an empty assets/ - has to pull it from the release.
                 val assetsZip = if (sourceApkShipsAssets(src)) {
                     JobProgress.detail(app, JOB_PATCH, "Source APK ships the game content")
                     null
@@ -1836,14 +1468,7 @@ private fun externalRoot(app: Application): File {
             }
         }
     }
-
     fun outputApk(): File? = lastReport?.let { workFile("patched.apk") }
-
-    /**
-     * Client packages already installed on the device. Installing the patched
-     * APK over an existing one fails when the signature differs, and users keep
-     * several copies around, so Install asks before touching any of them.
-     */
     fun installedClientPackages(): List<String> {
         val pm = app.packageManager
         return runCatching {
@@ -1853,43 +1478,27 @@ private fun externalRoot(app: Application): File {
                 .sorted()
         }.getOrElse { emptyList() }
     }
-
     private fun isClientPackage(name: String): Boolean =
         name.contains("cs16client", ignoreCase = true) || name.contains("xash", ignoreCase = true)
-
-    /** The packages Install is about to offer removing, if any. */
     private val _uninstallPrompt = MutableStateFlow<List<String>>(emptyList())
     val uninstallPrompt: StateFlow<List<String>> = _uninstallPrompt.asStateFlow()
-
     fun dismissUninstallPrompt() {
         _uninstallPrompt.value = emptyList()
     }
-
-    /**
-     * Install entry point: when an older client is still on the device the user
-     * is asked to remove it first, and confirming launches the uninstall and the
-     * patch in one go - the new APK is built without a second tap.
-     */
-    /** Install action to run once the uninstall is behind us, if any. */
     private val _pendingInstall = MutableStateFlow<Intent?>(null)
     val pendingInstall: StateFlow<Intent?> = _pendingInstall.asStateFlow()
-
     fun consumePendingInstall() {
         _pendingInstall.value = null
     }
-
     private val _pendingUninstall = MutableStateFlow<Intent?>(null)
     val pendingUninstall: StateFlow<Intent?> = _pendingUninstall.asStateFlow()
-
     fun consumePendingUninstall() {
         _pendingUninstall.value = null
     }
-
     private fun isTargetInstalled(pkg: String): Boolean = runCatching {
         app.packageManager.getPackageInfo(pkg, 0)
         true
     }.getOrDefault(false)
-
     fun requestInstall() {
         val target = "su.xash.cs16client.nexora"
         if (isTargetInstalled(target)) {
@@ -1900,7 +1509,6 @@ private fun externalRoot(app: Application): File {
         }
         _pendingInstall.value = installIntent()
     }
-
     fun onUninstallFinished() {
         if (isTargetInstalled("su.xash.cs16client.nexora")) return
         val out = outputApk()
@@ -1911,15 +1519,7 @@ private fun externalRoot(app: Application): File {
             startPatch()
         }
     }
-
-    /** Set when a patch was started only so the install could follow it. */
     private var installAfterPatch = false
-
-    /**
-     * Dialog confirmed. The removal itself is left to the system package
-     * installer, and the patched APK is installed right after it returns, so the
-     * whole replace is one flow: remove, then install, no second tap.
-     */
     fun confirmUninstallAndPatch() {
         val packages = _uninstallPrompt.value
         _uninstallPrompt.value = emptyList()
@@ -1931,24 +1531,18 @@ private fun externalRoot(app: Application): File {
                 )
             }
         }
-
         val out = outputApk()
         if (out != null && out.exists() && lastReport != null) {
-            // What is on disk is still current, so it can be installed as it is.
             _pendingInstall.value = installIntentFor(out)
             return
         }
-
-        // No usable APK yet: build it now and install the moment it is done.
         installAfterPatch = true
         startPatch()
     }
-
     fun installIntent(): Intent? {
         val out = outputApk() ?: return null
         return installIntentFor(out)
     }
-
     fun installIntentFor(apk: File): Intent? {
         if (!apk.exists()) return null
         val context = getApplication<Application>()
@@ -1963,14 +1557,12 @@ private fun externalRoot(app: Application): File {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
     }
-
     fun reset() {
         _patch.value = PatchUiState.Idle
         lastReport = null
         _patchLog.value = emptyList()
         _patchCheck.value = PatchCheck.Idle
     }
-
     private fun persistPatchRun(abi: String, report: ApkPatcher.PatchReport, log: List<String>) {
         val entry = PatchHistoryEntry(
             time = System.currentTimeMillis(),
@@ -1992,7 +1584,6 @@ private fun externalRoot(app: Application): File {
         }
         writePatchLog(abi, report, log, null)
     }
-
     private fun writePatchLog(
         abi: String,
         report: ApkPatcher.PatchReport?,
@@ -2018,7 +1609,6 @@ private fun externalRoot(app: Application): File {
         } catch (_: Throwable) {
         }
     }
-
     fun patchSummary(): PatchSummary? {
         val b = loadedBundle ?: return null
         val src = _receivedSource.value ?: return null
@@ -2035,7 +1625,6 @@ private fun externalRoot(app: Application): File {
             payloadSize = payload,
         )
     }
-
     fun verifyPatchedApk() {
         val out = outputApk() ?: return
         if (!out.exists()) {
@@ -2071,12 +1660,6 @@ private fun externalRoot(app: Application): File {
             }
         }
     }
-
-    // ------------------------------------------------------------------ updater
-    // Checks the crashview releases for a newer patcher APK and downloads it
-    // with progress (downloaded/total/speed), then hands it to the package
-    // installer automatically when done.
-
     sealed interface AppUpdate {
         data object Idle : AppUpdate
         data object Checking : AppUpdate
@@ -2097,31 +1680,17 @@ private fun externalRoot(app: Application): File {
         data class UpToDate(val tag: String) : AppUpdate
         data class Failed(val message: String) : AppUpdate
     }
-
     private val _appUpdate = MutableStateFlow<AppUpdate>(AppUpdate.Idle)
     val appUpdate: StateFlow<AppUpdate> = _appUpdate.asStateFlow()
-
     private val updatePrefs by lazy {
         getApplication<Application>().getSharedPreferences("updater_prefs", Context.MODE_PRIVATE)
     }
-
-    /**
-     * Manual update check only — called from the overflow menu's
-     * "Update check". Never runs automatically, no polling, no notifications.
-     *
-     * Single rolling "Continuous" release: the tag never changes, so the check
-     * compares the version string baked into this APK (version.txt asset) plus
-     * a byte-size check of the APK. No api.github.com calls.
-     */
     fun checkAppUpdate() {
         val cur = _appUpdate.value
         if (cur is AppUpdate.Checking || cur is AppUpdate.Downloading || cur is AppUpdate.Downloaded) return
         viewModelScope.launch(Dispatchers.IO) {
             _appUpdate.value = AppUpdate.Checking
             try {
-                // Prefer a stable release tag (v*) when one exists and is
-                // newer than the installed build; fall back to the rolling
-                // "continuous" tag otherwise.
                 val latest = ReleaseRepository.latestReleaseTag(APP_RELEASE_REPO)
                 val (tag, apkName) = if (latest != null) {
                     latest to RELEASE_APK
@@ -2133,7 +1702,6 @@ private fun externalRoot(app: Application): File {
                 ) ?: throw IOException("Could not reach GitHub releases")
                 val apkUrl = ReleaseRepository.assetUrl(APP_RELEASE_REPO, tag, apkName)
                 val apkSize = ReleaseRepository.probeSize(apkUrl)
-
                 val app = getApplication<Application>()
                 val ours = try {
                     app.packageManager.getPackageInfo(app.packageName, 0).versionName
@@ -2154,7 +1722,6 @@ private fun externalRoot(app: Application): File {
                     append("  →  $remoteVersion")
                     if (apkSize != null && apkSize > 0) append(" (${mb(apkSize)})")
                 }
-
                 if (versionDiffers || sizeDiffers) {
                     _appUpdate.value = AppUpdate.Available(tag, notes, emptyList(), apkSize ?: 0L, apkUrl)
                 } else {
@@ -2165,7 +1732,6 @@ private fun externalRoot(app: Application): File {
             }
         }
     }
-
     fun downloadAppUpdate() {
         val cur = _appUpdate.value as? AppUpdate.Available ?: return
         viewModelScope.launch(Dispatchers.IO) {
@@ -2184,30 +1750,15 @@ private fun externalRoot(app: Application): File {
             }
         }
     }
-
     fun dismissUpdate() {
         _appUpdate.value = AppUpdate.Idle
     }
-
     fun consumeDownloaded() {
         _appUpdate.value = AppUpdate.Idle
     }
-
     fun markBundleTagKnown(tag: String) {
         updatePrefs.edit().putString("known_bundle_tag", tag).apply()
     }
-
-    /**
-     * The build stamp per library file, as last written to disk on this phone.
-     *
-     * This is what turns the manifest's build id into an answer instead of an
-     * opinion: the release says which build produced a file's bytes, we say
-     * which build's bytes we are holding, and comparing the two short strings
-     * settles it without reading 150 MB back. Size alone cannot: a rebuilt
-     * library that happens to land on the same length looks identical, which
-     * is how the game dll stayed stale on disk while the patcher reported
-     * everything current.
-     */
     private fun appliedBuilds(abi: String): Map<String, String> {
         val raw = updatePrefs.getString("applied_builds_$abi", null) ?: return emptyMap()
         return runCatching {
@@ -2217,7 +1768,6 @@ private fun externalRoot(app: Application): File {
             }.toMap()
         }.getOrDefault(emptyMap())
     }
-
     private fun recordAppliedBuilds(abi: String, assets: List<IncrementalUpdateManager.AssetInfo>) {
         val merged = appliedBuilds(abi).toMutableMap()
         for (a in assets) if (a.build.isNotEmpty()) merged[a.cleanName] = a.build
@@ -2228,25 +1778,18 @@ private fun externalRoot(app: Application): File {
             )
             .apply()
     }
-
     private fun mb(bytes: Long): String =
         "${(bytes / 1048576.0).let { "%.1f".format(it) }} MB"
-
-    // ------------------------------------------------------- plugins editor
-    // Reads plugins-*.ini files and toggles lines with ';' (AMXX skips those).
     data class PluginLine(val text: String, val enabled: Boolean, val editable: Boolean, val isPlugin: Boolean)
     data class PluginIniFile(val name: String, val file: File, val lines: List<PluginLine>)
-
     private val _pluginInis = MutableStateFlow<List<PluginIniFile>>(emptyList())
     val pluginInis: StateFlow<List<PluginIniFile>> = _pluginInis.asStateFlow()
-
     private val _iniText = MutableStateFlow("")
     val iniText: StateFlow<String> = _iniText.asStateFlow()
     private val _iniDirty = MutableStateFlow(false)
     val iniDirty: StateFlow<Boolean> = _iniDirty.asStateFlow()
     private val _iniSavedAt = MutableStateFlow(0L)
     val iniSavedAt: StateFlow<Long> = _iniSavedAt.asStateFlow()
-
     fun openPluginIni(file: File) {
         viewModelScope.launch(Dispatchers.IO) {
             _iniText.value = try {
@@ -2257,12 +1800,10 @@ private fun externalRoot(app: Application): File {
             _iniDirty.value = false
         }
     }
-
     fun editIniText(text: String) {
         _iniText.value = text
         _iniDirty.value = true
     }
-
     fun savePluginIni(file: File) {
         val text = _iniText.value
         viewModelScope.launch(Dispatchers.IO) {
@@ -2280,9 +1821,7 @@ private fun externalRoot(app: Application): File {
             }
         }
     }
-
     fun revertPluginIni(file: File) = openPluginIni(file)
-
     fun loadPluginInis() {
         viewModelScope.launch(Dispatchers.IO) {
             val configs = File(File(_installPath.value), "addons/amxmodx/configs")
@@ -2298,10 +1837,8 @@ private fun externalRoot(app: Application): File {
                         val stripped = t.removePrefix(";").trim()
                         val first = stripped.split(Regex("\\s+")).firstOrNull().orEmpty()
                         if (first.endsWith(".amxx", ignoreCase = true)) {
-                            // Real plugin line (enabled) or disabled one (';').
                             PluginLine(line, enabled = !t.startsWith(";"), editable = true, isPlugin = true)
                         } else {
-                            // Blank line, comment or header — not a plugin, never listed.
                             PluginLine(line, enabled = true, editable = false, isPlugin = false)
                         }
                     }
@@ -2309,7 +1846,6 @@ private fun externalRoot(app: Application): File {
             }
         }
     }
-
     fun togglePluginLine(iniName: String, index: Int) {
         viewModelScope.launch(Dispatchers.IO) {
             val current = _pluginInis.value
@@ -2333,10 +1869,6 @@ private fun externalRoot(app: Application): File {
             }
         }
     }
-
-    // ------------------------------------------------------------ share logs
-    // Collects versions + log tails into one text for sharing (bug reports).
-
     suspend fun buildLogShareText(): String = kotlinx.coroutines.withContext(Dispatchers.IO) {
         val sb = StringBuilder()
         val pm = getApplication<Application>().packageManager
@@ -2373,12 +1905,6 @@ private fun externalRoot(app: Application): File {
         }
         sb.toString()
     }
-
-    /**
-     * Called from the SAF folder picker. Persists the tree grant, resolves the picked
-     * volume folder to a real disk path (MANAGE_EXTERNAL_STORAGE already grants raw
-     * access) and lists the .sma files inside it.
-     */
     fun setScriptRoot(uri: Uri?) {
         if (uri == null) return
         val app = getApplication<Application>()
@@ -2386,7 +1912,6 @@ private fun externalRoot(app: Application): File {
         try {
             app.contentResolver.takePersistableUriPermission(uri, flags)
         } catch (_: Exception) {
-            // grant may not be persistable (rare); listing still works this session
         }
         val dir = uriToDir(uri) ?: let {
             _compile.value = CompileState.Failed(
@@ -2397,13 +1922,9 @@ private fun externalRoot(app: Application): File {
         }
         _scriptRoot.value = dir.absolutePath
         compilerPrefs.edit().putString("script_root", dir.absolutePath).apply()
+        _compile.value = CompileState.Idle
         refreshScripts()
     }
-
-    /**
-     * Called from the SAF folder picker for the .amxx output folder.
-     * Persisted the same way as the scripts folder.
-     */
     fun setOutputRoot(uri: Uri?) {
         if (uri == null) return
         val app = getApplication<Application>()
@@ -2411,7 +1932,6 @@ private fun externalRoot(app: Application): File {
         try {
             app.contentResolver.takePersistableUriPermission(uri, flags)
         } catch (_: Exception) {
-            // grant may not be persistable (rare); output still works this session
         }
         val dir = uriToDir(uri) ?: let {
             _compile.value = CompileState.Failed(
@@ -2423,28 +1943,16 @@ private fun externalRoot(app: Application): File {
         _outputRoot.value = dir.absolutePath
         compilerPrefs.edit().putString("output_root", dir.absolutePath).apply()
     }
-
-    /** Clears the custom output folder (back to "<scripts>/compiled"). */
     fun clearOutputRoot() {
         _outputRoot.value = null
         compilerPrefs.edit().remove("output_root").apply()
     }
-
-    /** Forgets the picked .sma folder; the watcher then has nothing to watch. */
     fun clearScriptRoot() {
         _scriptRoot.value = null
         _scripts.value = emptyList()
+        _compile.value = CompileState.Idle
         compilerPrefs.edit().remove("script_root").apply()
     }
-
-    /**
-     * Looks for `<xash>/<gamedir>/addons/amxmodx/<sub>` and uses it, so the
-     * user does not have to walk the SAF tree by hand: `scripting` for the
-     * .sma source folder, `plugins` for the compiled output.
-     *
-     * cstrike and czero are checked first, then any other game directory that
-     * happens to sit under <xash>. Returns false when nothing was found.
-     */
     fun autoFindAmxxFolder(forOutput: Boolean): Boolean {
         val sub = if (forOutput) "plugins" else "scripting"
         val found = findAmxxFolder(sub) ?: return false
@@ -2454,53 +1962,46 @@ private fun externalRoot(app: Application): File {
         } else {
             _scriptRoot.value = found.absolutePath
             compilerPrefs.edit().putString("script_root", found.absolutePath).apply()
+            _compile.value = CompileState.Idle
             refreshScripts()
         }
         return true
     }
-
-    /** The folder Auto Find looks for, used in the messages. */
     fun autoFindTargetName(forOutput: Boolean): String =
         "addons/amxmodx/" + if (forOutput) "plugins" else "scripting"
-
+    private fun findAmxxRoots(): List<File> =
+        gameRootCandidates.map(::File).filter { it.isDirectory }
     private fun findAmxxFolder(sub: String): File? {
-        val gamesRoot = File(GAME_ROOT)
-        if (!gamesRoot.isDirectory) return null
-
-        val games = ArrayList<String>()
-        games.add(GAME_CSTRIKE)
-        games.add(GAME_CZERO)
-        try {
-            gamesRoot.listFiles()?.forEach { f ->
-                if (f.isDirectory && !games.contains(f.name)) games.add(f.name)
+        for (gamesRoot in findAmxxRoots()) {
+            val games = ArrayList<String>()
+            games.add(GAME_CSTRIKE)
+            games.add(GAME_CZERO)
+            try {
+                gamesRoot.listFiles()?.forEach { f ->
+                    if (f.isDirectory && !games.contains(f.name)) games.add(f.name)
+                }
+            } catch (_: Exception) {
             }
-        } catch (_: Exception) {
-            // listing denied, the known game dirs are still tried
-        }
-
-        for (game in games) {
-            val dir = File(File(File(gamesRoot, game), "addons/amxmodx"), sub)
-            if (dir.isDirectory) return dir
+            for (game in games) {
+                val dir = File(File(File(gamesRoot, game), "addons/amxmodx"), sub)
+                if (dir.isDirectory) return dir
+            }
         }
         return null
     }
-
     private fun uriToDir(uri: Uri): File? {
-        // external storage (com.android.externalstorage.documents):
-        // content://.../tree/primary%3Axash%2Fcstrike  -> /storage/emulated/0/xash/cstrike
         val path = uri.path ?: return null
         val marker = "/tree/"
         val idx = path.indexOf(marker)
         val doc = if (idx >= 0) path.substring(idx + marker.length) else path.trimStart('/')
-        val decoded = URLDecoder.decode(doc, Charsets.UTF_8.name()) // primary:xash/cstrike
+        val decoded = URLDecoder.decode(doc, Charsets.UTF_8.name()) 
         val volumeSep = decoded.indexOf(':')
         if (volumeSep < 0) return null
-        val volume = decoded.substring(0, volumeSep) // primary (or SD-card volume id)
+        val volume = decoded.substring(0, volumeSep) 
         val rel = decoded.substring(volumeSep + 1).trimStart('/')
         if (volume == "primary") {
             return File(File(Environment.getExternalStorageDirectory(), ""), rel)
         }
-        // secondary/custom volume: look it up on mounted volumes (API 30+ for a path)
         if (android.os.Build.VERSION.SDK_INT >= 30) {
             val manager = getApplication<Application>().getSystemService(Context.STORAGE_SERVICE) as android.os.storage.StorageManager
             for (v in manager.storageVolumes) {
@@ -2512,7 +2013,6 @@ private fun externalRoot(app: Application): File {
         }
         return null
     }
-
     fun refreshScripts() {
         viewModelScope.launch(Dispatchers.IO) {
             val dir = _scriptRoot.value?.let { File(it) } ?: run {
@@ -2534,28 +2034,13 @@ private fun externalRoot(app: Application): File {
             }
         }
     }
-
-    /**
-     * Watches the picked scripting folder so a .sma dropped in from a file
-     * manager shows up on its own. Plugins are edited outside the app, and
-     * making the user hit refresh after every save is the kind of thing that
-     * makes them stop using the screen at all.
-     *
-     * Only the Compiler screen has a scripting folder worth watching, so this is
-     * called on screen entry and cancelled on leave; a poll that runs for the
-     * whole process lifetime would keep the view model alive for nothing.
-     */
     private var scriptWatchJob: Job? = null
-
     fun startScriptWatcher() {
         scriptWatchJob?.cancel()
         scriptWatchJob = viewModelScope.launch(Dispatchers.IO) {
             while (true) {
                 kotlinx.coroutines.delay(SCRIPT_POLL_MS)
                 if (_scriptRoot.value == null) continue
-                // Re-reads the folder and assigns only when the result differs,
-                // so an unchanged folder does not churn the list the user is
-                // tapping in.
                 val current = _scripts.value
                 val updated = readScriptFolder()
                 if (updated != current) {
@@ -2564,17 +2049,13 @@ private fun externalRoot(app: Application): File {
             }
         }
     }
-
     fun stopScriptWatcher() {
         scriptWatchJob?.cancel()
         scriptWatchJob = null
     }
-
-    /** The .sma list of the current scripting folder, empty when unset. */
     private fun readScriptFolder(): List<SmaSource> {
         val dir = _scriptRoot.value?.let { File(it) } ?: return emptyList()
         if (!dir.isDirectory) return emptyList()
-
         return dir.listFiles { f ->
             f.isFile && f.name.endsWith(".sma", ignoreCase = true)
         }?.sortedBy { it.name }?.map { f ->
@@ -2585,43 +2066,18 @@ private fun externalRoot(app: Application): File {
             )
         }.orEmpty()
     }
-
-    /**
-     * Compiles a single .sma on-device using the amxxpc bundled in the release
-     * module. The driver + its libpc300 kernel (amxxpc32.so) are extracted from the
-     * bundle into the app files dir so no separate install is required. Falls back
-     * to an amxxpc sitting next to the script if no bundle compiler is available.
-     */
     fun compile(source: SmaSource) = compileAll(listOf(source))
-
-    /**
-     * Compiles every selected .sma in order (multi-compile). The combined output
-     * is shown as one log: a per-file pass/fail header plus amxxpc's own stderr.
-     * If any plugin fails, the whole batch is reported as [CompileState.Failed]
-     * (the log still shows which ones compiled cleanly).
-     */
     fun compileAll(sources: List<SmaSource>) {
         if (sources.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
             val total = sources.size
-            // Script Folder holds the folder the user picked for plugins
-            // (e.g. .../amxmodx/scripting). Log files live in exactly
-            // ScriptFolder/logs/ (only "logs/" appended, never another
-            // "scripting", even if the picker already points at the
-            // scripting folder).
             val scriptFolder = File(sources.first().path).parentFile
             val logDir = if (scriptFolder != null) File(scriptFolder, "logs") else null
             logDir?.mkdirs()
-
-            // Every plugin is a separate amxxpc process, so compiling several at
-            // once is real parallelism on the phone's cores. The worker count is
-            // a user setting: more workers finish sooner but fight each other
-            // for RAM and make the device hot, fewer keep it cool.
             val parallelism = effectiveCompileWorkers()
             val gate = Semaphore(parallelism)
             val finished = AtomicInteger(0)
             val results = arrayOfNulls<Pair<Boolean, String>>(total)
-
             coroutineScope {
                 sources.mapIndexed { index, source ->
                     async(Dispatchers.IO) {
@@ -2640,10 +2096,6 @@ private fun externalRoot(app: Application): File {
                     }
                 }.awaitAll()
             }
-
-            // The log is written in the order the user selected, not in the
-            // order the compiles happened to finish, so two runs over the same
-            // folder produce the same compiler.log.
             val log = StringBuilder()
             val failures = LinkedHashMap<String, String>()
             var failed = 0
@@ -2676,26 +2128,24 @@ private fun externalRoot(app: Application): File {
             }
             val okCount = total - failed
             val summary = "\n=== $okCount ok, $failed failed ($parallelism at a time) ==="
-            _compile.value = CompileState.Done(log.toString() + summary, failures)
+            _compile.value = CompileState.Done(
+                log = log.toString() + summary,
+                failures = failures,
+                ok = okCount,
+                total = total,
+            )
         }
     }
-
-    /**
-     * Runs amxxpc once for a single source and returns (success, raw output).
-     */
     private fun compileOne(source: SmaSource): Pair<Boolean, String> {
         val f = File(source.path)
         if (!f.exists()) error("Source not found: ${source.name}")
         val scriptDir = f.parentFile ?: error("Bad source path")
         val includeDir = File(scriptDir, "include")
-
         val amxxpc = prepareCompiler(scriptDir) ?: error(
-            "Compiler (amxxpc) unavailable.\n" +
-                "Pick the scripting folder, or install a patch with the embedded compiler first:\n" +
-                "• bundle compiler: $preparedCompilerPath\n" +
-                "• next to script: ${File(scriptDir, "amxxpc").absolutePath}"
+            "Compiler (amxxpc) is missing from this build.\n" +
+                "Install the latest Nexora APK from the Releases page — it bundles the on-device compiler — then try again.\n" +
+                "Alternatively, place an amxxpc binary next to your .sma files."
         )
-
         val cmd = mutableListOf(amxxpc.absolutePath)
         if (includeDir.isDirectory) {
             cmd.add("-i${includeDir.absolutePath}")
@@ -2712,18 +2162,8 @@ private fun externalRoot(app: Application): File {
         val outPath = File(compiledDir, f.nameWithoutExtension + ".amxx").absolutePath
         cmd.add("-o$outPath")
         cmd.add(source.path)
-        // Ensure compiler dir is in LD_LIBRARY_PATH so driver finds amxxpc32.so
-        // (driver does dlopen("amxxpc32.so") / dlopen("./amxxpc32.so"))
         val compilerDir = amxxpc.parentFile
-        // Run with CWD = the driver's own directory: the driver probes
-        // "./amxxpc32.so" FIRST, so this pins it to the kernel sitting next
-        // to the driver itself instead of a stale copy next to the scripts
-        // (which segfaults the driver silently before its banner flushes).
-        // All args below are absolute, so CWD is irrelevant otherwise.
         val workDir = if (compilerDir != null && compilerDir.isDirectory) compilerDir else scriptDir
-        // Pre-flight: a missing kernel would kill the driver with zero
-        // output — report it plainly instead. The kernel may sit next to
-        // the driver or in filesDir/compiler (which is on LD_LIBRARY_PATH).
         val kernelBesideDriver = if (compilerDir != null) File(compilerDir, "amxxpc32.so") else null
         val filesKernel = File(compilerHome(), "amxxpc32.so")
         val kernelFound = (kernelBesideDriver != null && kernelBesideDriver.exists()) ||
@@ -2737,8 +2177,6 @@ private fun externalRoot(app: Application): File {
             )
         }
         val pb = ProcessBuilder(cmd).directory(workDir).redirectErrorStream(true)
-        // Loader search path: driver's own dir first, then filesDir/compiler
-        // (provisioned kernel lives there when the APK lacks it).
         val ldDirs = listOfNotNull(
             compilerDir?.takeIf { it.isDirectory }?.absolutePath,
             compilerHome().takeIf { it.isDirectory }?.absolutePath,
@@ -2747,7 +2185,6 @@ private fun externalRoot(app: Application): File {
             val oldLd = pb.environment()["LD_LIBRARY_PATH"]
             pb.environment()["LD_LIBRARY_PATH"] = (ldDirs + listOfNotNull(oldLd?.takeIf { it.isNotEmpty() })).joinToString(":")
         }
-        // Last-chance chmod if file lost exec bit (e.g. after reboot)
         if (!amxxpc.canExecute()) {
             try { Runtime.getRuntime().exec(arrayOf("chmod", "755", amxxpc.absolutePath)).waitFor() } catch (_: Throwable) {}
             amxxpc.setExecutable(true, false)
@@ -2759,8 +2196,6 @@ private fun externalRoot(app: Application): File {
         val body = buildString {
             append(output.trim().ifEmpty { if (ok) "Done." else "Compile failed." })
             if (output.isBlank() && exit != 0) {
-                // Silent death (e.g. driver/kernel mismatch crashes before the
-                // banner flushes): record binary sizes for diagnosis.
                 val kernel = amxxpc.parentFile?.let { File(it, "amxxpc32.so") }
                 append("\n[no output, exit=$exit, driver=${amxxpc.length()} bytes" +
                     (if (kernel != null && kernel.exists()) ", kernel=${kernel.length()} bytes" else ", no kernel") +
@@ -2774,11 +2209,6 @@ private fun externalRoot(app: Application): File {
         }
         return ok to body
     }
-
-    private val preparedCompilerPath: String
-        get() = File(getApplication<Application>().filesDir, "compiler/amxxpc").absolutePath
-
-    /** ELF e_machine of a binary, or null if unreadable / not an ELF. */
     private fun elfMachine(file: File): Int? = try {
         file.inputStream().use { ins ->
             val hdr = ByteArray(20)
@@ -2791,34 +2221,23 @@ private fun externalRoot(app: Application): File {
     } catch (_: Throwable) {
         null
     }
-
-    /**
-     * True if [file] is an ELF matching this device's primary ABI
-     * (EM_AARCH64=183 on 64-bit, EM_ARM=40 on 32-bit). Stale/wrong-arch
-     * amxxpc copies (e.g. arm64 binary on an arm32 device) are rejected
-     * instead of executed.
-     */
     private fun matchesDeviceAbi(file: File): Boolean {
         val machine = elfMachine(file) ?: return false
         val want64 = Build.SUPPORTED_ABIS.firstOrNull()?.contains("64") == true
         return if (want64) machine == 183 else machine == 40
     }
-
     private fun compilerHome(): File = File(getApplication<Application>().filesDir, "compiler")
-
     private fun readCompilerStamp(): String? = try {
         File(compilerHome(), ".stamp").takeIf { it.exists() }?.readText()?.trim()
     } catch (_: Throwable) {
         null
     }
-
     private fun writeCompilerStamp(s: String) {
         try {
             compilerHome().mkdirs()
             File(compilerHome(), ".stamp").writeText(s)
         } catch (_: Throwable) {}
     }
-
     private fun appVersionCode(): Long = try {
         val app = getApplication<Application>()
         val info = app.packageManager.getPackageInfo(app.packageName, 0)
@@ -2827,24 +2246,12 @@ private fun externalRoot(app: Application): File {
     } catch (_: Throwable) {
         0L
     }
-
-    /**
-     * Returns a runnable amxxpc: prefers the copy shipped as native lib
-     * (lib/arm64-v8a/libamxxpc.so in the patcher APK → nativeLibraryDir, always
-     * executable), then falls back to extracting from bundle into filesDir.
-     */
     private fun prepareCompiler(fallbackDir: File): File? {
-        // 1) nativeLibraryDir (APK lib, extractNativeLibs=true) — always exec-allowed
         try {
             val nativeDir = File(getApplication<Application>().applicationInfo.nativeLibraryDir)
             val nativeAmxxpc = File(nativeDir, "libamxxpc.so")
             val nativeKernel = File(nativeDir, "libamxxpc32.so")
             if (nativeAmxxpc.exists() && nativeAmxxpc.canExecute()) {
-                // Driver dlopens "amxxpc32.so" (no lib prefix) — keep a copy
-                // in filesDir. Driver+kernel must always be the same
-                // generation: a stale mismatched kernel crashes the driver
-                // before its banner flushes (silent "Compile failed"), so the
-                // pair is version-stamped and reinstalled atomically.
                 try {
                     val dir = compilerHome()
                     dir.mkdirs()
@@ -2857,9 +2264,6 @@ private fun externalRoot(app: Application): File {
                         kernelCopy.setReadable(true, false)
                         writeCompilerStamp(stamp)
                     }
-                    // Old APKs ship the driver without the kernel next to it:
-                    // provision filesDir from bundle bytes (the loader finds
-                    // it via LD_LIBRARY_PATH set at exec time).
                     if (!nativeKernel.exists() && !matchesDeviceAbi(kernelCopy)) {
                         val kb = try {
                             (loadedBundle ?: bundleProvider.loadCachedBundle(_abi.value))
@@ -2883,14 +2287,9 @@ private fun externalRoot(app: Application): File {
                 return nativeAmxxpc
             }
         } catch (_: Throwable) {}
-
-        // Use the app's internal files dir (getFilesDir), not external storage:
-        // the external/emulated dir is typically mounted noexec, so an ELF written
-        // there cannot be exec'd ("permission denied" on ProcessBuilder.start()).
         val compilerDir = File(getApplication<Application>().filesDir, "compiler")
         val amxxpc = File(compilerDir, "amxxpc")
         val kernel = File(compilerDir, "amxxpc32.so")
-
         val bundleFiles = try {
             loadedBundle ?: bundleProvider.loadCachedBundle(_abi.value)
         } catch (_: Throwable) {
@@ -2908,13 +2307,9 @@ private fun externalRoot(app: Application): File {
                     return amxxpc
                 }
                 amxxpc.writeBytes(driverBytes)
-                // Reject wrong-arch binaries (e.g. arm64 driver from an old
-                // bundle on an arm32 device) instead of executing them.
                 if (!matchesDeviceAbi(amxxpc)) {
                     amxxpc.delete()
                 } else {
-                    // chmod 755 via shell is more reliable than File.setExecutable alone
-                    // (some OEMs / SELinux ignore the Java API). Do both.
                     try { Runtime.getRuntime().exec(arrayOf("chmod", "755", amxxpc.absolutePath)).waitFor() } catch (_: Throwable) {}
                     amxxpc.setExecutable(true, false)
                     amxxpc.setReadable(true, false)
@@ -2926,7 +2321,6 @@ private fun externalRoot(app: Application): File {
                             } else {
                                 try { Runtime.getRuntime().exec(arrayOf("chmod", "755", kernel.absolutePath)).waitFor() } catch (_: Throwable) {}
                                 kernel.setReadable(true, false)
-                                // kernel is dlopened, not executed, but needs r+x for some loaders
                                 try { Runtime.getRuntime().exec(arrayOf("chmod", "644", kernel.absolutePath)).waitFor() } catch (_: Throwable) {}
                             }
                         }
@@ -2937,70 +2331,34 @@ private fun externalRoot(app: Application): File {
                     }
                 }
             } catch (_: Throwable) {
-                // extraction failed; fall through to local
             }
         }
-        // fallback: a compiler already present in the picked/script folder
-        // (ABI-verified — never execute a wrong-arch binary)
         val root = _scriptRoot.value?.let { File(it) }
         return listOfNotNull(root, fallbackDir)
             .map { File(it, "amxxpc") }
             .firstOrNull { it.exists() && it.canExecute() && matchesDeviceAbi(it) }
     }
-
     companion object {
-        /** How often the picked scripting folder is re-read while the screen is open. */
         const val SCRIPT_POLL_MS = 3_000L
-
         const val JOB_CLIENT_APK = "client-apk"
         const val JOB_LIBS = "libs"
         const val JOB_ADDONS = "addons"
         const val JOB_PATCH = "patch"
         const val CACHE_TAG = "v2"
-        const val GAME_DIR = "/storage/emulated/0/xash/cstrike"
-        /** Xash base dir; supported games live directly under it. */
-        const val GAME_ROOT = "/storage/emulated/0/xash"
         const val GAME_CSTRIKE = "cstrike"
         const val GAME_CZERO = "czero"
-        /** ABIs the patcher can build for, in priority order. */
         val SUPPORTED_ABIS = listOf("arm64-v8a", "armeabi-v7a")
-
-        /**
-         * Slack for the "is the cached APK older than the release" check: files
-         * copied over USB or written by hand can easily end up a minute or two
-         * off without meaning anything.
-         */
         const val ASSET_DATE_SLOP = 5 * 60 * 1000L
-        /** Suffix that keeps the non-matching gamedata variant out of AMXX's *.txt scan. */
         const val GAMEDATA_DISABLED_SUFFIX = ".disabled"
-        /** Per-ABI gamedata override files: offsets-cstrike-replugged.<arm64|arm32>.txt */
         val GAMEDATA_VARIANT = Regex("offsets-cstrike-replugged\\.(arm64|arm32)\\.txt")
-        /** Pre-per-ABI override name; removed on sight so it cannot keep applying. */
         const val LEGACY_GAMEDATA_NAME = "offsets-cstrike-replugged.txt"
-        /** Releases (tags + patcher APK) are published here by CI. */
         const val APP_RELEASE_REPO = "berkchy/nexora"
-        /**
-         * The stock client APK, built from the cs16-client tree that this repo
-         * carries and published to our own rolling Continuous release, so the
-         * patcher and the client it adopts always come from one build. The
-         * patcher can fetch that APK directly instead of asking the user to
-         * locate it on the device.
-         */
         const val CLIENT_APK_REPO = APP_RELEASE_REPO
         const val CLIENT_APK_ASSET = "CS16Client-Android.apk"
-        /**
-         * Single rolling release: one "Continuous" tag whose assets are
-         * replaced on every build. Update check = version.txt string compare
-         * + APK byte-size check (the tag itself never changes).
-         */
         const val CONTINUOUS_TAG = "continuous"
         const val CONTINUOUS_APK = "nexora_continuous.apk"
         const val RELEASE_APK = "nexora.apk"
         const val VERSION_FILE = "version.txt"
-        /**
-         * User-edited AMXX config files from addons/amxmodx/configs/. The addons
-         * extractor may only create these when missing — never overwrite them.
-         */
         val PROTECTED_ADDON_CONFIGS = setOf(
             "addons/amxmodx/configs/modules.ini",
             "addons/amxmodx/configs/amxx.cfg",
@@ -3011,12 +2369,6 @@ private fun externalRoot(app: Application): File {
             "addons/amxmodx/configs/users.ini",
         )
     }
-
-    /**
-     * Auto-install addons from the embedded bundle into the game directory.
-     * Checks storage permission first; if not granted, silently skips.
-     * Only writes files that are missing or have different sizes (no overwrite of user edits).
-     */
     fun autoInstallAddons() {
         viewModelScope.launch(Dispatchers.IO) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
@@ -3024,7 +2376,6 @@ private fun externalRoot(app: Application): File {
             }
             val gameDir = File(_installPath.value)
             if (!gameDir.exists()) return@launch
-
             val bundle = loadedBundle ?: bundleProvider.loadCachedBundle(_abi.value) ?: return@launch
             var installed = 0
             for (entry in bundle.manifest.entries) {
@@ -3043,48 +2394,64 @@ private fun externalRoot(app: Application): File {
             scanAddonsStatus()
         }
     }
-
     data class AddonFileStatus(
         val path: String,
         val expected: Boolean,
         val installed: Boolean,
         val outdated: Boolean = false,
     )
-
     private val _addonFiles = MutableStateFlow<List<AddonFileStatus>>(emptyList())
     val addonFiles: StateFlow<List<AddonFileStatus>> = _addonFiles.asStateFlow()
-
     private val gamePrefs by lazy {
         getApplication<Application>().getSharedPreferences("game_prefs", Context.MODE_PRIVATE)
     }
-
     private fun savedGameId(): String =
         gamePrefs.getString("game_id", GAME_CSTRIKE)?.takeIf {
             it == GAME_CSTRIKE || it == GAME_CZERO
         } ?: GAME_CSTRIKE
-
-    private fun gameDirFor(gameId: String): String = "$GAME_ROOT/$gameId"
-
+    private val gameRootCandidates = listOf(
+        "/storage/emulated/0/.xash",
+        "/storage/emulated/0/xash",
+        "/sdcard/.xash",
+        "/sdcard/xash",
+    )
+    private fun isGameDirInstalled(dir: File): Boolean =
+        dir.isDirectory && (
+            File(dir, "config.cfg").isFile ||
+                File(dir, "dlls").isDirectory ||
+                File(dir, "cl_dlls").isDirectory ||
+                File(dir, "maps").isDirectory ||
+                File(dir, "valve.rc").isFile
+        )
+    private fun resolveGameRoot(): String {
+        val preferred = savedGameId()
+        for (root in gameRootCandidates) {
+            if (isGameDirInstalled(File(root, preferred))) return root
+        }
+        for (root in gameRootCandidates) {
+            for (game in listOf(GAME_CSTRIKE, GAME_CZERO)) {
+                if (isGameDirInstalled(File(root, game))) return root
+            }
+        }
+        return "/storage/emulated/0/.xash"
+    }
+    private fun gameDirFor(gameId: String): String = "${resolveGameRoot()}/$gameId"
     private val _installPath = MutableStateFlow(gameDirFor(savedGameId()))
     val installPath: StateFlow<String> = _installPath.asStateFlow()
-
-    /** Selected game: "cstrike" (Counter-Strike 1.6) or "czero" (Condition Zero). */
     val gameId: StateFlow<String> = _installPath
         .map { path -> if (path.endsWith("/czero")) GAME_CZERO else GAME_CSTRIKE }
         .stateIn(viewModelScope, SharingStarted.Eagerly, GAME_CSTRIKE)
-
     fun setGame(gameId: String) {
         if (gameId != GAME_CSTRIKE && gameId != GAME_CZERO) return
         gamePrefs.edit().putString("game_id", gameId).apply()
         _installPath.value = gameDirFor(gameId)
+        runAutoDetectAbi()
         scanAddonsStatus()
     }
-
     fun scanAddonsStatus() {
         viewModelScope.launch(Dispatchers.IO) {
             val gameDir = File(_installPath.value)
             val addonsDir = File(gameDir, "addons")
-
             val bundle = loadedBundle ?: bundleProvider.loadCachedBundle(_abi.value)
             val expected = mutableSetOf<String>()
             if (bundle != null) {
@@ -3093,7 +2460,6 @@ private fun externalRoot(app: Application): File {
                     expected.add(entry.target)
                 }
             }
-
             val result = mutableListOf<AddonFileStatus>()
             for (target in expected.sorted()) {
                 val file = File(gameDir, target)
@@ -3101,9 +2467,6 @@ private fun externalRoot(app: Application): File {
                     result.add(AddonFileStatus(target, expected = true, installed = false))
                     continue
                 }
-                // Byte-level compare: different size or different content (or a
-                // newer bundle copy) means the installed file is outdated and
-                // must be replaced on install.
                 var outdated = false
                 try {
                     val entry = bundle?.manifest?.entries?.firstOrNull { it.target == target }

@@ -1,18 +1,24 @@
 package com.pickle.patcher.ui.screens
-
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,1214 +27,566 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.SystemUpdateAlt
-import androidx.compose.material.icons.filled.Extension
-import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.InstallDesktop
-import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RocketLaunch
-import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material.icons.filled.SportsEsports
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.SystemUpdateAlt
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.TextButton
-import androidx.compose.foundation.layout.heightIn
-import com.pickle.patcher.lib.ApkPatcher
+import androidx.compose.ui.unit.sp
 import com.pickle.patcher.patcher.BundleState
-import com.pickle.patcher.patcher.LibInfo
 import com.pickle.patcher.patcher.PatchUiState
-import com.pickle.patcher.patcher.SourceDownloadState
 import com.pickle.patcher.patcher.PatcherViewModel
-import com.pickle.patcher.ui.theme.Accent
-import com.pickle.patcher.ui.theme.AlertRed
-import com.pickle.patcher.ui.theme.Gray40
-import com.pickle.patcher.ui.theme.Gray60
-import com.pickle.patcher.ui.theme.Gray70
-import com.pickle.patcher.ui.theme.Gray80
-import com.pickle.patcher.ui.theme.Gray90
-import com.pickle.patcher.ui.theme.SuccessGreen
-import com.pickle.patcher.ui.theme.WarnYellow
-import com.pickle.patcher.ui.theme.Gray30
+import com.pickle.patcher.patcher.SourceDownloadState
 import java.text.DecimalFormat
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-
-private val mbFmt = DecimalFormat("0.0")
-private fun Long.mb(): String = "${mbFmt.format(this / 1048576.0)} MB"
-
+internal val mbFmt = DecimalFormat("0.0")
+internal fun Long.mb(): String = if (this < 1048576L) {
+    "%.0f KB".format(this / 1024.0)
+} else {
+    "${mbFmt.format(this / 1048576.0)} MB"
+}
 fun String.toDisplayVersion(): String =
     if (firstOrNull()?.isDigit() == true) "v$this" else this
-
+internal fun displayAbi(abi: String): String = when (abi) {
+    "armeabi-v7a" -> "Arm32 (32-bit)"
+    else -> "Arm64 (64-bit)"
+}
 @Composable
-fun PatchScreen(vm: PatcherViewModel) {
+fun PatchScreen(vm: PatcherViewModel, onOpenLibraries: () -> Unit) {
     val scroll = rememberScrollState()
-
+    LaunchedEffect(Unit) {
+        vm.runAutoDetectAbi()
+        vm.refreshSourceApkStatus()
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(scroll)
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        Spacer(Modifier.height(4.dp))
-
-        PatchHeader(vm)
-
-        Spacer(Modifier.height(24.dp))
-
-        SectionHeader("Source APK", "Game client")
-        SourceCard(vm)
-
-        Spacer(Modifier.height(24.dp))
-
-        SectionHeader("Mod bundle", "Target libraries")
-        BundleCard(vm)
-
-        Spacer(Modifier.height(20.dp))
-
-        SectionHeader("Libs", "Installed modules")
-        LibListCard(vm)
-
-        Spacer(Modifier.height(20.dp))
-
-        SectionHeader("Custom libs", "Optional overrides")
-        CustomLibsCard(vm)
-
-        Spacer(Modifier.height(24.dp))
-
-        SectionHeader("Build", "Sign the output")
-        PatchCard(vm)
-
-        Spacer(Modifier.height(24.dp))
+        ArchitectureSection(vm)
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            ClientRow(vm, index = 0, total = 3)
+            LibrariesRow(vm, index = 1, total = 3, onOpenLibraries = onOpenLibraries)
+            BuildRow(vm, index = 2, total = 3)
+        }
+        Spacer(Modifier.height(16.dp))
     }
 }
-
 @Composable
-private fun PatchHeader(vm: PatcherViewModel) {
-    val source by vm.source.collectAsState()
-    val bundle by vm.bundle.collectAsState()
-    val libs by vm.libs.collectAsState()
-    val customLibs by vm.customLibs.collectAsState()
-
-    val sourceReady = source != null
-    val bundleReady = bundle is BundleState.Ready || bundle is BundleState.Loaded
-    val libsReady = libs.isNotEmpty() || customLibs.isNotEmpty()
-    val ready = sourceReady && bundleReady
-
-    ScreenHeader(
-        icon = Icons.Filled.Bolt,
-        title = "Patch",
-        subtitle = if (ready) {
-            "Workspace ready. Review the steps and build a signed APK."
-        } else {
-            "Complete the steps below to prepare a signed client APK."
-        },
-        status = if (ready) "Ready" else "Setup",
-        statusTone = if (ready) Tone.Primary else Tone.Neutral,
-        stats = listOf(
-            Stat("Client", if (sourceReady) "Ready" else "Missing", if (sourceReady) Tone.Primary else Tone.Neutral),
-            Stat("Bundle", if (bundleReady) "Ready" else "Missing", if (bundleReady) Tone.Primary else Tone.Neutral),
-            Stat("Libs", if (libsReady) "${libs.size + customLibs.size}" else "None", if (libsReady) Tone.Primary else Tone.Neutral),
-        ),
-    )
-}
-
-private fun displayAbi(abi: String): String = when (abi) {
-    "armeabi-v7a" -> "Arm32"
-    else -> "Arm64"
-}
-
-@Composable
-private fun SourceCard(vm: PatcherViewModel) {
-    val source by vm.source.collectAsState()
-    val download by vm.sourceDownload.collectAsState()
-    val state = download
-
-    LaunchedEffect(Unit) { vm.refreshSourceApkStatus() }
-
-    AppCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = if (source != null) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainerHighest
-                },
-            ) {
-                Box(modifier = Modifier.size(56.dp), contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Filled.InstallDesktop,
-                        contentDescription = null,
-                        modifier = Modifier.size(26.dp),
-                        tint = if (source != null) {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                }
-            }
-            Spacer(Modifier.width(14.dp))
+private fun ArchitectureSection(vm: PatcherViewModel) {
+    val abi by vm.abi.collectAsState()
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.CheckCircle,
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+            )
+            Spacer(Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    source?.name ?: "No client APK yet",
+                    text = displayAbi(abi),
                     style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.Bold,
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    if (source != null) {
-                        "${source!!.sizeBytes.mb()}  ·  ${source!!.entryCount} entries"
-                    } else {
-                        "Download the game client from GitHub to start."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = "Matched to this device",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
                 )
             }
         }
-
-        Spacer(Modifier.height(12.dp))
-
-        val isUpdate = state is SourceDownloadState.Outdated
-
-        if (state is SourceDownloadState.Downloading) {
-            val progress = if (state.total > 0) state.downloaded.toFloat() / state.total.toFloat() else 0.5f
-            Spacer(Modifier.height(8.dp))
-            WavyProgressBar(progress = progress)
-            Spacer(Modifier.height(4.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    text = if (state.total > 0) {
-                        "%.1f / %.1f MB".format(state.downloaded / 1048576.0, state.total / 1048576.0)
-                    } else {
-                        "%.1f MB".format(state.downloaded / 1048576.0)
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = "${(progress * 100).toInt()}%",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            Spacer(Modifier.height(8.dp))
-        }
-
-        PrimaryButton(
-            text = when (state) {
-                is SourceDownloadState.Fetching -> "Finding release..."
-                is SourceDownloadState.Downloading -> "Downloading..."
-                is SourceDownloadState.Done -> "Download again"
-                is SourceDownloadState.Outdated -> "Update"
-                is SourceDownloadState.Corrupt -> "Re-download"
-                is SourceDownloadState.Failed -> "Retry download"
-                null -> "Download from GitHub"
-            },
-            enabled = state !is SourceDownloadState.Fetching &&
-                state !is SourceDownloadState.Downloading,
-            icon = {
-                Icon(
-                    if (isUpdate) Icons.Filled.SystemUpdateAlt else Icons.Filled.Download,
-                    null,
-                    modifier = Modifier.size(18.dp),
-                )
-            },
-            containerColor = if (isUpdate) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-            contentColor = if (isUpdate) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onPrimary,
-            onClick = { vm.downloadSourceApk() },
-        )
-
-        val note = when (state) {
-            is SourceDownloadState.Outdated ->
-                "Update available (%s). Local %s vs GitHub %s."
-                    .format(
-                        state.reason,
-                        state.localSize.mb(),
-                        state.remoteSize.mb(),
-                    )
-            is SourceDownloadState.Corrupt ->
-                "The downloaded client APK is broken (${state.reason}). Download it again."
-            is SourceDownloadState.Failed -> state.message
-            is SourceDownloadState.Done ->
-                "Client APK ready." + if (source == null) "" else " Up to date."
-            else -> null
-        }
-        if (note != null) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                note,
-                style = MaterialTheme.typography.bodySmall,
-                color = if (state is SourceDownloadState.Failed ||
-                    state is SourceDownloadState.Corrupt
-                ) {
-                    MaterialTheme.colorScheme.error
-                } else {
-                    Gray40
+    }
+}
+@Composable
+private fun ClientRow(vm: PatcherViewModel, index: Int, total: Int) {
+    val source by vm.source.collectAsState()
+    val download by vm.sourceDownload.collectAsState()
+    val src = source
+    val downloading = download as? SourceDownloadState.Downloading
+    val isFetching = download is SourceDownloadState.Fetching
+    val isOutdated = download is SourceDownloadState.Outdated
+    val busy = downloading != null || isFetching
+    val errorNote = when (val s = download) {
+        is SourceDownloadState.Corrupt -> "${s.reason}. Re-download required."
+        is SourceDownloadState.Failed -> s.message
+        else -> null
+    }
+    val actionKey = when {
+        busy -> "busy"
+        src == null -> "download"
+        isOutdated -> "update"
+        else -> "redownload"
+    }
+    GroupedItem(
+        title = "Game Client APK",
+        subtitle = when {
+            src == null && isFetching -> "Checking the latest release…"
+            src == null -> "Not downloaded yet"
+            isOutdated -> "A newer client build is available"
+            else -> "Downloaded · ${src.sizeBytes.mb()}"
+        },
+        index = index,
+        total = total,
+        error = errorNote != null,
+        trailing = {
+            AnimatedContent(
+                targetState = actionKey,
+                transitionSpec = {
+                    (fadeIn(tween(180)) + scaleIn(initialScale = 0.92f)) togetherWith
+                        (fadeOut(tween(140)) + scaleOut(targetScale = 0.92f))
                 },
+                label = "clientAction",
+            ) { key ->
+                when (key) {
+                    "busy" -> SmallProgressButton("Downloading")
+                    "download" -> SmallButton("Download", Icons.Filled.Download) { vm.downloadSourceApk() }
+                    "update" -> SmallButton("Update", Icons.Filled.SystemUpdateAlt) { vm.downloadSourceApk() }
+                    else -> SmallButton("Re-download", Icons.Filled.Refresh) { vm.downloadSourceApk() }
+                }
+            }
+        },
+    ) {
+        if (downloading != null) {
+            val progress = if (downloading.total > 0) {
+                downloading.downloaded.toFloat() / downloading.total.toFloat()
+            } else {
+                null
+            }
+            ProgressFooter(
+                progress = progress,
+                left = if (downloading.total > 0) {
+                    "%.1f / %.1f MB".format(downloading.downloaded / 1048576.0, downloading.total / 1048576.0)
+                } else {
+                    "%.1f MB".format(downloading.downloaded / 1048576.0)
+                },
+                right = progress?.let { "${(it * 100).toInt()}%" }.orEmpty(),
+            )
+        }
+        if (errorNote != null) {
+            Text(
+                text = errorNote,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 14.dp),
             )
         }
     }
 }
-
 @Composable
-private fun BundleCard(vm: PatcherViewModel) {
+private fun LibrariesRow(
+    vm: PatcherViewModel,
+    index: Int,
+    total: Int,
+    onOpenLibraries: () -> Unit,
+) {
     val bundleState by vm.bundle.collectAsState()
     val abiStatus by vm.abiStatus.collectAsState()
     val currentAbi by vm.abi.collectAsState()
-
-    AppCard {
-        val target = abiStatus.firstOrNull { it.selected }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            val abiList = listOf("arm64-v8a" to "Arm64 (64-bit)", "armeabi-v7a" to "Arm32 (32-bit)")
-            abiList.forEachIndexed { index, (abiKey, label) ->
-                val isSelected = currentAbi == abiKey
-                val status = abiStatus.firstOrNull { it.abi == abiKey }
-                val shape = when (index) {
-                    0 -> RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp, topEnd = 4.dp, bottomEnd = 4.dp)
-                    else -> RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp, topEnd = 14.dp, bottomEnd = 14.dp)
-                }
-
-                Surface(
-                    checked = isSelected,
-                    onCheckedChange = { if (!isSelected) vm.setAbi(abiKey) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(42.dp),
-                    shape = shape,
-                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
-                    contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center,
-                    ) {
-                        Icon(
-                            imageVector = if (isSelected) Icons.Filled.Check else Icons.Filled.PhoneAndroid,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontWeight = if (isSelected) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Medium,
-                            ),
-                        )
-                        if (status?.inSource == true) {
-                            Spacer(Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary),
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        Spacer(Modifier.height(10.dp))
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                when {
-                    target == null || !target.inSource -> "Waiting for the client APK"
-                    target.installed -> "Installed · ${target.libCount} libs"
-                    else -> "No libraries yet · Download required"
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        when (val bs = bundleState) {
-            is BundleState.Downloading -> {
-                Text(
-                    bs.tagName.ifBlank { "Bundle" },
-                    style = MaterialTheme.typography.titleSmall,
-                    color = Accent,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    if (bs.currentFile.isNotBlank()) {
-                        "Downloading ${bs.fileIndex + 1}/${bs.fileTotal} \u00b7 ${bs.currentFile}"
-                    } else {
-                        "Downloading\u2026"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Gray40,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(8.dp))
-                WavyProgressBar(progress = bs.percent)
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "%${(bs.percent * 100).toInt()}",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            is BundleState.DownloadError -> {
-                BundleSummaryLine(
-                    icon = Icons.Filled.Warning,
-                    tint = AlertRed,
-                    title = "Download failed",
-                    detail = bs.message,
-                )
-                Spacer(Modifier.height(10.dp))
-                SecondaryButton("Retry", onClick = { vm.fetchAndDownloadBundle() })
-            }
-            is BundleState.None -> {
-                BundleSummaryLine(
-                    icon = Icons.Filled.FolderOpen,
-                    tint = Gray40,
-                    title = "No bundle for this target",
-                    detail = "Download the modules for the selected ABI to patch.",
-                )
-                Spacer(Modifier.height(10.dp))
-                PrimaryButton(
-                    text = "Download",
-                    onClick = { vm.fetchAndDownloadBundle() },
-                    icon = { Icon(Icons.Filled.Download, null, modifier = Modifier.size(18.dp)) },
-                )
-            }
-            is BundleState.Loaded -> {
-                BundleSummaryLine(
-                    icon = Icons.Filled.CheckCircle,
-                    tint = SuccessGreen,
-                    title = "Ready to patch",
-                    detail = "Libraries from libs/ \u00b7 ${abiStatus.firstOrNull { it.selected }?.libCount ?: 0} files",
-                )
-                Spacer(Modifier.height(8.dp))
-                SecondaryButton("Refresh", onClick = { vm.fetchAndDownloadBundle() })
-            }
-            is BundleState.Ready -> {
-                BundleSummaryLine(
-                    icon = Icons.Filled.CheckCircle,
-                    tint = SuccessGreen,
-                    title = bs.bundleName,
-                    detail = "${bs.entries} entries \u00b7 ${bs.version.toDisplayVersion()}",
-                )
-                Spacer(Modifier.height(8.dp))
-                SecondaryButton("Refresh", onClick = { vm.fetchAndDownloadBundle() })
-            }
-        }
+    val target = abiStatus.firstOrNull { it.selected }
+    val isDownloading = bundleState is BundleState.Downloading
+    val isReady = target?.installed == true ||
+        bundleState is BundleState.Ready ||
+        bundleState is BundleState.Loaded
+    val bundleError = bundleState as? BundleState.DownloadError
+    val actionKey = when {
+        isDownloading -> "busy"
+        isReady -> "refresh"
+        else -> "download"
     }
-}
-
-@Composable
-private fun BundleSummaryLine(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    tint: androidx.compose.ui.graphics.Color,
-    title: String,
-    detail: String,
-) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleSmall, color = Gray30)
-            Text(
-                detail,
-                style = MaterialTheme.typography.bodySmall,
-                color = Gray40,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
-@Composable
-private fun CustomLibsCard(vm: PatcherViewModel) {
-    val customLibs by vm.customLibs.collectAsState()
-    val context = LocalContext.current
-    val abi by vm.abi.collectAsState()
-    val stale = remember(customLibs, abi) { vm.staleCustomLibs() }
-
-    val picker = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
-    ) { uri ->
-        if (uri != null) vm.addCustomLibs(listOf(uri))
-    }
-
-    AppCard {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                if (customLibs.isEmpty()) "Custom libs" else "${customLibs.size} custom lib(s)",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                GhostButton(text = "Releases", onClick = {
-                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/berkchy/nexora/releases"))
-                    context.startActivity(intent)
-                })
-                GhostButton(text = "Add", onClick = { picker.launch(arrayOf("*/*")) })
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-        if (customLibs.isEmpty()) {
-            Text(
-                "No custom libs added yet. Tap Add to pick a .so.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Gray60,
-            )
-        } else {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                customLibs.forEach { lib ->
-                    val isStale = lib in stale
-                    Surface(
-                        shape = MaterialTheme.shapes.medium,
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Row(
-                            Modifier.padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(lib.name, style = MaterialTheme.typography.bodyMedium, color = Gray30, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(
-                                    "lib/$abi/${lib.name} · ${lib.machineName}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Gray40,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                if (lib.shadows != null) {
-                                    Text("replaces ${lib.shadows}", style = MaterialTheme.typography.bodySmall, color = WarnYellow)
-                                }
-                                if (isStale) {
-                                    Text("not built for $abi", style = MaterialTheme.typography.bodySmall, color = AlertRed)
-                                }
-                            }
-                            IconButton(onClick = { vm.removeCustomLib(lib.name) }) {
-                                Icon(Icons.Filled.Close, contentDescription = "Remove ${lib.name}", tint = Gray60)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LibListCard(vm: PatcherViewModel) {
-    val libs by vm.libs.collectAsState()
-    val checking by vm.libsChecking.collectAsState()
-
-    AppCard {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                if (libs.isEmpty()) "Local libs" else "${libs.size} local libs",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            GhostButton(
-                text = if (checking) "Checking…" else "Check updates",
-                onClick = { vm.refreshLibStatus() },
-                enabled = !checking,
-            )
-        }
-        Spacer(Modifier.height(4.dp))
-        if (libs.isEmpty()) {
-            Text(
-                "No .so files found in libs directory.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = Gray40,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "Press Download in MOD BUNDLE to fetch them.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Gray60,
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 176.dp),
-                verticalArrangement = Arrangement.spacedBy(0.dp),
-            ) {
-                items(libs, key = { it.name }) { lib ->
-                    LibRow(
-                        lib = lib,
-                        onRefresh = { vm.refreshSingleLib(lib.name) },
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LibRow(lib: LibInfo, onRefresh: () -> Unit) {
-    val icon = libTypeIcon(lib.name)
-    val iconDesc = libTypeDesc(lib.name)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = iconDesc,
-            modifier = Modifier.size(20.dp).padding(end = 8.dp),
-            tint = Gray70,
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                lib.name,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (lib.downloading) {
-                AppProgressBar(lib.downloadProgress.coerceAtLeast(0f))
+    GroupedItem(
+        title = "Mod Libraries",
+        subtitle = when (val bs = bundleState) {
+            is BundleState.Downloading -> "Downloading libraries…"
+            is BundleState.Loaded -> "${target?.libCount ?: 0} libraries ready"
+            is BundleState.Ready -> "${bs.entries} entries · ${bs.version.toDisplayVersion()}"
+            is BundleState.DownloadError -> bs.message
+            is BundleState.None -> if (target?.installed == true) {
+                "${target.libCount} libraries ready"
             } else {
-                Text(
-                    if (lib.localSize > 0) {
-                        val local = lib.localSize.mb()
-                        val release = lib.releaseSize.mb()
-                        if (lib.upToDate) "$local (up to date)" else "$local → $release"
-                    } else if (lib.releaseSize > 0) "Outdated" else "Not installed",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (lib.upToDate) Gray60 else AlertRed,
-                )
-            }
-        }
-        if (lib.downloading) {
-            Icon(
-                Icons.Filled.Download,
-                contentDescription = "Downloading",
-                modifier = Modifier.size(20.dp),
-                tint = Accent,
-            )
-        } else if (lib.upToDate) {
-            Icon(
-                Icons.Filled.CheckCircle,
-                contentDescription = "Up to date",
-                modifier = Modifier.size(20.dp),
-                tint = Gray60,
-            )
-        } else {
-            Icon(
-                Icons.Filled.Refresh,
-                contentDescription = "Refresh",
-                modifier = Modifier
-                    .size(20.dp)
-                    .clickable { onRefresh() },
-                tint = Accent,
-            )
-        }
-    }
-}
-
-private fun libTypeIcon(name: String): ImageVector = when {
-    name == "libamxmodx.so" -> Icons.Filled.Extension
-    name == "libmetamod.so" -> Icons.Filled.Bolt
-    name == "libyapb.so" -> Icons.Filled.SmartToy
-    name.startsWith("libclient_android_") -> Icons.Filled.PhoneAndroid
-    name.startsWith("libcs_android_") -> Icons.Filled.SportsEsports
-    name.contains("_amxx_") -> Icons.Filled.Build
-    else -> Icons.Filled.FolderOpen
-}
-
-private fun libTypeDesc(name: String): String = when {
-    name == "libamxmodx.so" -> "AMX Mod X core"
-    name == "libmetamod.so" -> "Metamod HL1"
-    name == "libyapb.so" -> "YaPB bot"
-    name.startsWith("libclient_android_") -> "CS16Client client DLL"
-    name.startsWith("libcs_android_") -> "ReGameDLL game DLL"
-    name.contains("_amxx_") -> "AMXX module"
-    else -> "Library"
-}
-
-@Composable
-private fun PatchCard(vm: PatcherViewModel) {
-    val state by vm.patch.collectAsState()
-    val log by vm.patchLog.collectAsState()
-    val bundle = vm.bundle.collectAsState().value
-    val context = LocalContext.current
-    val canPatch = vm.source.collectAsState().value != null &&
-        (bundle is BundleState.Ready || bundle is BundleState.Loaded)
-    var showComponents by rememberSaveable { mutableStateOf(false) }
-
-    AppCard {
-        when (val s = state) {
-            is PatchUiState.Idle -> {
-                Text(
-                    "Ready to build",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "Inject the selected libraries, align the archive and sign the APK.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(14.dp))
-                PrimaryButton(
-                    text = "Patch & Sign APK",
-                    onClick = { showComponents = true },
-                    enabled = canPatch,
-                    icon = { Icon(Icons.Filled.RocketLaunch, null, modifier = Modifier.size(18.dp)) },
-                )
-                if (!canPatch) {
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "Select an APK and load a bundle to continue.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            is PatchUiState.Running -> {
-                PatchSteps(s)
-            }
-            is PatchUiState.Done -> {
-                PatchResult(
-                    vm = vm,
-                    report = s.report,
-                    log = s.log,
-                    onInstall = { vm.requestInstall() },
-                    onPatchAgain = { vm.reset() },
-                )
-            }
-            is PatchUiState.Failed -> {
-                Icon(Icons.Filled.Warning, null, tint = AlertRed, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.height(4.dp))
-                Text("Patch failed", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    s.message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Gray40,
-                )
-                Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SecondaryButton("Copy log", onClick = {
-                        val clip = context.getSystemService(android.content.ClipboardManager::class.java)
-                        clip?.setPrimaryClip(
-                            android.content.ClipData.newPlainText(
-                                "nexora patch log",
-                                (listOf(s.message) + log).joinToString("\n"),
-                            )
-                        )
-                    })
-                    SecondaryButton("Try Again", onClick = { vm.reset() })
-                }
-                Spacer(Modifier.height(12.dp))
-                MiniConsole(lines = log)
-            }
-        }
-    }
-
-    if (showComponents && canPatch && state is PatchUiState.Idle) {
-        val components = remember(vm) { vm.patchComponents() }
-        val customLibs by vm.customLibs.collectAsState()
-        val problem by vm.customLibProblem.collectAsState()
-        val abi by vm.abi.collectAsState()
-        val problemText = problem
-
-        val libPicker = androidx.activity.compose.rememberLauncherForActivityResult(
-            androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
-        ) { uri ->
-            if (uri != null) vm.addCustomLibs(listOf(uri))
-        }
-
-        if (problemText != null) {
-            AlertDialog(
-                onDismissRequest = {
-                    vm.dismissCustomLibProblem()
-                    showComponents = false
-                },
-                title = { Text("Libraries not added", color = AlertRed) },
-                text = {
-                    Text(problemText, style = MaterialTheme.typography.bodySmall, color = Gray40)
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        vm.dismissCustomLibProblem()
-                        showComponents = false
-                    }) { Text("OK", color = Accent) }
-                },
-            )
-        } else {
-            PatchComponentsDialog(
-                components = components,
-                customLibs = customLibs,
-                targetAbi = abi,
-                staleCustomLibs = remember(customLibs, abi) { vm.staleCustomLibs() },
-                summary = vm.patchSummary(),
-                onAddLibs = { libPicker.launch(arrayOf("*/*")) },
-                onRemoveLib = vm::removeCustomLib,
-                onConfirm = { selectedKeys ->
-                    showComponents = false
-                    vm.startPatch(selectedKeys)
-                },
-                onDismiss = { showComponents = false },
-            )
-        }
-    }
-}
-
-@Composable
-private fun PatchComponentsDialog(
-    components: List<PatcherViewModel.PatchComponent>,
-    customLibs: List<PatcherViewModel.CustomLib>,
-    targetAbi: String,
-    staleCustomLibs: List<PatcherViewModel.CustomLib>,
-    summary: PatcherViewModel.PatchSummary?,
-    onAddLibs: () -> Unit,
-    onRemoveLib: (String) -> Unit,
-    onConfirm: (Set<String>) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val allKeys = components.map { it.key } + customLibs.map { it.name }
-    var selected by remember(customLibs) {
-        mutableStateOf((allKeys).toSet())
-    }
-    val allSelected = selected.size == allKeys.size
-    val blocked = staleCustomLibs.filter { it.name in selected }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Patch") },
-        text = {
-            Column {
-                if (summary != null) {
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = Accent.copy(alpha = 0.07f),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Column(Modifier.padding(10.dp)) {
-                            Text(
-                                "Target ${displayAbi(summary.abi)}",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = Accent,
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                "${summary.source} \u00b7 ${summary.sourceSize.mb()}\n" +
-                                    "${summary.components} components \u00b7 ${summary.entries} entries\n" +
-                                    "payload ${summary.payloadSize.mb()}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Gray40,
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(10.dp))
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "${selected.size}/${components.size} selected",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = Gray40,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = {
-                        selected = if (allSelected) emptySet() else allKeys.toSet()
-                    }) {
-                        Text(if (allSelected) "Clear" else "All", color = Accent)
-                    }
-                }
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 300.dp)
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    components.forEach { c ->
-                        val on = c.key in selected
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    selected = if (on) selected - c.key else selected + c.key
-                                }
-                                .padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Checkbox(
-                                checked = on,
-                                onCheckedChange = { checked ->
-                                    selected = if (checked) selected + c.key else selected - c.key
-                                },
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    c.label,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = if (on) Gray30 else Gray40,
-                                )
-                                Text(
-                                    c.description,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Gray40,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                    }
-
-                    if (customLibs.isNotEmpty()) {
-                        HorizontalDivider(
-                            color = MaterialTheme.colorScheme.outlineVariant,
-                            modifier = Modifier.padding(vertical = 8.dp),
-                        )
-                        Text(
-                            "Custom libs",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = Accent,
-                        )
-                    }
-
-                    customLibs.forEach { lib ->
-                        val on = lib.name in selected
-                        val stale = lib in staleCustomLibs
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    selected = if (on) selected - lib.name else selected + lib.name
-                                }
-                                .padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Checkbox(
-                                checked = on,
-                                onCheckedChange = { checked ->
-                                    selected = if (checked) selected + lib.name else selected - lib.name
-                                },
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    lib.name,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = if (on) Gray30 else Gray40,
-                                )
-                                Text(
-                                    "lib/$targetAbi/${lib.name} · ${lib.machineName}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Gray40,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                if (lib.shadows != null) {
-                                    Text(
-                                        "replaces ${lib.shadows}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = WarnYellow,
-                                    )
-                                }
-                                if (stale) {
-                                    Text(
-                                        "not built for $targetAbi",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = AlertRed,
-                                    )
-                                }
-                            }
-                            IconButton(onClick = { onRemoveLib(lib.name) }) {
-                                Icon(
-                                    Icons.Filled.Close,
-                                    contentDescription = "Remove ${lib.name}",
-                                    tint = Gray60,
-                                )
-                            }
-                        }
-                    }
-                }
+                "Required for ${displayAbi(currentAbi)}"
             }
         },
-        confirmButton = {
-            TextButton(
-                onClick = { onConfirm(selected) },
-                enabled = selected.isNotEmpty() && blocked.isEmpty(),
-            ) {
-                Text("Patch", color = Accent)
-            }
-        },
-        dismissButton = {
-            Row {
-                TextButton(onClick = onAddLibs) { Text("Add libs", color = Accent) }
-                TextButton(onClick = onDismiss) { Text("Cancel", color = Gray60) }
-            }
-        },
-    )
-}
-
-@Composable
-private fun PatchSteps(state: PatchUiState.Running) {
-    val entries = state.counters["entries"].orEmpty()
-    val libs = state.counters["libs"].orEmpty()
-    val stage = when (state.step) {
-        ApkPatcher.Step.ANALYZE -> "analyze"
-        ApkPatcher.Step.INJECT -> "inject"
-        ApkPatcher.Step.ALIGN -> "align"
-        ApkPatcher.Step.SIGN -> "sign"
-        ApkPatcher.Step.VERIFY -> "verify"
-    }
-
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        RingProgress(fraction = state.progress, label = stage)
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = state.detail.ifBlank { "working\u2026" },
-                style = MaterialTheme.typography.bodyMedium,
-                color = Accent,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (entries.isNotEmpty() || libs.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (entries.isNotEmpty()) {
-                        StatPill("entries", entries)
-                    }
-                    if (libs.isNotEmpty()) {
-                        StatPill("libs", libs)
-                    }
-                }
-            }
-        }
-    }
-
-    Spacer(Modifier.height(12.dp))
-    MiniConsole(lines = state.log)
-}
-
-@Composable
-private fun PatchHistoryCard(vm: PatcherViewModel) {
-    val history by vm.patchHistory.collectAsState()
-    if (history.isEmpty()) return
-    AppCard {
-        Text("Patch history", style = MaterialTheme.typography.titleSmall, color = Gray40)
-        Spacer(Modifier.height(6.dp))
-        history.take(5).forEach { h ->
+        index = index,
+        total = total,
+        error = bundleError != null,
+        trailing = {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(
-                    Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(if (h.ok) SuccessGreen else AlertRed)
-                )
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "${displayAbi(h.abi)} \u00b7 ${h.libs} libs \u00b7 ${h.entries} entries",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Gray30,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        h.source,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Gray60,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                FilledTonalButton(
+                    onClick = onOpenLibraries,
+                    modifier = Modifier.height(38.dp),
+                    shape = RoundedCornerShape(percent = 50),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.List,
+                        contentDescription = "View libraries",
+                        modifier = Modifier.size(18.dp),
                     )
                 }
-                Text(
-                    SimpleDateFormat("dd.MM HH:mm", Locale.getDefault()).format(Date(h.time)),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Gray60,
-                )
+                AnimatedContent(
+                    targetState = actionKey,
+                    transitionSpec = {
+                        (fadeIn(tween(180)) + scaleIn(initialScale = 0.92f)) togetherWith
+                            (fadeOut(tween(140)) + scaleOut(targetScale = 0.92f))
+                    },
+                    label = "librariesAction",
+                ) { key ->
+                    when (key) {
+                        "busy" -> SmallProgressButton("Downloading")
+                        "refresh" -> SmallButton("Refresh", Icons.Filled.Refresh) { vm.fetchAndDownloadBundle() }
+                        else -> SmallButton("Download", Icons.Filled.Download) { vm.fetchAndDownloadBundle() }
+                    }
+                }
             }
-        }
-    }
-    Spacer(Modifier.height(8.dp))
-}
-
-@Composable
-private fun PatchCheckCard(vm: PatcherViewModel) {
-    val check by vm.patchCheck.collectAsState()
-    AppCard {
-        Text("Install check", style = MaterialTheme.typography.titleSmall, color = Gray40)
-        Spacer(Modifier.height(6.dp))
-        when (val c = check) {
-            is PatcherViewModel.PatchCheck.Idle -> {
-                Text(
-                    "Signature, bundled libraries and the last game run.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Gray40,
-                )
-                Spacer(Modifier.height(8.dp))
-                SecondaryButton("Run check", onClick = { vm.verifyPatchedApk() })
-            }
-            is PatcherViewModel.PatchCheck.Running -> {
-                Text("Checking\u2026", style = MaterialTheme.typography.bodySmall, color = Accent)
-            }
-            is PatcherViewModel.PatchCheck.Result -> {
-                CheckLine("Signature", if (c.signatureOk) "verified (v1=${c.usedV1} v2=${c.usedV2})" else "NOT VERIFIED", c.signatureOk)
-                CheckLine("Bundled libs", "${c.presentLibs}/${c.expectedLibs}", c.presentLibs >= c.expectedLibs && c.expectedLibs > 0)
-                CheckLine("Last game run", c.engineCommit.ifBlank { "engine.log not found" }, c.engineCommit.isNotBlank())
-            }
-            is PatcherViewModel.PatchCheck.Failed -> {
-                Text(c.message, style = MaterialTheme.typography.bodySmall, color = AlertRed)
-                Spacer(Modifier.height(8.dp))
-                SecondaryButton("Retry", onClick = { vm.verifyPatchedApk() })
-            }
-        }
-    }
-}
-
-@Composable
-private fun CheckLine(label: String, value: String, ok: Boolean) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        },
     ) {
-        Icon(
-            if (ok) Icons.Filled.CheckCircle else Icons.Filled.Warning,
-            null,
-            tint = if (ok) SuccessGreen else AlertRed,
-            modifier = Modifier.size(16.dp),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(label, style = MaterialTheme.typography.bodySmall, color = Gray40)
-        Spacer(Modifier.width(8.dp))
-        Text(
-            value,
-            style = MaterialTheme.typography.bodySmall,
-            color = if (ok) Gray30 else AlertRed,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        if (bundleState is BundleState.Downloading) {
+            val bs = bundleState as BundleState.Downloading
+            ProgressFooter(
+                progress = bs.percent,
+                left = if (bs.fileTotal > 0) "File ${bs.fileIndex + 1} of ${bs.fileTotal}" else "Downloading…",
+                right = "${(bs.percent * 100).toInt()}%",
+            )
+        }
     }
 }
-
 @Composable
-private fun PatchResult(
-    vm: PatcherViewModel,
-    report: ApkPatcher.PatchReport,
-    log: List<String>,
-    onInstall: () -> Unit,
-    onPatchAgain: () -> Unit,
+private fun BuildRow(vm: PatcherViewModel, index: Int, total: Int) {
+    val patchState by vm.patch.collectAsState()
+    val source by vm.source.collectAsState()
+    val bundleState by vm.bundle.collectAsState()
+    val abiStatus by vm.abiStatus.collectAsState()
+    val patchLog by vm.patchLog.collectAsState()
+    val target = abiStatus.firstOrNull { it.selected }
+    val hasClient = source != null
+    val hasBundle = target?.installed == true ||
+        bundleState is BundleState.Ready ||
+        bundleState is BundleState.Loaded
+    val canPatch = hasClient && hasBundle
+    var showLog by remember { mutableStateOf(false) }
+    val running = patchState as? PatchUiState.Running
+    val actionKey = when (patchState) {
+        PatchUiState.Idle -> "idle"
+        is PatchUiState.Running -> "running"
+        is PatchUiState.Done -> "done"
+        is PatchUiState.Failed -> "failed"
+    }
+    GroupedItem(
+        title = when (patchState) {
+            is PatchUiState.Done -> "Patch Succeeded"
+            is PatchUiState.Failed -> "Patch Failed"
+            is PatchUiState.Running -> "Patching APK…"
+            PatchUiState.Idle -> "Build Patched APK"
+        },
+        index = index,
+        total = total,
+        trailing = {
+            AnimatedContent(
+                targetState = actionKey,
+                transitionSpec = {
+                    (fadeIn(tween(180)) + scaleIn(initialScale = 0.92f)) togetherWith
+                        (fadeOut(tween(140)) + scaleOut(targetScale = 0.92f))
+                },
+                label = "buildAction",
+            ) { key ->
+                when (key) {
+                    "idle" -> SmallButton(
+                        text = "Start Patch",
+                        icon = Icons.Filled.RocketLaunch,
+                        filled = true,
+                        enabled = canPatch,
+                        onClick = { vm.startPatch() },
+                    )
+                    "running" -> SmallProgressButton("Building")
+                    "done" -> Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        SmallButton("Install", Icons.Filled.InstallDesktop, filled = true) { vm.requestInstall() }
+                        SmallButton("Reset", Icons.Filled.Refresh) { vm.reset() }
+                    }
+                    else -> SmallButton(
+                        text = "Reset",
+                        icon = Icons.Filled.Refresh,
+                        filled = true,
+                        onClick = { vm.reset() },
+                    )
+                }
+            }
+        },
+    ) {
+        val failedState = patchState as? PatchUiState.Failed
+        if (failedState != null) {
+            Text(
+                text = failedState.message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 14.dp),
+            )
+        }
+        if (running != null) {
+            ProgressFooter(
+                progress = running.progress,
+                left = running.step.name.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() },
+                right = "${(running.progress * 100).toInt()}%",
+            )
+        }
+        if (patchLog.isNotEmpty()) {
+            TextButton(
+                onClick = { showLog = !showLog },
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(top = 2.dp),
+            ) {
+                Text(if (showLog) "Hide Build Log" else "View Build Log")
+            }
+            AnimatedVisibility(visible = showLog) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 14.dp, end = 14.dp, bottom = 14.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                ) {
+                    val logText = patchLog.joinToString("\n")
+                    val scrollState = rememberScrollState()
+                    Text(
+                        text = logText,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .padding(14.dp)
+                            .heightIn(max = 200.dp)
+                            .verticalScroll(scrollState),
+                    )
+                }
+            }
+        }
+    }
+}
+@Composable
+internal fun GroupedItem(
+    title: String,
+    subtitle: String? = null,
+    index: Int,
+    total: Int,
+    error: Boolean = false,
+    trailing: @Composable () -> Unit,
+    footer: @Composable ColumnScope.() -> Unit = {},
 ) {
-    AnimatedContent(
-        targetState = true,
-        transitionSpec = { fadeIn(tween(300)).togetherWith(fadeOut(tween(200))) },
-        label = "result",
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(
+                animationSpec = spring(
+                    dampingRatio = 0.9f,
+                    stiffness = Spring.StiffnessMediumLow,
+                ),
+            ),
+        shape = getGroupedItemShape(index, total),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ),
     ) {
         Column {
-            Surface(
-                shape = MaterialTheme.shapes.large,
-                color = SuccessGreen.copy(alpha = 0.12f),
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 18.dp, end = 12.dp, top = 14.dp, bottom = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
-                    Text("Patch Complete", style = MaterialTheme.typography.titleMedium, color = SuccessGreen)
-                    Spacer(Modifier.height(4.dp))
-                    val v = report.verification
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Output: ${report.signedSizeBytes.mb()}  ·  source ${report.sourceName}\n" +
-                            "Added: ${report.addedEntries.size}  ·  kept: ${report.keptCount}  ·  aligned: ${report.alignedStored}\n" +
-                            if (report.patchedLibs.isNotEmpty()) "LibCs: PostThink active-item guard applied\n" else "" +
-                            "Signature: ${if (v != null && v.verified) "OK (v1=${v.usedV1} v2=${v.usedV2})" else "NOT VERIFIED"}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Gray40,
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
+                    subtitle?.takeIf { it.isNotBlank() }?.let {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
+                Spacer(Modifier.width(8.dp))
+                trailing()
             }
-            Spacer(Modifier.height(10.dp))
-            PrimaryButton(
-                text = "Install",
-                onClick = onInstall,
-                icon = { Icon(Icons.Filled.InstallDesktop, null, modifier = Modifier.size(18.dp)) },
+            footer()
+        }
+    }
+}
+@Composable
+internal fun SmallButton(
+    text: String,
+    icon: ImageVector,
+    filled: Boolean = false,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed && enabled) 0.94f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium,
+        ),
+        label = "smallButtonScale",
+    )
+    val modifier = Modifier
+        .height(38.dp)
+        .graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+        }
+    val shape = RoundedCornerShape(percent = 50)
+    val padding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+    val content: @Composable RowScope.() -> Unit = {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+        )
+    }
+    if (filled) {
+        Button(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = modifier,
+            shape = shape,
+            contentPadding = padding,
+            interactionSource = interactionSource,
+            content = content,
+        )
+    } else {
+        FilledTonalButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = modifier,
+            shape = shape,
+            contentPadding = padding,
+            interactionSource = interactionSource,
+            content = content,
+        )
+    }
+}
+@Composable
+internal fun SmallProgressButton(text: String) {
+    Button(
+        onClick = {},
+        enabled = false,
+        modifier = Modifier.height(38.dp),
+        shape = RoundedCornerShape(percent = 50),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(14.dp),
+            strokeWidth = 2.dp,
+            color = MaterialTheme.colorScheme.onPrimary,
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+        )
+    }
+}
+@Composable
+internal fun ProgressFooter(progress: Float?, left: String, right: String) {
+    Column(
+        modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 14.dp),
+    ) {
+        val indicatorModifier = Modifier
+            .fillMaxWidth()
+            .height(6.dp)
+            .clip(RoundedCornerShape(3.dp))
+        if (progress != null) {
+            LinearProgressIndicator(
+                progress = { progress.coerceIn(0f, 1f) },
+                modifier = indicatorModifier,
             )
-            Spacer(Modifier.height(8.dp))
-            SecondaryButton("Patch again", onClick = onPatchAgain)
-            Spacer(Modifier.height(12.dp))
-            MiniConsole(lines = log)
-            Spacer(Modifier.height(12.dp))
-            PatchHistoryCard(vm)
-            Spacer(Modifier.height(8.dp))
-            PatchCheckCard(vm)
-            Spacer(Modifier.height(6.dp))
+        } else {
+            LinearProgressIndicator(modifier = indicatorModifier)
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
             Text(
-                "Replaces the existing AMXX install. Signed with the debug key.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Gray40,
+                text = left,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = right,
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.primary,
             )
         }
     }

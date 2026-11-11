@@ -1,13 +1,4 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# Pushes a new tag to the private fork to trigger the build & release workflow,
-# then prints the new run. Run from the repo root.
-#
-# Usage:
-#   ./push-tag.sh [version]        # default v1.10.0  (re-tags current commit)
-#   ./push-tag.sh v1.11.0          # new version tag
-#
-# Options:
-#   -n, --no-commit   skip the git add/commit step (just re-tag existing HEAD)
 set -euo pipefail
 
 REMOTE="crashview"

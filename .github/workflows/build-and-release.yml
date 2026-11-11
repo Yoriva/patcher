@@ -18,9 +18,6 @@ env:
   ANDROID_DIR: android
   CS16_CLIENT_URL: https://github.com/berkchy/cs16-client.git
 
-# NOTE: intentionally a SINGLE job. The old 3-job layout passed ~200 MB
-# through Actions artifacts on every tag and hit the repo artifact quota.
-# All stages run sequentially anyway (needs:), so nothing is lost.
 jobs:
   build-release:
     runs-on: ubuntu-latest
@@ -42,10 +39,6 @@ jobs:
           GOT=$(git -C cs16-client rev-parse HEAD)
           [ "$GOT" = "$PIN" ] || { echo "::error::cs16-client is $GOT, pin says $PIN"; exit 1; }
 
-      # cs16-client is a plain directory, not a submodule, so `submodules: recursive`
-      # does not fetch it and `git diff` cannot see it change. cs16-client.pin
-      # holds the commit to build and takes that role: changing it is what makes
-      # the native rebuild notice, exactly as moving a gitlink used to.
       - name: Detect build type
         id: build_type
         shell: bash
@@ -53,23 +46,12 @@ jobs:
           MSG=$(git log -1 --pretty=%s)
           echo "Commit message: $MSG"
           LOWER=$(echo "$MSG" | tr '[:upper:]' '[:lower:]')
-          # What gets built comes from the commit message and nothing else:
-          #   [android] -> the patcher APK, with the on-device compilers in it
-          #   [libs]    -> the .so set: amxx core/modules, plugins, game dlls
-          # A commit with neither marker builds nothing, so docs/config/infra
-          # pushes no longer spend a runner compiling an APK and 40 libraries.
           NEEDS_ANDROID=false
           NEEDS_LIBS=false
           if echo "$LOWER" | grep -q '\[android\]'; then NEEDS_ANDROID=true; fi
           if echo "$LOWER" | grep -q '\[libs\]'; then NEEDS_LIBS=true; fi
-          # Legacy markers still accepted.
           if echo "$LOWER" | grep -qE '\[android build\]|\[version build\]'; then NEEDS_ANDROID=true; fi
           if echo "$LOWER" | grep -qE '\[bundle build\]'; then NEEDS_LIBS=true; fi
-          # The continuous channel is built either from the continuous tag or
-          # from a manual run on master - otherwise a plain commit that touches
-          # cs16-client or android/ci would need the tag force-moved under it, and a
-          # dispatch on master would publish nexora_vmaster.apk into the
-          # continuous release.
           CONTINUOUS=false
           if [ "$GITHUB_REF_NAME" = "continuous" ]; then
             CONTINUOUS=true
@@ -81,8 +63,6 @@ jobs:
           fi
           if [ "$CONTINUOUS" = true ]; then
             echo "APP_VERSION_NAME=continuous-r${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
-            # Epoch seconds: monotonic across CI providers (run numbers and
-            # GitLab pipeline IIDs are independent counters -> downgrade block).
             echo "APP_VERSION_CODE=$(date -u +%s)" >> "$GITHUB_ENV"
             echo "APK_NAME=nexora_continuous.apk" >> "$GITHUB_ENV"
             echo "BUNDLE_VERSION=continuous-r${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
@@ -91,7 +71,6 @@ jobs:
             echo "APP_VERSION_CODE=$(date -u +%s)" >> "$GITHUB_ENV"
             echo "APK_NAME=nexora_v${GITHUB_REF_NAME#v}.apk" >> "$GITHUB_ENV"
           fi
-          # Escape multiline for GitHub Actions output
           ESCAPED=$(echo "$MSG" | head -1 | sed 's/"/\\"/g')
           echo "commit_msg=$ESCAPED" >> "$GITHUB_OUTPUT"
           echo "needs_android=$NEEDS_ANDROID" >> "$GITHUB_OUTPUT"
@@ -101,17 +80,12 @@ jobs:
             echo "::notice::no [android] / [libs] marker in the commit message - nothing to build"
           fi
 
-          # --- native skip guard: when [libs] is asked for but nothing native
-          # changed, reuse the previous .so set instead of recompiling (~5 min).
-          # Guard inputs: repo diff on native watch paths + HEAD SHAs of the
-          # floating upstream sources (unpinned master/branch clones).
           SKIP_NATIVE=false
           NATIVE_SHA_OUT=$(git rev-parse HEAD)
           if [ "$NEEDS_LIBS" = "true" ]; then
             UP_AMXX=$(git ls-remote https://github.com/alliedmodders/amxmodx.git HEAD 2>/dev/null | cut -f1)
             UP_MM=$(git ls-remote https://github.com/FWGS/metamod-fwgs.git HEAD 2>/dev/null | cut -f1)
             UP_REAPI=$(git ls-remote https://github.com/rehlds/ReAPI.git HEAD 2>/dev/null | cut -f1)
-            # YaPB is a submodule now: report the pinned commit and what upstream has
             UP_YAPB=$(git -C 3rdparty/yapb rev-parse HEAD 2>/dev/null)
             UP_YAPB_UPSTREAM=$(git ls-remote https://github.com/yapb/yapb.git HEAD 2>/dev/null | cut -f1)
             UP_RGDLL=$(git ls-remote https://github.com/berkchy/ReGameDLL_CS.git fix/first-spawn-equip 2>/dev/null | cut -f1)
@@ -142,12 +116,6 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          # Stays on 17. :patcherlib sets sourceCompatibility/targetCompatibility
-          # to 17 but no jvmTarget, so compileKotlin follows the daemon's JVM and
-          # any bump here fails with "Inconsistent JVM Target Compatibility".
-          # cs16-client wants 21 and declares it in its own
-          # gradle-daemon-jvm.properties, so its gradle invocation provisions
-          # that itself and does not need this to move.
           java-version: '17'
 
       - name: Set up Android SDK/NDK tooling
@@ -196,23 +164,12 @@ jobs:
         if: steps.build_type.outputs.needs_libs == 'true'
         shell: bash
         run: |
-          # The engine hands cl_enginefunc_t to the client dll by value, so a dll
-          # built against more slots than the engine has reads past the end of
-          # the engine's table and calls whatever pointer follows it - which
-          # breaks every player who has not updated their engine APK yet. Cheap
-          # to check, so it runs before the long cross-compile.
           python3 ./android/ci/check-engine-abi.py
 
       - name: Cross-compile core + modules + plugins
         if: steps.build_type.outputs.needs_libs == 'true' && steps.build_type.outputs.skip_native != 'true'
         shell: bash
         run: |
-          # Every source is a submodule under 3rdparty/ and carries its own
-          # changes as commits: berkchy/amxmodx, berkchy/mm-p,
-          # berkchy/metamod-fwgs, berkchy/hlsdk, berkchy/yapb. build-amxx.sh
-          # selects the amxmodx branch for the ABI it is building.
-          # arm64-v8a is mandatory; armeabi-v7a is best-effort (trial) and its
-          # failure only drops the v7a bundle, it never fails the workflow.
           for ABI in arm64-v8a armeabi-v7a; do
             if RELEASE_VERSION="$BUNDLE_VERSION" bash ./android/ci/build-amxx.sh "$GITHUB_WORKSPACE/src" "$ANDROID_NDK_HOME" \
                 "$GITHUB_WORKSPACE/build-out" "" "$ABI"; then
@@ -243,9 +200,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Native inputs unchanged: reuse the previous .so set (+ on-device
-          # compiler) instead of recompiling. Manifests/zip are regenerated
-          # below with the new version.
           mkdir -p /tmp/prevso \
             "$GITHUB_WORKSPACE/build-out/lib/arm64-v8a" \
             "$GITHUB_WORKSPACE/build-out/lib/armeabi-v7a" \
@@ -282,10 +236,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # [android] on its own: the patcher APK embeds amxxpc/amxxpc32 for both
-          # ABIs, but those are native binaries. Instead of cross-compiling the
-          # whole tree for an APK-only change, take the compilers the last [libs]
-          # build already published (a few MB) and build only the APK.
           mkdir -p /tmp/prevpc \
             "$GITHUB_WORKSPACE/build-out/compiler/arm64-v8a" \
             "$GITHUB_WORKSPACE/build-out/compiler/armeabi-v7a"
@@ -314,20 +264,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # libcs is bundled from the berkchy/ReGameDLL_CS fork branch carrying the
-          # first-spawn fix; built standalone with the NDK already installed above.
-          # Both ABIs are built: shipping v7a amxmodx modules without a matching
-          # v7a gamedll would leave the base APK's unpatched libcs in place.
-          # arm64-v8a is required; armeabi-v7a is best-effort like the cross-compile
-          # above, and a failure drops the whole v7a bundle.
           RGDLL="$GITHUB_WORKSPACE/rgdll-src"
           rm -rf "$RGDLL"
           mkdir -p "$RGDLL"
-          # Fetched as a tarball rather than a clone: the gamedata measurement
-          # needs a specific file out of the tree, and a shallow clone that
-          # comes back without its checkout used to fail much later.
-          # The head of that branch is also what stamps libcs in the
-          # manifest, so a phone only re-downloads it when the branch moved.
           RGDLL_BRANCH=fix/first-spawn-equip
           curl -fsSL "https://api.github.com/repos/berkchy/ReGameDLL_CS/commits/$RGDLL_BRANCH" \
             | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"][:12])' \
@@ -336,10 +275,6 @@ jobs:
           echo "regamedll $RGDLL_BRANCH -> $(cat "$GITHUB_WORKSPACE/rgdll-sha")"
           curl -fsSL "https://codeload.github.com/berkchy/ReGameDLL_CS/tar.gz/refs/heads/$RGDLL_BRANCH" \
             | tar -xz -C "$RGDLL" --strip-components=1
-          # The gamedll measures its own cstrike pdata offsets out of the debug
-          # info it compiles with, but the fork builds with -g0 and strips at
-          # link time. Keep -g1 (class layouts, no locals) and skip the -s; the
-          # debug sections are removed again below.
           python3 - "$RGDLL" <<'PY'
           import glob, os, sys
           root = sys.argv[1]
@@ -382,20 +317,12 @@ jobs:
                 -DCMAKE_BUILD_TYPE=Release &&
                cmake --build "$BUILD" --target regamedll --parallel 2 &&
                [ -f "$SO" ]; then
-              # Measure this build's cstrike pdata offsets straight out of the
-              # DWARF the build just emitted, so the table can never drift from
-              # the shipped gamedll (DW_AT_data_member_location == offsetof).
               "$NDKBIN/llvm-readelf" -S "$SO" | grep -i "debug" || echo "  (no debug sections in $SO)"
               python3 ./android/ci/gamedata-offsets.py dump "$TPL" \
                 --dwarfdump "$NDKBIN/llvm-dwarfdump" --so "$SO" --out "$BUILD/gamedll.dwarf"
               echo "  dwarf dump: $(wc -c < "$BUILD/gamedll.dwarf") bytes"
               if python3 ./android/ci/gamedata-offsets.py measure "$TPL" \
                   "$BUILD/gamedll.dwarf" "$BUILD/offsets-$VARIANT.txt"; then
-                # Both ABIs are regenerated from the build that is about to ship.
-                # arm64 used to be only checked against the committed table, so
-                # its overrides stayed from an older libcs and AMXX reported a
-                # CRC mismatch plus "sv/svs global variable is not available" on
-                # 64-bit devices.
                 case "$VARIANT" in
                   arm64) ABI_ARG=arm64-v8a ;;
                   *)     ABI_ARG=armeabi-v7a ;;
@@ -408,7 +335,6 @@ jobs:
               else
                 echo "::warning::gamedata offset measurement failed for $ABI (shipping without an override)"
               fi
-              # Measurement scaffolding only: the shipped gamedll is stripped again.
               "$NDKBIN/llvm-strip" "$SO"
               mkdir -p "$GITHUB_WORKSPACE/build-out/lib/$ABI"
               cp "$SO" "$GITHUB_WORKSPACE/build-out/lib/$ABI/$NAME"
@@ -427,9 +353,6 @@ jobs:
         if: steps.build_type.outputs.needs_libs == 'true'
         shell: bash
         run: |
-          # The manifest this build supersedes, so a file whose bytes did not
-          # change keeps its old build stamp instead of being marked new.
-          # Without it every release would look like a full rebuild.
           PREV="$GITHUB_WORKSPACE/prev-manifest"
           mkdir -p "$PREV"
           for f in manifest.json manifest-v7a.json; do
@@ -438,21 +361,7 @@ jobs:
               || echo "no previous $f"
           done
 
-          # Incremental update: individual .so files + manifest.json
-          #
-          # Producer stamps, not the sha of the output. The build is not
-          # reproducible - libclient_android_*.so built from an identical tree on
-          # 7 Oct and 12 Oct came out the same byte count with different
-          # content - so a sha stamp advances on every release and the phone
-          # re-downloads libraries nobody touched. These ask the question the
-          # stamp should be asking: did anything that goes into this library
-          # change? A cs16-client commit now costs three downloads instead of
-          # seven, and an amxmodx-only change costs none of them.
           PRODUCER_ARGS=()
-          # git rev-parse HEAD:<path> resolves to the tree sha for a tracked directory
-          # and to the pinned gitlink commit for a submodule, so one helper
-          # covers 3rdparty/*. cs16-client is neither: it is untracked, so its
-          # stamp comes from the clone that was just checked out.
           sub_sha() {
             local path="$1" out
             out="$(git rev-parse --verify --quiet "HEAD:$path" 2>/dev/null || true)"
@@ -479,7 +388,6 @@ jobs:
             --plugins-dir "$GITHUB_WORKSPACE/build-out/plugins" \
             --previous "$PREV/manifest.json" \
             "${PRODUCER_ARGS[@]}"
-          # Rename manifest for arm64 (default ABI keeps manifest.json name)
           mv "$GITHUB_WORKSPACE/incremental/manifest.json" "$GITHUB_WORKSPACE/manifest.json"
 
           if [ ! -f "$GITHUB_WORKSPACE/v7a-missing" ] && \
@@ -490,26 +398,12 @@ jobs:
               "$GITHUB_WORKSPACE/incremental-v7a" \
               --previous "$PREV/manifest-v7a.json" \
               "${PRODUCER_ARGS[@]}"
-            # Rename manifest for v7a to avoid conflict
             mv "$GITHUB_WORKSPACE/incremental-v7a/manifest.json" "$GITHUB_WORKSPACE/manifest-v7a.json"
           fi
 
-          # Addons zip
           cd "$GITHUB_WORKSPACE"
           zip -r amxx-addons.zip addons/ -x '*.gitignore' '*.git/*'
 
-          # Game assets zip.
-          #
-          # The client APK is now a ~2 MB shell: it carries only the menu
-          # library, because nexora injects its own libclient into the package
-          # at patch time. That means the game content (sound, maps, gfx,
-          # touch, and the touch.cfg/bot db files the menu and the bot data
-          # loader read by path) has to come from here instead - the engine
-          # resolves it from the game directory, and with an empty assets/ in
-          # the APK there is nothing left to find.
-          #
-          # Taken from the cs16-client tree, which is the only copy: the shell build
-          # no longer merges it into the APK, so this is the single source.
           ASSETS_DIR="$GITHUB_WORKSPACE/cs16-client/3rdparty/cs16client-extras"
           if [ ! -d "$ASSETS_DIR" ]; then
             echo "::error::client assets tree is missing at $ASSETS_DIR"
@@ -519,8 +413,6 @@ jobs:
           (cd "$ASSETS_DIR" && zip -r -9 "$GITHUB_WORKSPACE/game-assets.zip" . \
             -x '*.gitignore' '*.git/*')
 
-          # The patcher checks these before it patches anything, so a truncated
-          # or partial zip has to fail here rather than on the user's device.
           unzip -tq "$GITHUB_WORKSPACE/game-assets.zip"
           for f in touch.cfg touch_default/numbers.cfg BotProfile.db BotChatter.db \
                    gfx/shell/btn_touch.bmp maps/tr_1.bsp sound/radio/bot/a.wav; do
@@ -529,8 +421,6 @@ jobs:
           done
           ls -la "$GITHUB_WORKSPACE/game-assets.zip"
 
-          # build-meta.json: lets the next run's skip guard know which commit
-          # + upstream SHAs the native outputs correspond to.
           UPSTREAMS_JSON='${{ steps.build_type.outputs.upstreams_json }}' \
           NATIVE_SHA_OUT='${{ steps.build_type.outputs.native_sha_out }}' \
           python3 - "$GITHUB_WORKSPACE/build-meta.json" <<'PY'
@@ -548,8 +438,6 @@ jobs:
           print(open(out).read())
           PY
 
-          # Stage on-device compiler binaries as ABI-prefixed release assets
-          # (plain names would collide across ABIs).
           mkdir -p "$GITHUB_WORKSPACE/compiler-assets"
           cf="$GITHUB_WORKSPACE/build-out/compiler"
           [ -f "$cf/arm64-v8a/amxxpc" ] && cp "$cf/arm64-v8a/amxxpc" "$GITHUB_WORKSPACE/compiler-assets/compiler-arm64-v8a__amxxpc"
@@ -564,8 +452,6 @@ jobs:
         if: steps.build_type.outputs.needs_android == 'true'
         shell: bash
         run: |
-          # The runner's preinstalled sdkmanager is too old for current SDK XML
-          # (v4), which silently breaks --install. Use a fresh cmdline-tools zip.
           CMDT=commandlinetools-linux-11076708_latest.zip
           mkdir -p "$RUNNER_TEMP/sdkman"
           curl -fsSL -o "$RUNNER_TEMP/$CMDT" "https://dl.google.com/android/repository/$CMDT"
@@ -596,12 +482,10 @@ jobs:
         if: steps.build_type.outputs.needs_android == 'true'
         shell: bash
         run: |
-          # amxxpc compiler (produced by build-amxx.sh)
           mkdir -p android/app/src/main/jniLibs/arm64-v8a
           cp "$GITHUB_WORKSPACE/build-out/compiler/arm64-v8a/amxxpc" android/app/src/main/jniLibs/arm64-v8a/libamxxpc.so
           cp "$GITHUB_WORKSPACE/build-out/compiler/arm64-v8a/amxxpc32.so" android/app/src/main/jniLibs/arm64-v8a/libamxxpc32.so
           chmod +x android/app/src/main/jniLibs/arm64-v8a/libamxxpc.so
-          # armeabi-v7a compiler (best-effort)
           if [ ! -f "$GITHUB_WORKSPACE/v7a-missing" ] && \
               [ -f "$GITHUB_WORKSPACE/build-out/compiler/armeabi-v7a/amxxpc" ]; then
             mkdir -p android/app/src/main/jniLibs/armeabi-v7a
@@ -629,14 +513,9 @@ jobs:
             mv "$APK" "${APK_NAME:-nexora.apk}"
             echo "Renamed: ${APK_NAME:-nexora.apk}"
           fi
-          # version stamp for the in-app updater (version.txt string + byte check)
           echo "${APP_VERSION_NAME:-unknown}" > "$GITHUB_WORKSPACE/version.txt"
           cat "$GITHUB_WORKSPACE/version.txt"
 
-      # cs16-client pins its own ndkVersion and its "continuous" build type passes
-          # -DCMAKE_C_COMPILER_LAUNCHER=ccache into CMake, which fails outright
-          # when ccache is missing. Neither is the r25c the .so build uses, so
-          # both are installed here, only for the run that needs them.
       - name: Release (rolling continuous)
         if: >-
           (startsWith(github.ref, 'refs/tags/') && github.ref_name == 'continuous') ||
@@ -647,9 +526,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Rolling release: the tag + release stay, only the assets of the side
-          # that was rebuilt are replaced. An [android]-only build must not drop
-          # the .so assets and a [libs]-only build must not drop the APK.
           if ! gh release view continuous >/dev/null 2>&1; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -659,8 +535,6 @@ jobs:
               --title "Nexora Continuous" \
               --notes "Nexora Continuous build"
           fi
-          # An asset is dropped only when the side it belongs to was rebuilt;
-          # everything else stays untouched (upload --clobber replaces it).
           NEEDS_ANDROID="${{ steps.build_type.outputs.needs_android }}"
           NEEDS_LIBS="${{ steps.build_type.outputs.needs_libs }}"
 
@@ -669,7 +543,6 @@ jobs:
 
           shopt -s nullglob
 
-          # --- continuous tag: APK + version.txt only ---
           if [ "$NEEDS_ANDROID" = "true" ]; then
             if ! gh release view continuous >/dev/null 2>&1; then
               git config user.name "github-actions[bot]"
@@ -681,7 +554,6 @@ jobs:
             gh release upload continuous --clobber version.txt android/app/build/outputs/apk/release/*.apk 2>/dev/null || true
           fi
 
-          # --- libs tag: all native libs + manifests ---
           if [ "$NEEDS_LIBS" = "true" ]; then
             if ! gh release view libs >/dev/null 2>&1; then
               git config user.name "github-actions[bot]"
@@ -711,9 +583,6 @@ jobs:
           fail_on_unmatched_files: false
 
       - name: Release extras (addons, game assets)
-        # Keep the rolling "extras" release limited to addons and game assets.
-        # Native libs live only in the "libs" release, and the client APK is
-        # uploaded to extras by build-client-apk.yml.
         if: >-
           success() &&
           (steps.build_type.outputs.needs_libs == 'true')

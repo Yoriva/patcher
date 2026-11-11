@@ -1,5 +1,4 @@
 package com.pickle.patcher.ui.screens
-
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,7 +29,6 @@ import kotlinx.coroutines.withContext
 import com.pickle.patcher.ui.MarkdownText
 import org.json.JSONArray
 import org.json.JSONObject
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AdminScreen(api: StoreApi, onBack: () -> Unit) {
@@ -38,7 +36,6 @@ fun AdminScreen(api: StoreApi, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val token = StoreSession.token(context) ?: ""
     var tab by remember { mutableStateOf(0) }
-
     Scaffold(
         topBar = {
             TopAppBar(
@@ -77,7 +74,6 @@ fun AdminScreen(api: StoreApi, onBack: () -> Unit) {
         }
     }
 }
-
 @Composable
 private fun AdminPosts(api: StoreApi, token: String) {
     val scope = rememberCoroutineScope()
@@ -85,7 +81,6 @@ private fun AdminPosts(api: StoreApi, token: String) {
     var items by remember { mutableStateOf<JSONArray?>(null) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-
     fun load() {
         scope.launch {
             loading = true; error = null
@@ -101,9 +96,7 @@ private fun AdminPosts(api: StoreApi, token: String) {
             )
         }
     }
-
     LaunchedEffect(statusFilter) { load() }
-
     Column(Modifier.fillMaxSize()) {
         ScreenHeader(
             icon = Icons.Filled.Article,
@@ -151,7 +144,6 @@ private fun AdminPosts(api: StoreApi, token: String) {
         }
     }
 }
-
 @Composable
 private fun AdminPostCard(obj: JSONObject, api: StoreApi, token: String, onAction: () -> Unit) {
     val scope = rememberCoroutineScope()
@@ -367,7 +359,6 @@ private fun AdminPostCard(obj: JSONObject, api: StoreApi, token: String, onActio
                     Text("Delete")
                 }
             }
-
             previewFile?.let { file ->
                 val name = file.optString("name", "Untitled")
                 val url = file.optString("url", "")
@@ -421,7 +412,6 @@ private fun AdminPostCard(obj: JSONObject, api: StoreApi, token: String, onActio
         }
     }
 }
-
 private fun listZipEntries(url: String): List<String> {
     val entries = mutableListOf<String>()
     return runCatching {
@@ -442,14 +432,12 @@ private fun listZipEntries(url: String): List<String> {
         if (entries.isEmpty()) listOf("Zip archive is empty") else entries
     }.getOrElse { listOf(it.message ?: "Could not inspect zip archive") }
 }
-
 @Composable
 private fun AdminUsers(api: StoreApi, token: String) {
     val scope = rememberCoroutineScope()
     var users by remember { mutableStateOf<JSONArray?>(null) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-
     fun load() {
         scope.launch {
             loading = true; error = null
@@ -465,9 +453,7 @@ private fun AdminUsers(api: StoreApi, token: String) {
             )
         }
     }
-
     LaunchedEffect(Unit) { load() }
-
     Column(Modifier.fillMaxSize()) {
         ScreenHeader(
             icon = Icons.Filled.People,
@@ -502,7 +488,6 @@ private fun AdminUsers(api: StoreApi, token: String) {
         }
     }
 }
-
 @Composable
 private fun AdminUserCard(obj: JSONObject, api: StoreApi, token: String, onAction: () -> Unit) {
     val scope = rememberCoroutineScope()
@@ -520,7 +505,6 @@ private fun AdminUserCard(obj: JSONObject, api: StoreApi, token: String, onActio
     } }
     var showPerms by remember { mutableStateOf(false) }
     var perms by remember { mutableStateOf(initialPerms) }
-
     Surface(
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -596,7 +580,6 @@ private fun AdminUserCard(obj: JSONObject, api: StoreApi, token: String, onActio
             }
         }
     }
-
     if (showPerms) {
         AlertDialog(
             onDismissRequest = { showPerms = false },

@@ -1,5 +1,4 @@
 package com.pickle.patcher.ui.screens
-
 import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -24,7 +23,6 @@ import androidx.compose.material.icons.filled.Close
 import kotlinx.coroutines.launch
 import java.io.File
 import java.security.MessageDigest
-
 @Composable
 fun StoreUploadScreen(
     api: StoreApi,
@@ -46,7 +44,6 @@ fun StoreUploadScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var cooldown by remember { mutableStateOf<String?>(null) }
     var dupMsg by remember { mutableStateOf<String?>(null) }
-
     val logoPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) logoUri = uri
     }
@@ -68,7 +65,6 @@ fun StoreUploadScreen(
             }
         }
     }
-
     fun uriToFile(uri: Uri, prefix: String, nameOverride: String? = null): File? {
         return try {
             val input = context.contentResolver.openInputStream(uri) ?: return null
@@ -78,7 +74,6 @@ fun StoreUploadScreen(
             file
         } catch (_: Exception) { null }
     }
-
     Column(
         Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp).verticalScroll(rememberScrollState()),
     ) {
@@ -92,7 +87,6 @@ fun StoreUploadScreen(
         )
         Spacer(Modifier.height(20.dp))
         SectionHeader("Details", "Describe the post")
-
         OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text("Description") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
@@ -100,7 +94,6 @@ fun StoreUploadScreen(
         OutlinedTextField(value = version, onValueChange = { version = it }, label = { Text("Version") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         Spacer(Modifier.height(20.dp))
         SectionHeader("Assets", "Logo and package files")
-
         Row(verticalAlignment = Alignment.CenterVertically) {
             Button(onClick = { logoPicker.launch(arrayOf("image/*")) }) { Text("Pick Logo") }
             Spacer(Modifier.width(8.dp))
@@ -111,7 +104,6 @@ fun StoreUploadScreen(
             )
         }
         Spacer(Modifier.height(12.dp))
-
         Row(verticalAlignment = Alignment.CenterVertically) {
             Button(onClick = { libPicker.launch(arrayOf("*/*")) }) { Text("Add Files") }
             Spacer(Modifier.width(8.dp))
@@ -153,7 +145,6 @@ fun StoreUploadScreen(
             }
         }
         Spacer(Modifier.height(8.dp))
-
         if (libEntries.isNotEmpty()) {
             Spacer(Modifier.height(4.dp))
             libEntries.forEach { (uri, _) ->
@@ -210,7 +201,6 @@ fun StoreUploadScreen(
         }
         Spacer(Modifier.height(20.dp))
         SectionHeader("Publish", "Submit for review")
-
         Button(
             onClick = {
                 val token = StoreSession.token(context) ?: api.token
@@ -279,7 +269,6 @@ fun StoreUploadScreen(
         }
     }
 }
-
 private fun displayName(context: Context, uri: Uri): String {
     val fromColumn = try {
         context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
@@ -294,7 +283,6 @@ private fun displayName(context: Context, uri: Uri): String {
     val withExt = candidates.firstOrNull { it.contains('.') }
     return (withExt ?: candidates.firstOrNull() ?: "file.bin")
 }
-
 private suspend fun hashUri(context: Context, uri: Uri): String? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
     try {
         val input = context.contentResolver.openInputStream(uri) ?: return@withContext null

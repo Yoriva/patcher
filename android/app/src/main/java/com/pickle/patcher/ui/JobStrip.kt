@@ -1,5 +1,4 @@
 package com.pickle.patcher.ui
-
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -26,7 +25,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pickle.patcher.jobs.JobProgress
 import com.pickle.patcher.ui.theme.Accent
-
 @Composable
 fun JobStrip(jobs: List<JobProgress.Job>, modifier: Modifier = Modifier) {
     AnimatedVisibility(visible = jobs.isNotEmpty(), modifier = modifier) {
@@ -42,7 +40,6 @@ fun JobStrip(jobs: List<JobProgress.Job>, modifier: Modifier = Modifier) {
         }
     }
 }
-
 @Composable
 private fun JobRow(job: JobProgress.Job) {
     androidx.compose.material3.Surface(

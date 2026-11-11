@@ -1,5 +1,4 @@
 package com.pickle.patcher
-
 import android.app.AlertDialog
 import android.content.Context
 import android.os.Build
@@ -12,11 +11,9 @@ import java.io.StringWriter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
 object CrashLog {
     private const val TAG = "NexoraCrash"
     private const val FILE_NAME = "nexora-crash.txt"
-
     fun install(context: Context) {
         val appContext = context.applicationContext
         val prev = Thread.getDefaultUncaughtExceptionHandler()
@@ -33,12 +30,10 @@ object CrashLog {
             }
         }
     }
-
     private fun showCrashDialog(context: Context, throwable: Throwable) {
         val sw = StringWriter()
         throwable.printStackTrace(PrintWriter(sw))
         val preview = sw.toString().lines().take(15).joinToString("\n")
-
         try {
             AlertDialog.Builder(context)
                 .setTitle("Nexora Crash")
@@ -72,20 +67,16 @@ object CrashLog {
             System.exit(1)
         }
     }
-
     fun candidateFiles(context: Context): List<File> = buildList {
         add(File(context.getExternalFilesDir(null), FILE_NAME))
         runCatching {
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         }.getOrNull()?.let { add(File(it, FILE_NAME)) }
     }
-
     fun latestFile(context: Context): File? =
         candidateFiles(context).firstOrNull { it.exists() }
-
     fun readLatest(context: Context): String? =
         latestFile(context)?.takeIf { it.length() in 1..(1 shl 20) }?.readText()
-
     private fun write(context: Context, throwable: Throwable) {
         val sw = StringWriter()
         throwable.printStackTrace(PrintWriter(sw))
@@ -93,7 +84,6 @@ object CrashLog {
         val body = "=== $stamp pid=${android.os.Process.myPid()} ===\n" +
             "model=${Build.MODEL} sdk=${Build.VERSION.SDK_INT}\n" +
             "thread=${Thread.currentThread().name}\n$sw\n"
-
         if (Build.VERSION.SDK_INT >= 29) {
             runCatching {
                 val resolver = context.contentResolver

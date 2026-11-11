@@ -1,5 +1,4 @@
 package com.pickle.patcher.ui.screens
-
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,7 +23,6 @@ import androidx.compose.material.icons.filled.Close
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
-
 @Composable
 fun StoreManageScreen(
     api: StoreApi,
@@ -37,7 +35,6 @@ fun StoreManageScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var deleteTarget by remember { mutableStateOf<String?>(null) }
     var editTarget by remember { mutableStateOf<JSONObject?>(null) }
-
     fun reload(showLoading: Boolean = items == null) {
         if (showLoading) loading = true
         scope.launch {
@@ -56,7 +53,6 @@ fun StoreManageScreen(
             )
         }
     }
-
     LaunchedEffect(Unit) {
         reload(showLoading = true)
         while (true) {
@@ -64,7 +60,6 @@ fun StoreManageScreen(
             reload(showLoading = false)
         }
     }
-
     Column(Modifier.fillMaxSize()) {
         ScreenHeader(
             icon = Icons.Filled.Edit,
@@ -74,7 +69,6 @@ fun StoreManageScreen(
             statusTone = Tone.Secondary,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
         )
-
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -137,7 +131,6 @@ fun StoreManageScreen(
             }
         }
     }
-
     deleteTarget?.let { id ->
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
@@ -175,7 +168,6 @@ fun StoreManageScreen(
             },
         )
     }
-
     editTarget?.let { obj ->
         key(obj.optString("id")) {
             var title by remember { mutableStateOf(obj.optString("title")) }
@@ -196,7 +188,6 @@ fun StoreManageScreen(
             var linkInput by remember { mutableStateOf("") }
             var saving by remember { mutableStateOf(false) }
             var progressLabel by remember { mutableStateOf("") }
-
             val logoPicker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
                 if (uri != null) logoUri = uri
             }
@@ -215,12 +206,10 @@ fun StoreManageScreen(
                     }
                 }
             }
-
             val initialLibs = remember {
                 val arr = obj.optJSONArray("libs")
                 (0 until (arr?.length() ?: 0)).map { arr!!.getJSONObject(it) }
             }
-
             AlertDialog(
                 onDismissRequest = { editTarget = null },
                 title = { Text("Edit item", color = MaterialTheme.colorScheme.onSurface) },
@@ -232,7 +221,6 @@ fun StoreManageScreen(
                         Spacer(Modifier.height(8.dp))
                         OutlinedTextField(value = version, onValueChange = { version = it }, label = { Text("Version") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                         Spacer(Modifier.height(12.dp))
-
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Button(onClick = { logoPicker.launch(arrayOf("image/*")) }) { Text("Pick Logo") }
                             Spacer(Modifier.width(8.dp))
@@ -253,7 +241,6 @@ fun StoreManageScreen(
                             }
                         }
                         Spacer(Modifier.height(12.dp))
-
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Button(onClick = { libPicker.launch(arrayOf("*/*")) }) { Text("Add Files") }
                             Spacer(Modifier.width(8.dp))
@@ -328,7 +315,6 @@ fun StoreManageScreen(
                                 }
                             }
                         }
-
                         if (progressLabel.isNotBlank()) {
                             Text(
                                 progressLabel,
@@ -383,7 +369,6 @@ fun StoreManageScreen(
                                     }
                                 }
                                 finalLibs.addAll(uploadedNew)
-
                                 api.updateItem(
                                     token,
                                     obj.optString("id"),
@@ -423,7 +408,6 @@ fun StoreManageScreen(
         }
     }
 }
-
 private fun uriToFile(context: android.content.Context, uri: android.net.Uri, prefix: String, nameOverride: String? = null): java.io.File? {
     return try {
         val input = context.contentResolver.openInputStream(uri) ?: return null
@@ -433,7 +417,6 @@ private fun uriToFile(context: android.content.Context, uri: android.net.Uri, pr
         file
     } catch (_: Exception) { null }
 }
-
 private fun displayName(context: android.content.Context, uri: android.net.Uri): String {
     val fromColumn = try {
         context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
@@ -448,7 +431,6 @@ private fun displayName(context: android.content.Context, uri: android.net.Uri):
     val withExt = candidates.firstOrNull { it.contains('.') }
     return (withExt ?: candidates.firstOrNull() ?: "file.bin")
 }
-
 private suspend fun hashUri(context: android.content.Context, uri: android.net.Uri): String? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
     try {
         val input = context.contentResolver.openInputStream(uri) ?: return@withContext null

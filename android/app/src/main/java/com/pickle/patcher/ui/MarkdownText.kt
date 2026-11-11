@@ -1,5 +1,4 @@
 package com.pickle.patcher.ui
-
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -16,7 +15,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-
 @Composable
 fun MarkdownText(
     text: String,
@@ -79,7 +77,6 @@ fun MarkdownText(
         }
     }
 }
-
 private fun parseInline(text: String): AnnotatedString = buildAnnotatedString {
     var i = 0
     val n = text.length

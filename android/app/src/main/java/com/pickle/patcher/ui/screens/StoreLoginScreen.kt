@@ -1,5 +1,4 @@
 package com.pickle.patcher.ui.screens
-
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -18,7 +17,6 @@ import com.pickle.patcher.ui.theme.Gray40
 import com.pickle.patcher.ui.theme.Gray30
 import kotlinx.coroutines.launch
 import org.json.JSONObject
-
 @Composable
 fun StoreLoginScreen(
     api: StoreApi,
@@ -33,7 +31,6 @@ fun StoreLoginScreen(
     var password by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-
     Column(
         Modifier
             .fillMaxSize()
@@ -49,7 +46,6 @@ fun StoreLoginScreen(
             statusTone = Tone.Primary,
         )
         Spacer(Modifier.height(20.dp))
-
         AppCard {
             OutlinedTextField(
                 value = email, onValueChange = { email = it },
@@ -74,7 +70,6 @@ fun StoreLoginScreen(
                 )
             }
             Spacer(Modifier.height(16.dp))
-
             Button(
                 onClick = {
                     loading = true; error = null

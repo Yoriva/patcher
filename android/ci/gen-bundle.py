@@ -23,8 +23,6 @@ MODULES = [
     "hamsandwich", "json", "nvault", "reapi", "regex", "sockets", "sqlite",
 ]
 
-# ABI -> (android runtime lib suffix, AMXX module suffix, canonical bundle asset name)
-# Module suffix: "amd64" upstream = 64-bit cells (LP64 ABIs), "arm" = ARM32.
 ABI_MAP = {
     "arm64-v8a": ("arm64", "amd64", "amxx-bundle.zip"),
     "armeabi-v7a": ("armv7l", "arm", "amxx-bundle-armeabi-v7a.zip"),
@@ -61,7 +59,6 @@ def main():
             "required": True,
             "description": "Metamod HL1 (as libyapb for -dll @yapb)",
         })
-    # Actual YaPB bot .so — loaded by metamod via plugins.ini
     yapb_so = os.path.join(libdir, "libyapb.so")
     if os.path.exists(yapb_so):
         entries.append({
@@ -71,7 +68,6 @@ def main():
             "required": False,
             "description": "YaPB bot plugin",
         })
-    # CS16Client client DLL with crash handler (cs16-client/cl_dll)
     client_so = os.path.join(libdir, f"libclient_android_{suffix}.so")
     if os.path.exists(client_so):
         entries.append({
@@ -81,9 +77,6 @@ def main():
             "required": False,
             "description": "CS16Client client DLL (crash handler)",
         })
-    # Main menu, built by the runner from the same tree as the client. The
-    # engine asks for this name before it falls back to the stock menu in the
-    # engine package, so shipping it is what makes the game package provide it.
     menu_so = os.path.join(libdir, f"libmenu_android_{suffix}.so")
     if os.path.exists(menu_so):
         entries.append({

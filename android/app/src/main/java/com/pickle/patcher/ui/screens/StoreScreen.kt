@@ -1,5 +1,4 @@
 package com.pickle.patcher.ui.screens
-
 import android.app.DownloadManager
 import android.content.Context
 import android.net.Uri
@@ -38,7 +37,6 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import android.widget.Toast
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StoreScreen(
@@ -57,7 +55,6 @@ fun StoreScreen(
     var showComments by remember { mutableStateOf(false) }
     var comments by remember { mutableStateOf<JSONArray?>(null) }
     var commentText by remember { mutableStateOf("") }
-
     fun load(isRefresh: Boolean = false) {
         scope.launch {
             if (isRefresh) refreshing = true else loading = true
@@ -76,9 +73,7 @@ fun StoreScreen(
             )
         }
     }
-
     LaunchedEffect(page) { load() }
-
     Column(Modifier.fillMaxSize()) {
         ScreenHeader(
             icon = Icons.Filled.ShoppingCart,
@@ -91,7 +86,6 @@ fun StoreScreen(
             ),
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
         )
-
         PullToRefreshBox(
             isRefreshing = refreshing,
             onRefresh = { load(true) },
@@ -126,7 +120,6 @@ fun StoreScreen(
             }
         }
     }
-
     detailItem?.let { obj ->
         val libs = obj.optJSONArray("libs")
         val libCount = libs?.length() ?: 0
@@ -160,7 +153,6 @@ fun StoreScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(8.dp))
-
                     if (links != null && links.length() > 0) {
                         Text(
                             "Links",
@@ -182,7 +174,6 @@ fun StoreScreen(
                         }
                         Spacer(Modifier.height(8.dp))
                     }
-
                     if (libCount > 0) {
                         Text(
                             "Files",
@@ -249,7 +240,6 @@ fun StoreScreen(
                             }
                         }
                     }
-
                     Spacer(Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val liked = obj.optBoolean("liked", false)
@@ -325,7 +315,6 @@ fun StoreScreen(
             },
         )
     }
-
     if (showComments && detailItem != null) {
         val obj = detailItem!!
         AlertDialog(
@@ -420,7 +409,6 @@ fun StoreScreen(
         )
     }
 }
-
 @Composable
 private fun StoreItemCard(obj: JSONObject, onUserClick: (String) -> Unit, onOpenDetail: () -> Unit) {
     Card(
@@ -547,7 +535,6 @@ private fun StoreItemCard(obj: JSONObject, onUserClick: (String) -> Unit, onOpen
         }
     }
 }
-
 private fun downloadLib(context: Context, url: String, name: String) {
     if (url.isBlank()) {
         Toast.makeText(context, "No download URL", Toast.LENGTH_SHORT).show()

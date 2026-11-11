@@ -1,5 +1,4 @@
 package com.pickle.patcher.ui.screens
-
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -54,25 +53,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pickle.patcher.patcher.PatcherViewModel
 import java.io.File
-
 private val EditorFont = FontFamily.Monospace
 private val EditorSize = 13.sp
 private val EditorLineHeight = 19.sp
 private val EditorLines = 18
-
 private fun highlightIni(text: String, colors: IniColors): AnnotatedString = buildAnnotatedString {
     var pos = 0
     while (pos <= text.length) {
         val lineEnd = text.indexOf('\n', pos).let { if (it < 0) text.length else it }
         val line = text.substring(pos, lineEnd)
-
         var first = 0
         while (first < line.length && line[first] == ' ') first++
-
         fun style(from: Int, to: Int, span: SpanStyle) {
             if (to > from) addStyle(span, pos + from, pos + to)
         }
-
         if (first < line.length) {
             when {
                 line[first] == ';' -> {
@@ -120,7 +114,6 @@ private fun highlightIni(text: String, colors: IniColors): AnnotatedString = bui
         }
     }
 }
-
 private data class IniColors(
     val comment: Color,
     val pluginName: Color,
@@ -130,12 +123,10 @@ private data class IniColors(
     val string: Color,
     val value: Color,
 )
-
 private class IniHighlight(private val colors: IniColors) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText =
         TransformedText(highlightIni(text.text, colors), OffsetMapping.Identity)
 }
-
 @Composable
 fun PluginsScreen(vm: PatcherViewModel) {
     val inis by vm.pluginInis.collectAsState()
@@ -146,7 +137,6 @@ fun PluginsScreen(vm: PatcherViewModel) {
     val pageScroll = rememberScrollState()
     val hScroll = rememberScrollState()
     val vScroll = rememberScrollState()
-
     LaunchedEffect(Unit) { vm.loadPluginInis() }
     LaunchedEffect(inis) {
         if (selected == null || inis.none { it.file == selected }) {
@@ -154,7 +144,6 @@ fun PluginsScreen(vm: PatcherViewModel) {
         }
     }
     LaunchedEffect(selected) { selected?.let(vm::openPluginIni) }
-
     val file = selected
     val iniColors = IniColors(
         comment = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -174,7 +163,6 @@ fun PluginsScreen(vm: PatcherViewModel) {
     )
     val gutterText = remember(text) { (1..lineCount).joinToString("\n") }
     val saved = savedAt > 0L
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -200,7 +188,6 @@ fun PluginsScreen(vm: PatcherViewModel) {
                 else -> Tone.Neutral
             },
         )
-
         if (inis.isNotEmpty()) {
             Spacer(Modifier.height(20.dp))
             SectionHeader("Config file", "Choose a plugin list")
@@ -230,10 +217,8 @@ fun PluginsScreen(vm: PatcherViewModel) {
                 }
             }
         }
-
         Spacer(Modifier.height(20.dp))
         if (file != null) SectionHeader("Editor", "Edit the INI in place")
-
         if (file != null) {
             Surface(
                 shape = MaterialTheme.shapes.large,
@@ -271,7 +256,6 @@ fun PluginsScreen(vm: PatcherViewModel) {
                     }
                 }
             }
-
             Spacer(Modifier.height(20.dp))
             SectionHeader("Save", "Write changes to disk")
             Row(verticalAlignment = Alignment.CenterVertically) {

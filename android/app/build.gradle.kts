@@ -4,30 +4,21 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
     id("org.jetbrains.kotlin.plugin.compose")
 }
-
 base {
     archivesName.set("nexora")
 }
-
 val signingStoreFile = rootProject.file("debug/patcher-release.p12")
-
 android {
     namespace = "com.pickle.patcher"
     compileSdk = 36
-
     defaultConfig {
         applicationId = "com.nexora"
         minSdk = 24
         targetSdk = 36
-        // Continuous release: every build gets a unique versionName
-        // (e.g. continuous-r42) written into version.txt, and a monotonic
-        // versionCode so the new APK always installs over the old one.
-        // The in-app updater compares version.txt + APK bytes.
         versionCode = System.getenv("APP_VERSION_CODE")?.toIntOrNull() ?: 1
         versionName = System.getenv("APP_VERSION_NAME")?.takeIf { it.isNotBlank() } ?: "0.1.0"
         vectorDrawables { useSupportLibrary = true }
     }
-
     signingConfigs {
         create("release") {
             storeFile = signingStoreFile
@@ -36,7 +27,6 @@ android {
             keyPassword = "android"
         }
     }
-
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -47,48 +37,35 @@ android {
             )
         }
     }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-        // Backports java.* APIs (e.g. java.util.Base64, API 26+) down to
-        // minSdk for ALL code incl. libraries (apksig). Definitive fix for
-        // NoClassDefFoundError on Android 7.
         isCoreLibraryDesugaringEnabled = true
     }
-
     buildFeatures {
         compose = true
         buildConfig = true
     }
-
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
-        // The crash handler resolves frames by reading .symtab from the
-        // on-disk .so, and Android's own crash report only carries module
-        // offsets. Stripping here removes both, so an arm32 SIGSEGV lands as
-        // a bare address instead of a function name.
         jniLibs {
+            useLegacyPackaging = true
             keepDebugSymbols.add("**/*.so")
         }
     }
 }
-
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
-
 dependencies {
     implementation(project(":patcherlib"))
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
-
     implementation(platform("androidx.compose:compose-bom:2024.09.02"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
@@ -96,11 +73,9 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended:1.7.4")
     implementation("androidx.compose.animation:animation")
     implementation("androidx.navigation:navigation-compose:2.8.2")
-
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
-
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

@@ -1,5 +1,4 @@
 package com.pickle.patcher.jobs
-
 import android.app.Notification
 import android.app.Service
 import android.content.Context
@@ -15,23 +14,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-
-/**
- * Keeps the process alive and the notification visible while a download or the
- * patch runs. It holds no work of its own: [JobProgress] owns the state, this
- * service just follows it, which is what lets a job continue after the app has
- * been backgrounded.
- */
 class JobService : Service() {
-
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-
     override fun onCreate() {
         super.onCreate()
         JobProgress.attach(this)
-        // Android only allows a few seconds between startForegroundService() and
-        // startForeground(), so the service announces itself right away and then
-        // swaps in the real progress.
         startInForeground(null)
         scope.launch {
             JobProgress.jobs.collectLatest { jobs ->
@@ -45,7 +32,6 @@ class JobService : Service() {
             }
         }
     }
-
     private fun startInForeground(job: JobProgress.Job?) {
         val ctx = applicationContext
         JobProgress.ensureChannel()
@@ -67,27 +53,16 @@ class JobService : Service() {
             startForeground(notificationId(job), notification)
         }
     }
-
-    /**
-     * The foreground notification carries the running job's own id, so Android
-     * shows one notification that keeps being updated rather than a permanent
-     * summary plus a per-job copy of the same download.
-     */
     private fun notificationId(job: JobProgress.Job?): Int =
         job?.let { JobProgress.idOf(it) } ?: JobService.SUMMARY_ID
-
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_NOT_STICKY
-
     override fun onBind(intent: Intent?): IBinder? = null
-
     override fun onDestroy() {
         scope.cancel()
         super.onDestroy()
     }
-
     companion object {
         const val SUMMARY_ID = 41_001
-
         fun start(context: Context) {
             val intent = Intent(context, JobService::class.java)
             runCatching {
@@ -98,7 +73,6 @@ class JobService : Service() {
                 }
             }
         }
-
         fun stop(context: Context) {
             runCatching { context.stopService(Intent(context, JobService::class.java)) }
         }

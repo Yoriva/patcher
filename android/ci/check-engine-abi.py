@@ -96,12 +96,8 @@ def members(body):
 
     names = []
     for decl in declarations(body):
-        # The member's own `(*name)` comes before any pointer in its arguments.
         match = re.search(r"\(\s*\*\s*([A-Za-z_]\w*)\s*\)", decl)
         if not match:
-            # Members of a pointer typedef, e.g. `pfnEngSrc_pfnFoo_t pfnFoo;`.
-            # Not every such typedef ends in _t (COM_GetApproxWavePlayLength
-            # does not), so the suffix cannot be required.
             match = re.search(r"\bpfnEngSrc_\w+\s+([A-Za-z_]\w*)\s*$", decl)
         if match:
             names.append(match.group(1))
@@ -130,10 +126,6 @@ def main():
 
     engine = load_fingerprint()
 
-    # Position is the whole contract: the engine fills its own table by static
-    # initializer order and the dll copies it out by value. Same number of slots
-    # means every slot lines up. Member NAMES may differ (they get renamed
-    # upstream all the time) and that is harmless.
     if len(client) != len(engine):
         print(f"FAIL: client has {len(client)} slots, engine has {len(engine)}")
         if len(client) > len(engine):

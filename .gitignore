@@ -6,3 +6,6 @@ signingkey.jks
 *.jks
 *.keystore
 shots/
+__pycache__/
+*.pyc
+

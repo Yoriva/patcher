@@ -27,7 +27,6 @@ import re
 import subprocess
 import sys
 
-# --- template parsing -------------------------------------------------------
 
 CLASS_RE = re.compile(r'^\t\t\t"(\w+)"$')
 SECTION_RE = re.compile(r'^\t\t\t\t"(\w+)"$')
@@ -73,15 +72,12 @@ def parse_measurements(path):
     return out
 
 
-# --- DWARF parsing ----------------------------------------------------------
 
 DIE_RE = re.compile(r"^(0x[0-9a-f]+):(\s+)(DW_TAG_\w+|NULL)\s*$")
 ATTR_RE = re.compile(r"^\s+(DW_AT_\w+)\s*(?:\((.*)\))?\s*$")
 QUOTED_RE = re.compile(r'"((?:[^"\\]|\\.)*)"')
 REF_RE = re.compile(r"^0x([0-9a-f]+)")
 TYPE_TAGS = ("DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type")
-# A gamedll's DWARF is dominated by subprograms and enums; only the type graph
-# is needed here, and dropping the rest keeps the parse inside memory limits.
 KEEP_TAGS = frozenset(
     ("DW_TAG_compile_unit", "DW_TAG_member", "DW_TAG_inheritance") + TYPE_TAGS
 )
@@ -165,8 +161,6 @@ def build_layout(dies):
         name = die.name()
         if not name:
             continue
-        # The same type can be described more than once across compile units;
-        # the complete definition is the largest one.
         best = by_name.get(name)
         if best is None or (die.number("byte_size") or 0) > (best.number("byte_size") or 0):
             by_name[name] = die
@@ -185,8 +179,6 @@ def build_layout(dies):
                 if name:
                     out[name] = loc
                     continue
-                # Anonymous struct/union member: its own members live one level
-                # down, shifted by the anonymous member's offset.
                 nested = child.ref("type")
                 if nested is not None and nested in dies:
                     for member, offset in members(dies[nested], seen).items():
@@ -291,9 +283,6 @@ def measure(dwarf_dump, fields):
     carried = {}
     for (cls, _section, field), values in fields:
         if cls not in layout:
-            # Not compiled into this gamedll (SimpleStateMachine belongs to the
-            # bot code): nothing to read it from, so keep what the template has
-            # rather than dropping the entry on the floor.
             template = values.get("linux")
             if template is None:
                 missing.append("%s (class not in DWARF, no template value)" % cls)
@@ -303,15 +292,12 @@ def measure(dwarf_dump, fields):
             out.append((cls, field, int(template)))
             continue
         if field not in layout[cls]:
-            # The class is there but the member is not: a real mismatch, not a
-            # missing type, so this must not be papered over.
             missing.append("%s.%s (member not in DWARF)" % (cls, field))
             continue
         out.append((cls, field, layout[cls][field]))
     return out, missing, carried
 
 
-# --- emission ---------------------------------------------------------------
 
 def emit(fields, measurements, out_path, abi, note=""):
     lines = []
@@ -336,7 +322,6 @@ def emit(fields, measurements, out_path, abi, note=""):
     for (cls, section, field), values in fields:
         if cls != current_class:
             if current_class is not None:
-                # Close the previous class: its "Offsets" section, then itself.
                 lines.append("\t\t\t\t}")
                 lines.append("\t\t\t}")
                 lines.append("")
@@ -350,8 +335,6 @@ def emit(fields, measurements, out_path, abi, note=""):
             raise SystemExit("emit: no measurement for %s.%s" % key)
         lines.append('\t\t\t\t\t"%s"' % field)
         lines.append("\t\t\t\t\t{")
-        # Every key the template has, in its order: "size" matters for arrays,
-        # strings and classptr fields, and dropping it breaks those reads.
         for name, value in values.items():
             if name == "linux":
                 value = str(measurements[key])
@@ -471,8 +454,6 @@ def main():
 
     if args.cmd == "emit":
         written = emit(fields, measurements, args.out, args.abi, args.note)
-        # The template is a file AMXX already parses, so its shape is the
-        # reference: an unbalanced brace here breaks every gamedata lookup.
         expected = structure(args.template)
         if written != expected:
             for index, (got, want) in enumerate(zip(written, expected)):

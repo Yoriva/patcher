@@ -1,11 +1,11 @@
 package com.pickle.patcher.ui.screens
-
 import android.content.Intent
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,21 +27,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.NightlightRound
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -52,24 +48,35 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.activity.compose.BackHandler
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.pickle.patcher.R
 import com.pickle.patcher.patcher.PatcherViewModel
 import com.pickle.patcher.ui.theme.LocalThemeController
-
+import kotlin.math.roundToInt
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     vm: PatcherViewModel,
+    onBack: () -> Unit = {},
     onOpenTheme: () -> Unit = {},
     onOpenAbout: () -> Unit = {},
     onShareLogs: () -> Unit = {},
     onRedownloadBundle: () -> Unit = {},
 ) {
+    BackHandler(onBack = onBack)
     val context = LocalContext.current
     val workers by vm.compileWorkers.collectAsState()
     val patchWorkers by vm.patchWorkers.collectAsState()
@@ -79,9 +86,7 @@ fun SettingsScreen(
     val outputRoot by vm.outputRoot.collectAsState()
     val themeController = LocalThemeController.current
     val themeChoice by themeController.choice.collectAsState()
-
     var pickForOutput by remember { mutableStateOf(false) }
-
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
@@ -90,7 +95,6 @@ fun SettingsScreen(
         }
         pickForOutput = false
     }
-
     val storagePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) {
@@ -98,7 +102,6 @@ fun SettingsScreen(
             folderPicker.launch(null)
         }
     }
-
     fun requestStorageAndPickFolder() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (Environment.isExternalStorageManager()) {
@@ -114,13 +117,34 @@ fun SettingsScreen(
             folderPicker.launch(null)
         }
     }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 20.dp),
-    ) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "Settings",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground,
+                    )
+                },
+                navigationIcon = {
+                    TopBarBackButton(onClick = onBack)
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                ),
+            )
+        },
+        containerColor = MaterialTheme.colorScheme.background,
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 20.dp),
+        ) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 text = "Engine & Performance",
@@ -129,7 +153,6 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(start = 8.dp, bottom = 4.dp),
             )
-
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = getGroupedItemShape(0, 2),
@@ -183,13 +206,12 @@ fun SettingsScreen(
                     Spacer(Modifier.height(10.dp))
                     Slider(
                         value = workers.toFloat(),
-                        onValueChange = { vm.setCompileWorkers(it.toInt()) },
+                        onValueChange = { vm.setCompileWorkers(it.roundToInt()) },
                         valueRange = 1f..maxWorkers.toFloat(),
                         steps = (maxWorkers - 2).coerceAtLeast(0),
                     )
                 }
             }
-
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = getGroupedItemShape(1, 2),
@@ -243,16 +265,14 @@ fun SettingsScreen(
                     Spacer(Modifier.height(10.dp))
                     Slider(
                         value = patchWorkers.toFloat(),
-                        onValueChange = { vm.setPatchWorkers(it.toInt()) },
+                        onValueChange = { vm.setPatchWorkers(it.roundToInt()) },
                         valueRange = 1f..maxPatchWorkers.toFloat(),
                         steps = (maxPatchWorkers - 2).coerceAtLeast(0),
                     )
                 }
             }
         }
-
         Spacer(Modifier.height(24.dp))
-
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 text = "Directories",
@@ -261,9 +281,8 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(start = 8.dp, bottom = 4.dp),
             )
-
             GroupedFolderCard(
-                title = "Scripts Directory (.sma)",
+                title = "Plugins Directory (.sma)",
                 path = scriptRoot,
                 emptyLabel = "No directory selected",
                 icon = Icons.Filled.Folder,
@@ -272,7 +291,6 @@ fun SettingsScreen(
                 onPick = { pickForOutput = false; requestStorageAndPickFolder() },
                 onClear = if (scriptRoot != null) ({ vm.clearScriptRoot() }) else null,
             )
-
             GroupedFolderCard(
                 title = "Output Directory (.amxx)",
                 path = outputRoot,
@@ -284,9 +302,7 @@ fun SettingsScreen(
                 onClear = if (outputRoot != null) ({ vm.clearOutputRoot() }) else null,
             )
         }
-
         Spacer(Modifier.height(24.dp))
-
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 text = "Appearance & Theme",
@@ -295,7 +311,6 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(start = 8.dp, bottom = 4.dp),
             )
-
             Card(
                 onClick = onOpenTheme,
                 modifier = Modifier.fillMaxWidth(),
@@ -348,9 +363,7 @@ fun SettingsScreen(
                 }
             }
         }
-
         Spacer(Modifier.height(24.dp))
-
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 text = "Tools & System",
@@ -359,7 +372,6 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(start = 8.dp, bottom = 4.dp),
             )
-
             GroupedActionCard(
                 title = "Check for Updates",
                 subtitle = "Scan GitHub releases and module updates",
@@ -371,7 +383,6 @@ fun SettingsScreen(
                     vm.refreshLibStatus()
                 },
             )
-
             GroupedActionCard(
                 title = "Re-download Mod Bundle",
                 subtitle = "Fetch latest libraries and configuration assets",
@@ -380,7 +391,6 @@ fun SettingsScreen(
                 total = 4,
                 onClick = onRedownloadBundle,
             )
-
             GroupedActionCard(
                 title = "Share Logs",
                 subtitle = "Export system, patcher, and compiler debug logs",
@@ -389,21 +399,19 @@ fun SettingsScreen(
                 total = 4,
                 onClick = onShareLogs,
             )
-
             GroupedActionCard(
                 title = "About Nexora",
                 subtitle = "Version, license, and repository information",
-                icon = Icons.Filled.Info,
+                iconRes = R.drawable.nexora_logo,
                 index = 3,
                 total = 4,
                 onClick = onOpenAbout,
             )
         }
-
         Spacer(Modifier.height(32.dp))
     }
+    }
 }
-
 @Composable
 private fun GroupedFolderCard(
     title: String,
@@ -458,46 +466,29 @@ private fun GroupedFolderCard(
                     maxLines = 1,
                 )
             }
-            Spacer(modifier = Modifier.width(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                FilledTonalIconButton(
-                    onClick = onPick,
-                    colors = IconButtonDefaults.filledTonalIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    ),
+            if (onClear != null) {
+                Spacer(modifier = Modifier.width(8.dp))
+                IconButton(
+                    onClick = onClear,
                     modifier = Modifier.size(38.dp),
                 ) {
                     Icon(
-                        imageVector = Icons.Rounded.FolderOpen,
-                        contentDescription = "Browse folder",
-                        modifier = Modifier.size(20.dp),
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Clear folder",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        modifier = Modifier.size(18.dp),
                     )
-                }
-                if (onClear != null) {
-                    Spacer(modifier = Modifier.width(6.dp))
-                    IconButton(
-                        onClick = onClear,
-                        modifier = Modifier.size(38.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Close,
-                            contentDescription = "Clear folder",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
                 }
             }
         }
     }
 }
-
 @Composable
 private fun GroupedActionCard(
     title: String,
     subtitle: String,
-    icon: ImageVector,
+    icon: ImageVector? = null,
+    iconRes: Int? = null,
     index: Int,
     total: Int,
     onClick: () -> Unit,
@@ -519,15 +510,24 @@ private fun GroupedActionCard(
             Box(
                 modifier = Modifier
                     .size(40.dp)
-                    .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.secondaryContainer),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.size(20.dp),
-                )
+                if (iconRes != null) {
+                    Image(
+                        painter = painterResource(iconRes),
+                        contentDescription = null,
+                        modifier = Modifier.size(26.dp),
+                    )
+                } else if (icon != null) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {

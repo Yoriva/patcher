@@ -1,7 +1,14 @@
 package com.pickle.patcher.ui.screens
-
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,20 +24,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -42,7 +46,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -51,599 +54,402 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pickle.patcher.patcher.CompileState
 import com.pickle.patcher.patcher.PatcherViewModel
 import com.pickle.patcher.patcher.SmaSource
-import com.pickle.patcher.ui.theme.Accent
-import com.pickle.patcher.ui.theme.AlertRed
-import com.pickle.patcher.ui.theme.Gray30
-import com.pickle.patcher.ui.theme.Gray40
-import com.pickle.patcher.ui.theme.Gray60
-import kotlinx.coroutines.delay
-
-private const val NOTICE_MS = 4000L
-
 @Composable
-fun CompilerScreen(vm: PatcherViewModel, onOpenSettings: () -> Unit) {
-    val scroll = rememberScrollState()
-    val listScroll = rememberScrollState()
+fun CompilerScreen(vm: PatcherViewModel) {
     val scripts by vm.scripts.collectAsState()
     val compile by vm.compile.collectAsState()
     val scriptRoot by vm.scriptRoot.collectAsState()
     var selected by remember { mutableStateOf(setOf<String>()) }
-    var filterMode by remember { mutableIntStateOf(0) }
-    val failures = (compile as? CompileState.Done)?.failures ?: emptyMap()
     var stampError by remember { mutableStateOf<Pair<String, String>?>(null) }
-    var pickCancelled by remember { mutableStateOf<Boolean?>(null) }
-    var notice by remember { mutableStateOf<String?>(null) }
-
+    val selectedSources = scripts.filter { it.path in selected }
+    val failures = (compile as? CompileState.Done)?.failures ?: emptyMap()
+    val context = LocalContext.current
+    val folderPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri -> if (uri != null) vm.setScriptRoot(uri) }
+    val storagePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
+            folderPicker.launch(null)
+        }
+    }
+    fun pickPluginsFolder() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (Environment.isExternalStorageManager()) {
+                folderPicker.launch(null)
+            } else {
+                storagePermissionLauncher.launch(
+                    Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                        data = Uri.parse("package:${context.packageName}")
+                    },
+                )
+            }
+        } else {
+            folderPicker.launch(null)
+        }
+    }
     DisposableEffect(Unit) {
         vm.startScriptWatcher()
         onDispose { vm.stopScriptWatcher() }
     }
-
-    LaunchedEffect(notice) {
-        if (notice != null) {
-            delay(NOTICE_MS)
-            notice = null
-        }
+    LaunchedEffect(scripts) {
+        val available = scripts.mapTo(HashSet()) { it.path }
+        selected = selected.intersect(available)
     }
-
-    LaunchedEffect(compile) {
-        if (compile is CompileState.Compiling) {
-            scroll.animateScrollTo(scroll.maxValue)
-        }
-    }
-
-    val selectedSources = scripts.filter { it.path in selected }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(scroll)
-                .padding(horizontal = 20.dp, vertical = 16.dp),
-        ) {
-            Spacer(Modifier.height(4.dp))
-
-            CompilerHeader(
-                scriptRoot = scriptRoot,
-                scriptCount = scripts.size,
-                selectedCount = selected.size,
-                failureCount = failures.size,
-                compile = compile,
-            )
-
-            Spacer(Modifier.height(16.dp))
-
-            if (scriptRoot == null) {
-                Surface(
-                    shape = MaterialTheme.shapes.large,
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                ) {
-                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Filled.FolderOpen,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(22.dp),
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                "Scripts Directory",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "Choose where your .sma sources live before compiling.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.height(10.dp))
-                        SecondaryButton(
-                            text = "Open Settings",
-                            onClick = { onOpenSettings() },
-                        )
-                    }
-                }
-            } else {
-                Surface(
-                    shape = MaterialTheme.shapes.large,
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            Icons.Filled.FolderOpen,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            scriptRoot.orEmpty(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        TextButton(onClick = { onOpenSettings() }) {
-                            Text("Settings", style = MaterialTheme.typography.labelLarge)
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(20.dp))
-
-            SectionHeader("Plugins", "Select source scripts to compile")
-            AppCard {
-                if (scriptRoot == null) {
-                    Text("Select a folder above.", style = MaterialTheme.typography.bodySmall, color = Gray40)
-                } else if (scripts.isEmpty()) {
-                    Text("No .sma files found.", style = MaterialTheme.typography.bodySmall, color = Gray40)
-                } else {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            if (selected.isEmpty()) "${scripts.size} scripts" else "${selected.size}/${scripts.size} selected",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (selected.isNotEmpty()) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
-                        Row {
-                            if (scripts.size > 1) {
-                                GhostButton(
-                                    text = if (selected.size == scripts.size) "Clear" else "Select All",
-                                    onClick = {
-                                        selected = if (selected.size != scripts.size) scripts.map { it.path }.toSet() else emptySet()
-                                    },
-                                )
-                            }
-                        }
-                    }
-
-                    val displayedScripts = when (filterMode) {
-                        1 -> scripts.filter { it.path in selected }
-                        2 -> scripts.filter { it.path in failures.keys }
-                        else -> scripts
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        FilterChip(
-                            selected = filterMode == 0,
-                            onClick = { filterMode = 0 },
-                            label = { Text("All (${scripts.size})", style = MaterialTheme.typography.labelSmall) },
-                        )
-                        if (selected.isNotEmpty()) {
-                            FilterChip(
-                                selected = filterMode == 1,
-                                onClick = { filterMode = 1 },
-                                label = { Text("Selected (${selected.size})", style = MaterialTheme.typography.labelSmall) },
-                            )
-                        }
-                        if (failures.isNotEmpty()) {
-                            FilterChip(
-                                selected = filterMode == 2,
-                                onClick = { filterMode = 2 },
-                                label = { Text("Failed (${failures.size})", style = MaterialTheme.typography.labelSmall) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.errorContainer,
-                                    selectedLabelColor = MaterialTheme.colorScheme.onErrorContainer,
-                                ),
-                            )
-                        }
-                    }
-
-                    Column(
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp).verticalScroll(listScroll),
-                    ) {
-                        displayedScripts.forEach { s ->
-                            ScriptRow(
-                                source = s,
-                                selected = s.path in selected,
-                                error = failures[s.path],
-                                onClick = {
-                                    selected = if (s.path in selected) selected - s.path else selected + s.path
-                                },
-                                onErrorClick = { err -> stampError = s.path to err },
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (selectedSources.isNotEmpty()) {
-                Spacer(Modifier.height(20.dp))
-                SectionHeader("Compile", "Build the selected queue")
-                AppCard {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            shape = MaterialTheme.shapes.large,
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                        ) {
-                            Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Filled.PlayArrow,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(24.dp),
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                )
-                            }
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                if (selectedSources.size == 1) {
-                                    selectedSources.first().name
-                                } else {
-                                    "${selectedSources.size} plugins selected"
-                                },
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                if (selectedSources.size > 1) {
-                                    "Compiled in order · ${selectedSources.first().scriptDir}"
-                                } else {
-                                    selectedSources.first().scriptDir
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(14.dp))
-                    PrimaryButton(
-                        text = if (selectedSources.size == 1) {
-                            "Compile Plugin"
-                        } else {
-                            "Compile Selected (${selectedSources.size})"
-                        },
-                        onClick = { vm.compileAll(selectedSources) },
-                        enabled = compile !is CompileState.Compiling,
-                        icon = { Icon(Icons.Filled.PlayArrow, null, modifier = Modifier.size(18.dp)) },
-                    )
-                    if (compile is CompileState.Compiling) {
-                        Spacer(Modifier.height(12.dp))
-                        Text(
-                            "amxxpc compiler is running…",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        WavyProgressBar(progress = 0.7f)
-                    }
-                }
-            }
-
-            stampError?.let { (name, message) ->
-                ErrorDialog(name = name.substringAfterLast('/'), message = message) { stampError = null }
-            }
-
-            pickCancelled?.let { forOutput ->
-                PickFolderDialog(
-                    target = vm.autoFindTargetName(forOutput),
-                    onClose = { pickCancelled = null },
-                    onAutoFind = {
-                        pickCancelled = null
-                        val what = if (forOutput) "Output" else "Scripts"
-                        notice = if (vm.autoFindAmxxFolder(forOutput))
-                            "$what folder found."
-                        else
-                            "Could not find xash/<game>/${vm.autoFindTargetName(forOutput)}"
-                    },
-                )
-            }
-
-            when (val c = compile) {
-                is CompileState.Compiling -> {
-                    Spacer(Modifier.height(20.dp))
-                    SectionHeader("Output", "Compiler log")
-                    OutputPanel(text = c.source, busy = true)
-                }
-                is CompileState.Done -> {
-                    Spacer(Modifier.height(20.dp))
-                    SectionHeader("Output", "Compiler log")
-                    OutputPanel(
-                        text = c.log,
-                        error = c.failures.isNotEmpty(),
-                        status = if (c.failures.isEmpty()) "Done" else "Needs attention",
-                    )
-                }
-                is CompileState.Failed -> {
-                    Spacer(Modifier.height(20.dp))
-                    SectionHeader("Output", "Compiler log")
-                    OutputPanel(text = c.message, error = true, status = "Failed")
-                }
-                else -> {}
-            }
-
-            Spacer(Modifier.height(20.dp))
-        }
-
-        notice?.let { BottomNotice(it) }
-    }
-}
-
-@Composable
-private fun CompilerHeader(
-    scriptRoot: String?,
-    scriptCount: Int,
-    selectedCount: Int,
-    failureCount: Int,
-    compile: CompileState,
-) {
-    val status = when {
-        compile is CompileState.Compiling -> "Compiling"
-        compile is CompileState.Failed -> "Failed"
-        compile is CompileState.Done && failureCount > 0 -> "Needs attention"
-        compile is CompileState.Done -> "Done"
-        scriptRoot == null -> "Setup"
-        else -> "Ready"
-    }
-    val tone = when (status) {
-        "Ready", "Done" -> Tone.Primary
-        "Compiling", "Needs attention" -> Tone.Tertiary
-        "Failed" -> Tone.Error
-        else -> Tone.Neutral
-    }
-    val subtitle = when {
-        scriptRoot == null -> "Choose a scripts folder to unlock the compiler."
-        compile is CompileState.Compiling -> "amxxpc is building your queue."
-        compile is CompileState.Failed -> "The last build stopped with an error."
-        else -> "Compile .sma plugins with the local amxxpc."
-    }
-
-    ScreenHeader(
-        icon = Icons.Filled.Build,
-        title = "Compiler",
-        subtitle = subtitle,
-        status = status,
-        statusTone = tone,
-        stats = listOf(
-            Stat("Files", "$scriptCount", if (scriptCount > 0) Tone.Primary else Tone.Neutral),
-            Stat("Selected", "$selectedCount", if (selectedCount > 0) Tone.Primary else Tone.Neutral),
-            Stat("Errors", "$failureCount", if (failureCount > 0) Tone.Error else Tone.Neutral),
-        ),
-    )
-}
-
-@Composable
-private fun OutputPanel(
-    text: String,
-    error: Boolean = false,
-    busy: Boolean = false,
-    status: String? = null,
-) {
-    val context = LocalContext.current
-    val label = status ?: if (busy) "RUNNING" else null
-    val badge = when {
-        error -> MaterialTheme.colorScheme.errorContainer
-        busy -> MaterialTheme.colorScheme.tertiaryContainer
-        else -> MaterialTheme.colorScheme.primaryContainer
-    }
-    val onBadge = when {
-        error -> MaterialTheme.colorScheme.onErrorContainer
-        busy -> MaterialTheme.colorScheme.onTertiaryContainer
-        else -> MaterialTheme.colorScheme.onPrimaryContainer
-    }
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "TERMINAL",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                if (label != null) {
-                    Surface(shape = RoundedCornerShape(50), color = badge) {
-                        Text(
-                            label,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = onBadge,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                        )
-                    }
-                    Spacer(Modifier.width(6.dp))
-                }
-                IconButton(onClick = {
-                    val clip = context.getSystemService(ClipboardManager::class.java)
-                    clip?.setPrimaryClip(
-                        ClipData.newPlainText("compiler log", text)
-                    )
-                }) {
-                    Icon(
-                        Icons.Filled.ContentCopy,
-                        contentDescription = "Copy log",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            LogBox(text = text, error = error, busy = busy)
-        }
-    }
-}
-
-@Composable
-private fun PickFolderDialog(
-    target: String,
-    onClose: () -> Unit,
-    onAutoFind: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onClose,
-        title = { Text("Can't pick a folder?", color = AlertRed) },
-        text = {
-            Text(
-                "No folder was selected.\n\n" +
-                    "Auto Find looks for xash/<game>/$target under the device's internal storage and fills it in for you.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Gray30,
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = onAutoFind) { Text("Auto Find", color = Accent) }
-        },
-        dismissButton = {
-            TextButton(onClick = onClose) { Text("Close", color = Gray60) }
-        },
-    )
-}
-
-@Composable
-private fun BottomNotice(text: String) {
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 18.dp),
-        contentAlignment = Alignment.BottomCenter,
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        Surface(
-            shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.inverseSurface,
-            modifier = Modifier.fillMaxWidth(),
+        GroupedItem(
+            title = "Plugins folder",
+            subtitle = scriptRoot ?: "No folder selected",
+            index = 0,
+            total = 1,
+            trailing = {
+                SmallButton(
+                    text = if (scriptRoot == null) "Choose" else "Change",
+                    icon = Icons.Filled.FolderOpen,
+                    onClick = ::pickPluginsFolder,
+                )
+            },
+        )
+        PluginsSection(
+            scriptRoot = scriptRoot,
+            scripts = scripts,
+            selected = selected,
+            failures = failures,
+            onToggle = { path ->
+                selected = if (path in selected) selected - path else selected + path
+            },
+            onSelectAll = {
+                selected = if (selected.size != scripts.size) {
+                    scripts.map { it.path }.toSet()
+                } else {
+                    emptySet()
+                }
+            },
+            onErrorClick = { name, message -> stampError = name to message },
+        )
+        BuildSection(
+            compile = compile,
+            scriptRoot = scriptRoot,
+            scriptCount = scripts.size,
+            selectedSources = selectedSources,
+            onCompile = { vm.compileAll(selectedSources) },
+        )
+        Spacer(Modifier.height(16.dp))
+    }
+    stampError?.let { (name, message) ->
+        ErrorDialog(
+            name = name.substringAfterLast('/'),
+            message = message,
+            onDismiss = { stampError = null },
+        )
+    }
+}
+@Composable
+private fun PluginsSection(
+    scriptRoot: String?,
+    scripts: List<SmaSource>,
+    selected: Set<String>,
+    failures: Map<String, String>,
+    onToggle: (String) -> Unit,
+    onSelectAll: () -> Unit,
+    onErrorClick: (String, String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 8.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.inverseOnSurface,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                text = "Plugins",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f),
             )
+            if (scripts.isNotEmpty()) {
+                TextButton(
+                    onClick = onSelectAll,
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                ) {
+                    Text(
+                        text = if (selected.size == scripts.size) "Clear" else "Select all",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
+        when {
+            scriptRoot == null -> EmptyCard(
+                "Pick the folder that holds your .sma plugin sources — usually addons/amxmodx/scripting.",
+            )
+            scripts.isEmpty() -> EmptyCard("No .sma plugin sources found in this folder.")
+            else -> Column {
+                scripts.forEachIndexed { index, source ->
+                    ScriptRow(
+                        source = source,
+                        selected = source.path in selected,
+                        error = failures[source.path],
+                        index = index,
+                        total = scripts.size,
+                        onClick = { onToggle(source.path) },
+                        onErrorClick = { message -> onErrorClick(source.path, message) },
+                    )
+                }
+            }
         }
     }
 }
-
 @Composable
 private fun ScriptRow(
     source: SmaSource,
     selected: Boolean,
     error: String?,
+    index: Int,
+    total: Int,
     onClick: () -> Unit,
     onErrorClick: (String) -> Unit,
 ) {
-    val container = when {
-        error != null -> MaterialTheme.colorScheme.errorContainer
-        selected -> MaterialTheme.colorScheme.primaryContainer
-        else -> MaterialTheme.colorScheme.surfaceContainerHighest
+    val container = if (error != null) {
+        MaterialTheme.colorScheme.errorContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainer
     }
-    val content = when {
-        error != null -> MaterialTheme.colorScheme.onErrorContainer
-        selected -> MaterialTheme.colorScheme.onPrimaryContainer
-        else -> MaterialTheme.colorScheme.onSurface
+    val titleColor = if (error != null) {
+        MaterialTheme.colorScheme.onErrorContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
     }
-    Surface(
+    Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp)
+            .padding(vertical = 1.dp)
             .clickable(onClick = onClick),
-        shape = MaterialTheme.shapes.medium,
-        color = container,
+        shape = getGroupedItemShape(index, total),
+        colors = CardDefaults.cardColors(containerColor = container),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp).fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 18.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                source.name,
-                style = MaterialTheme.typography.bodyMedium,
-                color = content,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            if (error != null) {
-                IconButton(
-                    onClick = { onErrorClick(error) },
-                    modifier = Modifier.size(26.dp),
-                ) {
-                    Icon(
-                        Icons.Filled.ErrorOutline,
-                        contentDescription = "Compile error",
-                        tint = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.size(16.dp),
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = source.name,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = titleColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (error != null) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = "Compile error",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
-            } else if (selected) {
-                Icon(
-                    Icons.Filled.CheckCircle, null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(16.dp),
+            }
+            when {
+                error != null -> IconButton(
+                    onClick = { onErrorClick(error) },
+                    modifier = Modifier.size(30.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.ErrorOutline,
+                        contentDescription = "Compile error",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                else -> Icon(
+                    imageVector = if (selected) {
+                        Icons.Filled.CheckBox
+                    } else {
+                        Icons.Outlined.CheckBoxOutlineBlank
+                    },
+                    contentDescription = if (selected) "Selected" else "Not selected",
+                    tint = if (selected) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                    },
+                    modifier = Modifier.size(22.dp),
                 )
             }
         }
     }
 }
-
+@Composable
+private fun BuildSection(
+    compile: CompileState,
+    scriptRoot: String?,
+    scriptCount: Int,
+    selectedSources: List<SmaSource>,
+    onCompile: () -> Unit,
+) {
+    val compiling = compile as? CompileState.Compiling
+    val done = compile as? CompileState.Done
+    val failures = done?.failures ?: emptyMap()
+    val title = when {
+        compiling != null -> "Compiling…"
+        done != null && failures.isNotEmpty() -> "Build Finished with Errors"
+        done != null -> "Build Succeeded"
+        else -> "Build Plugins"
+    }
+    val subtitle = when {
+        compiling != null -> compiling.source
+        done != null && failures.isNotEmpty() -> "${done.ok} compiled · ${failures.size} failed"
+        done != null -> "${done.ok} plugin${if (done.ok == 1) "" else "s"} compiled"
+        selectedSources.isEmpty() -> when {
+            scriptRoot == null -> "Choose a plugins folder above."
+            scriptCount == 0 -> "No .sma plugin sources found in this folder."
+            else -> "Select one or more plugins above."
+        }
+        selectedSources.size == 1 -> selectedSources.first().name
+        else -> "${selectedSources.size} plugins selected"
+    }
+    var showLog by remember { mutableStateOf(false) }
+    val logText = when (compile) {
+        is CompileState.Done -> compile.log
+        is CompileState.Failed -> compile.message
+        else -> null
+    }
+    GroupedItem(
+        title = title,
+        subtitle = subtitle,
+        index = 0,
+        total = 1,
+        error = done != null && failures.isNotEmpty(),
+        trailing = {
+            if (compiling != null) {
+                SmallProgressButton("Building")
+            } else {
+                SmallButton(
+                    text = "Compile",
+                    icon = Icons.Filled.PlayArrow,
+                    filled = true,
+                    enabled = selectedSources.isNotEmpty(),
+                    onClick = onCompile,
+                )
+            }
+        },
+    ) {
+        if (compiling != null) {
+            ProgressFooter(progress = null, left = compiling.source, right = "")
+        }
+        if (logText != null) {
+            TextButton(
+                onClick = { showLog = !showLog },
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+            ) {
+                Text(if (showLog) "Hide Log" else "View Log")
+            }
+            AnimatedVisibility(visible = showLog) {
+                Box(
+                    modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 14.dp),
+                ) {
+                    LogBox(text = logText, error = failures.isNotEmpty())
+                }
+            }
+        }
+    }
+}
+@Composable
+private fun EmptyCard(text: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = getGroupedItemShape(0, 1),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 20.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
 @Composable
 private fun ErrorDialog(name: String, message: String, onDismiss: () -> Unit) {
     val context = LocalContext.current
+    val scroll = rememberScrollState()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(name, color = AlertRed, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        icon = {
+            Icon(
+                imageVector = Icons.Filled.ErrorOutline,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+            )
+        },
+        title = {
+            Text(
+                text = name,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
         text = {
             Text(
-                message,
+                text = message,
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                color = Gray30,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .heightIn(max = 320.dp)
+                    .verticalScroll(scroll),
             )
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close", color = Gray60) }
+            TextButton(onClick = onDismiss) { Text("Close") }
         },
         dismissButton = {
-            TextButton(onClick = {
-                val clip = context.getSystemService(ClipboardManager::class.java)
-                clip?.setPrimaryClip(
-                    ClipData.newPlainText(name, message)
-                )
-            }) {
+            TextButton(
+                onClick = {
+                    val clip = context.getSystemService(ClipboardManager::class.java)
+                    clip?.setPrimaryClip(ClipData.newPlainText(name, message))
+                },
+            ) {
                 Icon(
-                    Icons.Filled.ContentCopy,
-                    contentDescription = "Copy error",
-                    tint = Accent,
+                    imageVector = Icons.Filled.ContentCopy,
+                    contentDescription = null,
                     modifier = Modifier.size(18.dp),
                 )
+                Spacer(Modifier.width(6.dp))
+                Text("Copy")
             }
         },
     )
 }
-
 @Composable
-private fun LogBox(text: String, error: Boolean = false, busy: Boolean = false) {
+private fun LogBox(text: String, error: Boolean = false) {
     val scrollState = rememberScrollState()
     LaunchedEffect(text) {
         scrollState.scrollTo(scrollState.maxValue)
@@ -656,16 +462,16 @@ private fun LogBox(text: String, error: Boolean = false, busy: Boolean = false) 
             .heightIn(min = 64.dp, max = 240.dp),
     ) {
         Text(
-            text,
+            text = text,
             style = MaterialTheme.typography.bodySmall.copy(
                 fontFamily = FontFamily.Monospace,
                 fontSize = 11.sp,
                 lineHeight = 15.sp,
             ),
-            color = when {
-                busy -> MaterialTheme.colorScheme.primary
-                error -> MaterialTheme.colorScheme.error
-                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            color = if (error) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
             },
             modifier = Modifier
                 .fillMaxWidth()

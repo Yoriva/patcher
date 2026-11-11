@@ -6,15 +6,15 @@ local.properties
 .bundle/
 captures/
 
-# device build artifacts
 *.apk
 
-# keystore material stays in repo (it is a debug/release signing key shared by all patched builds)
+app/src/main/jniLibs/
+
+app/src/main/assets/keystore/
+
 !debug/patcher-release.p12
 
-# Android Studio / Gradle init
 .kotlin/
-# Vendored build artifacts we don't need
 modsrc-amxx/**/msvc12/
 modsrc-amxx/**/msvc10/
 modsrc-amxx/**/msvc11/

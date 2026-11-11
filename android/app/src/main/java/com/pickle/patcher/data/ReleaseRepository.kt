@@ -1,5 +1,4 @@
 package com.pickle.patcher.data
-
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
@@ -9,47 +8,22 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 import kotlin.io.DEFAULT_BUFFER_SIZE
-
-/**
- * Minimal GitHub Releases client. Now API-quota-free: it resolves the latest
- * tag through the github.com redirect and downloads release assets straight
- * from the releases/download CDN path. No api.github.com calls remain, so the
- * per-IP 60 req/hour rate limit is never hit by the app's polling loop.
- */
 object ReleaseRepository {
-
-    /**
-     * Raised on GitHub HTTP 403 (per-IP API quota or CDN download throttling).
-     * Carries the server's Retry-After hint so callers can back off politely.
-     */
     class GitHubRateLimited(
         val retryAfterSeconds: Long?,
         message: String,
     ) : IOException(message)
-
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
         .build()
-
     private val webClient = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .followRedirects(true)
         .build()
-
-    /**
-     * Resolves the latest release tag, pre-releases included.
-     *
-     * The github.com redirect (…/releases/latest -> …/releases/tag/vX) costs no
-     * API quota but skips pre-releases, and the rolling "continuous" builds of
-     * both repos are marked as pre-releases, so that redirect 404s for them.
-     * The releases feed does list them, newest first, so it is the fallback.
-     * Returns null on any failure (caller backs off).
-     */
     suspend fun latestTagRedirect(repo: String): String? =
         latestTagFromRedirect(repo) ?: latestTagFromFeed(repo)
-
     private suspend fun latestTagFromRedirect(repo: String): String? {
         return try {
             val req = Request.Builder()
@@ -66,11 +40,6 @@ object ReleaseRepository {
             null
         }
     }
-
-    /**
-     * First entry of the repository's releases feed, which unlike /releases/latest
-     * also carries the pre-releases. Still no api.github.com, so no quota.
-     */
     suspend fun latestTagFromFeed(repo: String): String? {
         return try {
             val req = Request.Builder()
@@ -93,11 +62,6 @@ object ReleaseRepository {
             null
         }
     }
-
-    /**
-     * Latest stable release tag (v*), scanning the releases feed for the first
-     * tag that starts with "v". Returns null when no release tag exists.
-     */
     suspend fun latestReleaseTag(repo: String): String? {
         return try {
             val req = Request.Builder()
@@ -117,35 +81,14 @@ object ReleaseRepository {
             null
         }
     }
-
-    /**
-     * Builds a direct release-asset download URL. Unlike
-     * `api.github.com/.../browser_download_url`, this never touches the API
-     * quota, so it is safe to construct on every poll.
-     */
     fun assetUrl(repo: String, tag: String, name: String): String =
         "https://github.com/$repo/releases/download/$tag/$name"
-
-    /**
-     * HEAD-probes a release asset. Returns its Content-Length (0 = no length)
-     * or null when the asset does not exist / the request failed. Zero API cost.
-     */
     suspend fun probeSize(url: String): Long? = probe(url)?.size
-
-    /**
-     * What the remote asset looks like right now: byte size plus the server's
-     * timestamp, so a cached APK can be compared on more than its length (a
-     * rebuilt client can come out the same size).
-     */
     data class RemoteInfo(
         val size: Long,
         val lastModifiedMillis: Long,
-        // GitHub serves release assets from a blob store whose ETag changes
-        // with the content, so it works as a cheap fingerprint: no download and
-        // no api.github.com quota needed to tell two builds apart.
         val etag: String,
     )
-
     suspend fun probe(url: String): RemoteInfo? {
         return try {
             val req = Request.Builder()
@@ -163,7 +106,6 @@ object ReleaseRepository {
                     RemoteInfo(
                         size = resp.body?.contentLength()?.coerceAtLeast(0L) ?: 0L,
                         lastModifiedMillis = stamp,
-                        // Both quoted and W/"..." forms appear; keep the bare value.
                         etag = resp.header("ETag")?.removeSurrounding("\"")?.trim() ?: "",
                     )
                 }
@@ -172,8 +114,6 @@ object ReleaseRepository {
             null
         }
     }
-
-    /** RFC 1123 date ("Wed, 05 Oct 2026 12:48:24 GMT") to epoch millis. */
     private fun parseHttpDate(value: String): Long = try {
         val fmt = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US)
         fmt.timeZone = TimeZone.getTimeZone("GMT")
@@ -181,11 +121,6 @@ object ReleaseRepository {
     } catch (_: Throwable) {
         0L
     }
-
-    /**
-     * GETs a small release text asset (e.g. version.txt from the Continuous
-     * release). Returns the trimmed body or null on any failure.
-     */
     suspend fun fetchText(url: String): String? {
         return try {
             val req = Request.Builder()
@@ -201,8 +136,6 @@ object ReleaseRepository {
             null
         }
     }
-
-    /** Seconds from a Retry-After header (integer or HTTP-date). */
     private fun retryAfterSeconds(raw: String?): Long? {
         if (raw.isNullOrBlank()) return null
         raw.trim().toLongOrNull()?.let { return it }
@@ -216,7 +149,6 @@ object ReleaseRepository {
             null
         }
     }
-
     suspend fun downloadUrl(
         url: String,
         dest: File,

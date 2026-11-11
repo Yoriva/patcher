@@ -1,5 +1,4 @@
 package com.pickle.patcher.ui.screens
-
 import android.os.Build
 import android.os.Environment
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -50,12 +49,10 @@ import com.pickle.patcher.ui.theme.Gray80
 import com.pickle.patcher.ui.theme.Gray90
 import com.pickle.patcher.ui.theme.SuccessGreen
 import com.pickle.patcher.ui.theme.Gray30
-
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.filled.Edit
-
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun AddonsScreen(vm: PatcherViewModel) {
@@ -96,19 +93,16 @@ fun AddonsScreen(vm: PatcherViewModel) {
         }
     }
 }
-
 @Composable
 private fun AddonsPackagesContent(vm: PatcherViewModel) {
     val context = LocalContext.current
     val addons by vm.addons.collectAsState()
     val addonFiles by vm.addonFiles.collectAsState()
     val installPath by vm.installPath.collectAsState()
-
     val missing = addonFiles.count { !it.installed }
     val outdated = addonFiles.count { it.installed && it.outdated }
     val total = addonFiles.size
     val installed = addonFiles.count { it.installed && !it.outdated }
-
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -141,7 +135,6 @@ private fun AddonsPackagesContent(vm: PatcherViewModel) {
                 ),
             )
         }
-
         item {
             SectionHeader("Game", "Choose the target install")
             AppCard {
@@ -174,12 +167,10 @@ private fun AddonsPackagesContent(vm: PatcherViewModel) {
                 )
             }
         }
-
         item {
             SectionHeader("Storage access", "All files permission")
             PermissionCard()
         }
-
         item {
             SectionHeader("Addon status", "What is installed")
             AppCard {
@@ -211,7 +202,6 @@ private fun AddonsPackagesContent(vm: PatcherViewModel) {
                 }
             }
         }
-
         if (total > 0 && (missing > 0 || outdated > 0)) {
             item {
                 SectionHeader("Repair queue", "Missing or outdated files")
@@ -249,7 +239,6 @@ private fun AddonsPackagesContent(vm: PatcherViewModel) {
                 }
             }
         }
-
         item {
             SectionHeader("Install", "Fetch and write files")
             AppCard {
@@ -303,9 +292,7 @@ private fun AddonsPackagesContent(vm: PatcherViewModel) {
                     }
                     else -> {}
                 }
-
                 Spacer(Modifier.height(10.dp))
-
                 val permLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.StartActivityForResult()
                 ) { result ->
@@ -313,7 +300,6 @@ private fun AddonsPackagesContent(vm: PatcherViewModel) {
                         vm.fetchAndInstallAddons()
                     }
                 }
-
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     PrimaryButton(
                         text = "Download & Install Addons",
@@ -339,7 +325,6 @@ private fun AddonsPackagesContent(vm: PatcherViewModel) {
                 }
             }
         }
-
         if (addonFiles.isNotEmpty()) {
             item {
                 SectionHeader("All files", "${addonFiles.size} tracked files")
@@ -396,7 +381,6 @@ private fun AddonsPackagesContent(vm: PatcherViewModel) {
         }
     }
 }
-
 @Composable
 private fun PermissionCard() {
     val context = LocalContext.current
@@ -405,11 +389,9 @@ private fun PermissionCard() {
     } else {
         true
     }
-
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { }
-
     AppCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(

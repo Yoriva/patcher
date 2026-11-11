@@ -1,5 +1,4 @@
 package com.pickle.patcher.ui.screens
-
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -67,7 +66,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.PI
 import kotlin.math.sin
-
 fun getGroupedItemShape(
     index: Int,
     total: Int,
@@ -91,9 +89,7 @@ fun getGroupedItemShape(
         else -> RoundedCornerShape(innerCorner)
     }
 }
-
 val CardShape: Shape = RoundedCornerShape(24.dp)
-
 enum class Tone {
     Primary,
     Secondary,
@@ -101,13 +97,11 @@ enum class Tone {
     Error,
     Neutral,
 }
-
 data class Stat(
     val label: String,
     val value: String,
     val tone: Tone = Tone.Neutral,
 )
-
 @Composable
 fun toneColors(tone: Tone): Pair<Color, Color> = when (tone) {
     Tone.Primary ->
@@ -121,7 +115,6 @@ fun toneColors(tone: Tone): Pair<Color, Color> = when (tone) {
     Tone.Neutral ->
         MaterialTheme.colorScheme.surfaceContainerHighest to MaterialTheme.colorScheme.onSurfaceVariant
 }
-
 @Composable
 fun TopBarBackButton(
     onClick: () -> Unit,
@@ -142,7 +135,6 @@ fun TopBarBackButton(
         )
     }
 }
-
 @Composable
 fun StatusPill(
     text: String,
@@ -177,7 +169,6 @@ fun StatusPill(
         }
     }
 }
-
 @Composable
 fun ScreenHeader(
     icon: ImageVector,
@@ -241,7 +232,6 @@ fun ScreenHeader(
         }
     }
 }
-
 @Composable
 fun StatCard(stat: Stat, modifier: Modifier = Modifier) {
     val (container, content) = toneColors(stat.tone)
@@ -268,7 +258,6 @@ fun StatCard(stat: Stat, modifier: Modifier = Modifier) {
         }
     }
 }
-
 @Composable
 fun SectionHeader(
     title: String,
@@ -295,7 +284,6 @@ fun SectionHeader(
         }
     }
 }
-
 @Composable
 fun AppCard(
     modifier: Modifier = Modifier,
@@ -313,7 +301,6 @@ fun AppCard(
         }
     }
 }
-
 @Composable
 fun GroupedSettingCard(
     title: String,
@@ -388,7 +375,6 @@ fun GroupedSettingCard(
         }
     }
 }
-
 @Composable
 fun PrimaryButton(
     text: String,
@@ -422,7 +408,6 @@ fun PrimaryButton(
         )
     }
 }
-
 @Composable
 fun SecondaryButton(
     text: String,
@@ -453,7 +438,6 @@ fun SecondaryButton(
         )
     }
 }
-
 @Composable
 fun ExpressiveOutlinedButton(
     text: String,
@@ -479,7 +463,6 @@ fun ExpressiveOutlinedButton(
         )
     }
 }
-
 @Composable
 fun GhostButton(
     text: String,
@@ -502,7 +485,6 @@ fun GhostButton(
         )
     }
 }
-
 @Composable
 fun InfoRow(
     label: String,
@@ -527,7 +509,6 @@ fun InfoRow(
         )
     }
 }
-
 @Composable
 fun StatPill(
     label: String,
@@ -560,7 +541,6 @@ fun StatPill(
         }
     }
 }
-
 @Composable
 fun WavyProgressBar(
     progress: Float,
@@ -578,10 +558,8 @@ fun WavyProgressBar(
         ),
         label = "wavePhase",
     )
-
     val clipPath = remember { Path() }
     val wavePath = remember { Path() }
-
     Canvas(
         modifier = modifier
             .fillMaxWidth()
@@ -590,15 +568,12 @@ fun WavyProgressBar(
     ) {
         drawRect(trackColor, size = size)
         if (progress <= 0f) return@Canvas
-
         val barWidth = size.width * progress.coerceIn(0f, 1f)
         val amplitude = size.height * 0.28f
         val wavelength = 28.dp.toPx().coerceAtLeast(8f)
         val centerY = size.height / 2f
-
         clipPath.reset()
         clipPath.addRect(Rect(Offset.Zero, Size(size.width, size.height)))
-
         clipPath(clipPath) {
             wavePath.reset()
             wavePath.moveTo(0f, centerY)
@@ -611,12 +586,10 @@ fun WavyProgressBar(
             wavePath.lineTo(barWidth, size.height)
             wavePath.lineTo(0f, size.height)
             wavePath.close()
-
             drawPath(wavePath, color)
         }
     }
 }
-
 @Composable
 fun AppProgressBar(fraction: Float, modifier: Modifier = Modifier) {
     val animated by animateFloatAsState(
@@ -640,7 +613,6 @@ fun AppProgressBar(fraction: Float, modifier: Modifier = Modifier) {
         )
     }
 }
-
 @Composable
 fun RingProgress(
     fraction: Float,
@@ -699,7 +671,6 @@ fun RingProgress(
         }
     }
 }
-
 @Composable
 fun MiniConsole(
     lines: List<String>,

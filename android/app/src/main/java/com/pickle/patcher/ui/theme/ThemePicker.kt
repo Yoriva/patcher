@@ -1,5 +1,4 @@
 package com.pickle.patcher.ui.theme
-
 import android.annotation.SuppressLint
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
@@ -52,18 +51,26 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.activity.compose.BackHandler
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-
+import com.pickle.patcher.ui.screens.TopBarBackButton
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ThemeScreen(
     onBack: () -> Unit = {},
 ) {
+    BackHandler(onBack = onBack)
     val controller = LocalThemeController.current
     val choice by controller.choice.collectAsState()
     val systemDark = isSystemInDarkTheme()
@@ -74,12 +81,34 @@ fun ThemeScreen(
     }
     val isAmoled = isDark && choice.amoled
     val view = LocalView.current
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(13.dp),
-        contentPadding = PaddingValues(vertical = 12.dp),
-    ) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "Theme",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground,
+                    )
+                },
+                navigationIcon = {
+                    TopBarBackButton(onClick = onBack)
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                ),
+            )
+        },
+        containerColor = MaterialTheme.colorScheme.background,
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+            verticalArrangement = Arrangement.spacedBy(13.dp),
+            contentPadding = PaddingValues(vertical = 12.dp),
+        ) {
         item {
             ThemePreviewCard(
                 keyColor = choice.keyColor,
@@ -87,7 +116,6 @@ fun ThemeScreen(
                 isAmoled = isAmoled,
             )
         }
-
         item {
             LazyRow(
                 modifier = Modifier.fillMaxWidth(),
@@ -103,7 +131,6 @@ fun ThemeScreen(
                         onClick = { controller.setKeyColor(0) },
                     )
                 }
-
                 items(keyColorOptions) { colorInt ->
                     ColorButtonMaterial(
                         color = Color(colorInt),
@@ -115,14 +142,12 @@ fun ThemeScreen(
                 }
             }
         }
-
         item {
             val options = listOf(
                 ModeOption("System", ThemeMode.System, Icons.Filled.Brightness4),
                 ModeOption("Light", ThemeMode.Light, Icons.Filled.Brightness7),
                 ModeOption("Dark", ThemeMode.Dark, Icons.Filled.Brightness3),
             )
-
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -131,13 +156,11 @@ fun ThemeScreen(
             ) {
                 options.forEachIndexed { index, opt ->
                     val isSelected = choice.mode == opt.mode
-
                     val shape = when (index) {
                         0 -> RoundedCornerShape(topStart = 20.dp, bottomStart = 20.dp, topEnd = 4.dp, bottomEnd = 4.dp)
                         options.lastIndex -> RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp, topEnd = 20.dp, bottomEnd = 20.dp)
                         else -> RoundedCornerShape(4.dp)
                     }
-
                     Surface(
                         checked = isSelected,
                         onCheckedChange = {
@@ -165,13 +188,12 @@ fun ThemeScreen(
                 }
             }
         }
-
         item {
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
+    }
 }
-
 @SuppressLint("ConfigurationScreenWidthHeight")
 @Composable
 private fun ThemePreviewCard(
@@ -184,14 +206,12 @@ private fun ThemePreviewCard(
     val screenHeight = configuration.screenHeightDp.toFloat()
     val screenRatio = screenWidth / screenHeight
     val context = LocalContext.current
-
     val colorScheme = schemeForSeed(
         keyColor = keyColor,
         isDark = isDark,
         isAmoled = isAmoled,
         context = context,
     )
-
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
         Surface(
             modifier = Modifier
@@ -221,7 +241,6 @@ private fun ThemePreviewCard(
                         )
                     }
                 }
-
                 BoxWithConstraints(modifier = Modifier.weight(1f)) {
                     val showInfoCard = maxHeight >= 72.dp
                     Column(
@@ -249,10 +268,8 @@ private fun ThemePreviewCard(
                     }
                 }
             }
-
             Column {
                 content()
-
                 Surface(
                     color = colorScheme.surfaceContainer,
                     modifier = Modifier.fillMaxWidth(),
@@ -276,7 +293,6 @@ private fun ThemePreviewCard(
         }
     }
 }
-
 @Composable
 private fun ColorButtonMaterial(
     color: Color,
@@ -294,7 +310,6 @@ private fun ColorButtonMaterial(
         isAmoled = isAmoled,
         context = context,
     )
-
     Surface(
         onClick = {
             view.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
@@ -319,7 +334,6 @@ private fun ColorButtonMaterial(
                     useCenter = true,
                 )
             }
-
             val scale by animateFloatAsState(targetValue = if (isSelected) 1.1f else 1.0f)
             Box(
                 modifier = Modifier.graphicsLayer {
@@ -370,7 +384,6 @@ private fun ColorButtonMaterial(
         }
     }
 }
-
 private data class ModeOption(
     val title: String,
     val mode: ThemeMode,

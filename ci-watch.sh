@@ -1,17 +1,4 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# Step-aware live viewer for ALL jobs of a workflow run.
-#
-# Tracks each job's active step. While a step runs it renders that step's log
-# lines as they appear (each unique line only ever printed once -- dedupe via
-# a seen-file). When a step completes it prints a DONE banner and moves on;
-# when a job finishes all its steps it prints that job's result. On run
-# completion prints the summary and, on failure, the compile errors.
-# Raw lines are mirrored to ci-watch.log.
-#
-# Usage:
-#   ./ci-watch.sh                      # watch the latest run of the default repo
-#   ./ci-watch.sh <run-id>             # watch a specific run
-#   ./ci-watch.sh <run-id> <repo>      # watch a specific run of another repo
 set -u
 
 REPO="${2:-berkchy/cs16-meta-patcher}"
@@ -28,12 +15,9 @@ fi
 echo "==> watching run $RUN of $REPO (all jobs, step-aware)  Ctrl-C to stop"
 printf '==> watching run %s at %s\n' "$RUN" "$(date '+%H:%M:%S')" >> "$LOG"
 
-# job -> step we currently have open
 declare -A cur_step
-# job -> 1 once we announced its "completed" result
 declare -A announced_done
 
-# ---- initial snapshot: print current state of all jobs ----
 echo "==> initial state:"
 gh api "repos/$REPO/actions/runs/$RUN/jobs" 2>/dev/null \
   --jq '.jobs[] | "    " + .name + " -> " + (.status) + (if .conclusion then " (" + .conclusion + ")" else "" end)'
@@ -43,7 +27,6 @@ while true; do
   state="$(gh run view "$RUN" --repo "$REPO" --json status,conclusion --jq '{s:.status,c:.conclusion}' 2>/dev/null)"
   status="$(jq -r '.s' <<<"$state")"
 
-  # ---- active step per job (process-sub: same shell, so arrays persist) ----
   declare -A act_step=()
   while IFS=$'\t' read -r job step; do
     [[ -n "$job" ]] && act_step["$job"]="$step"
@@ -53,7 +36,6 @@ while true; do
                     select(. != null) |
                     $j.name + "\t" + .name')
 
-  # ---- run summary for completion ----
   if [[ "$status" == "completed" ]]; then
     conclusion="$(jq -r '.c' <<<"$state")"
     echo
@@ -70,7 +52,6 @@ while true; do
         | grep -v "note:" \
         | grep -v "\^" \
         | head -n 100 || true
-      # Kotlin / Gradle errors (if any)
       gh run view "$RUN" --repo "$REPO" --log-failed 2>/dev/null \
         | grep -E "e: .*\.kt" \
         | head -n 50 || true
@@ -78,7 +59,6 @@ while true; do
     exit 0
   fi
 
-  # ---- announce newly-active steps / completed jobs (main shell) ----
   for job in "${!act_step[@]}"; do
     step="${act_step[$job]}"
     if [[ "${cur_step[$job]:-}" != "$step" ]]; then
@@ -89,7 +69,6 @@ while true; do
       unset "announced_done[$job]"
     fi
   done
-  # mark jobs that have no pending steps as finished
   while read -r job concl; do
     [[ -z "$job" ]] && continue
     if [[ -z "${act_step[$job]:-}" && "${announced_done[$job]:-}" != "1" ]]; then
@@ -100,7 +79,6 @@ while true; do
   done < <(gh api "repos/$REPO/actions/runs/$RUN/jobs" 2>/dev/null \
               --jq '.jobs[] | select(.status=="completed") | [.name, (.conclusion // "-")] | @tsv')
 
-  # ---- render each job's current active step log lines (dedupe) ----
   gh run view "$RUN" --repo "$REPO" --log 2>/dev/null \
     | tr -d '\r' \
     | while IFS=$'\t' read -r job step raw; do

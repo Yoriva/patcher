@@ -17,67 +17,46 @@ import org.json.JSONObject
 import java.io.File
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
-
-
-
-/**
- * Minimal client for the Nexora Store API. Deliberately thin: every call
- * returns a Result so the UI can show the error without guessing which
- * failure mode hit.
- */
-class StoreApi(private val baseUrl: String, private val context: android.content.Context? = null) {
-
+object StoreApiDefaults {
+    const val BASE_URL = "https://nexora-store-tawny.vercel.app"
+}
+class StoreApi(private val baseUrl: String = StoreApiDefaults.BASE_URL, private val context: android.content.Context? = null) {
     data class LibUpload(val name: String, val url: String, val size: Long)
     data class CloudinaryUpload(val url: String, val bytes: Long)
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
-
     private val json = "application/json; charset=utf-8".toMediaType()
-
     private var _token: String? = context?.let { com.pickle.patcher.data.StoreSession.token(it) }
     var token: String?
         get() = context?.let { com.pickle.patcher.data.StoreSession.token(it) } ?: _token
         set(value) { _token = value }
-
-    // ---- auth ----
-
     suspend fun register(email: String, password: String, username: String): Result<JSONObject> =
         post("/api/auth/register", JSONObject().apply {
             put("email", email); put("password", password); put("username", username)
         }.toString())
-
     suspend fun login(email: String, password: String): Result<JSONObject> =
         post("/api/auth/login", JSONObject().apply {
             put("email", email); put("password", password)
         }.toString())
-
     suspend fun logout(): Result<JSONObject> = post("/api/auth/logout", "{}")
-
     suspend fun verifyEmail(email: String, code: String): Result<JSONObject> =
         post("/api/auth/verify-email", JSONObject().apply {
             put("email", email); put("code", code)
         }.toString())
-
     suspend fun resendVerification(email: String): Result<JSONObject> =
         post("/api/auth/resend-verification", JSONObject().apply {
             put("email", email)
         }.toString())
-
     suspend fun me(): Result<JSONObject> = get("/api/auth/me", null)
-
     suspend fun updateProfile(token: String, displayName: String?, username: String?): Result<JSONObject> =
         patch("/api/auth/profile", JSONObject().apply {
             if (displayName != null) put("displayName", displayName)
             if (username != null) put("username", username)
         }.toString(), token)
-
     suspend fun uploadAvatar(token: String, file: File): Result<JSONObject> =
         multipart("/api/auth/avatar", "avatar", file, token)
-
-    // ---- items ----
-
     suspend fun listItems(page: Int = 1, userId: String? = null): Result<JSONObject> {
         val url = buildString {
             append("/api/items?page=$page&limit=20")
@@ -85,15 +64,12 @@ class StoreApi(private val baseUrl: String, private val context: android.content
         }
         return get(url, null)
     }
-
     suspend fun getItem(id: String): Result<JSONObject> = get("/api/items/$id", null)
-
     suspend fun signUpload(filename: String = "file.bin", exclude: Set<String> = emptySet(), provider: String? = null): Result<JSONObject> {
         val providerQuery = if (provider == null) "" else "&provider=${URLEncoder.encode(provider, "UTF-8")}"
         val excludeQuery = if (exclude.isEmpty()) "" else "&exclude=${URLEncoder.encode(exclude.joinToString(","), "UTF-8")}"
         return get("/api/upload/sign?filename=${URLEncoder.encode(filename, "UTF-8")}$providerQuery$excludeQuery", token)
     }
-
     private suspend fun uploadWithSign(
         file: File,
         sign: JSONObject,
@@ -178,7 +154,6 @@ class StoreApi(private val baseUrl: String, private val context: android.content
             }
         }
     }
-
     suspend fun uploadFile(file: File, onProgress: (Long, Long) -> Unit = { _, _ -> }): Result<CloudinaryUpload> = withContext(Dispatchers.IO) {
         val providerOrder = listOf("vps", "supabase", "cloudinary")
         var lastError: Exception? = null
@@ -193,10 +168,8 @@ class StoreApi(private val baseUrl: String, private val context: android.content
             if (result.isSuccess) return@withContext result
             lastError = result.exceptionOrNull() as? Exception ?: Exception("$provider upload failed")
         }
-
         Result.failure(lastError ?: Exception("All upload providers failed"))
     }
-
     suspend fun createItem(
         token: String,
         title: String,
@@ -234,7 +207,6 @@ class StoreApi(private val baseUrl: String, private val context: android.content
             .build()
         return execute(req)
     }
-
     suspend fun updateItem(
         token: String,
         id: String,
@@ -271,22 +243,18 @@ class StoreApi(private val baseUrl: String, private val context: android.content
                 put("links", arr)
             }
         }.toString(), token)
-
     private fun storagePathFromUrl(value: String): String? = runCatching {
         val path = if (value.startsWith("/files/")) value else java.net.URL(value).path
         if (!path.startsWith("/files/") || path.contains("..") || path.split('/').size != 5) return null
         path
     }.getOrNull()
-
     suspend fun deleteStorageFile(token: String, pathOrUrl: String): Result<JSONObject> {
         val path = storagePathFromUrl(pathOrUrl)
             ?: return Result.failure(Exception("Not a VPS storage path"))
         return authPost("/api/storage/delete", JSONObject().put("path", path).toString(), token)
     }
-
     suspend fun deleteItem(token: String, id: String): Result<JSONObject> =
         delete("/api/items/$id", token)
-
     suspend fun incrementLibDownload(itemId: String, libId: String): Result<Int> = withContext(Dispatchers.IO) {
         val req = Request.Builder()
             .url("$baseUrl/api/items/$itemId/libs/$libId/download")
@@ -294,38 +262,27 @@ class StoreApi(private val baseUrl: String, private val context: android.content
             .build()
         execute(req).map { it.optInt("downloads") }
     }
-
     suspend fun getComments(itemId: String): Result<JSONArray> = withContext(Dispatchers.IO) {
         get("/api/items/$itemId/comments", null).map { it.optJSONArray("data") ?: org.json.JSONArray() }
     }
-
     suspend fun postComment(token: String, itemId: String, content: String): Result<JSONObject> = withContext(Dispatchers.IO) {
         authPost("/api/items/$itemId/comments", JSONObject().put("content", content).toString(), token)
     }
-
     suspend fun toggleLike(token: String, itemId: String): Result<Pair<Boolean, Int>> = withContext(Dispatchers.IO) {
         authPost("/api/items/$itemId/like", "{}", token).map { Pair(it.optBoolean("liked"), it.optInt("likesCount")) }
     }
-
     suspend fun getUserProfile(username: String): Result<JSONObject> =
         get("/api/users/$username", null)
-
-    // ---- admin ----
-
     suspend fun adminListItems(token: String, status: String? = null): Result<JSONObject> {
         val path = if (status != null) "/api/admin/items?status=$status" else "/api/admin/items"
         return get(path, token)
     }
-
     suspend fun adminPatchItem(token: String, id: String, status: String): Result<JSONObject> =
         patch("/api/admin/items/$id", JSONObject().put("status", status).toString(), token)
-
     suspend fun adminDeleteItem(token: String, id: String): Result<JSONObject> =
         delete("/api/admin/items/$id", token)
-
     suspend fun adminListUsers(token: String): Result<JSONObject> =
         get("/api/admin/users", token)
-
     suspend fun adminPatchUser(token: String, id: String, role: String? = null, displayName: String? = null, permissions: List<String>? = null): Result<JSONObject> =
         patch("/api/admin/users/$id", JSONObject().apply {
             if (role != null) put("role", role)
@@ -336,26 +293,20 @@ class StoreApi(private val baseUrl: String, private val context: android.content
                 put("permissions", arr)
             }
         }.toString(), token)
-
     suspend fun adminDeleteUser(token: String, id: String): Result<JSONObject> =
         delete("/api/admin/users/$id", token)
-
-    // ---- helpers ----
-
     private suspend fun get(path: String, token: String?): Result<JSONObject> = withContext(Dispatchers.IO) {
         val b = Request.Builder().url("$baseUrl$path")
         val t = token ?: this@StoreApi.token
         if (t != null) b.header("Authorization", "Bearer $t")
         execute(b.get().build())
     }
-
     private suspend fun post(path: String, body: String): Result<JSONObject> = withContext(Dispatchers.IO) {
         val req = Request.Builder().url("$baseUrl$path")
             .post(body.toRequestBody(json))
             .build()
         execute(req)
     }
-
     private suspend fun patch(path: String, body: String, token: String?): Result<JSONObject> = withContext(Dispatchers.IO) {
         val b = Request.Builder().url("$baseUrl$path")
             .patch(body.toRequestBody(json))
@@ -363,7 +314,6 @@ class StoreApi(private val baseUrl: String, private val context: android.content
         if (t != null) b.header("Authorization", "Bearer $t")
         execute(b.build())
     }
-
     private suspend fun authPost(path: String, body: String, token: String?): Result<JSONObject> = withContext(Dispatchers.IO) {
         val b = Request.Builder().url("$baseUrl$path")
             .post(body.toRequestBody(json))
@@ -371,14 +321,12 @@ class StoreApi(private val baseUrl: String, private val context: android.content
         if (t != null) b.header("Authorization", "Bearer $t")
         execute(b.build())
     }
-
     private suspend fun delete(path: String, token: String?): Result<JSONObject> = withContext(Dispatchers.IO) {
         val b = Request.Builder().url("$baseUrl$path").delete()
         val t = token ?: this@StoreApi.token
         if (t != null) b.header("Authorization", "Bearer $t")
         execute(b.build())
     }
-
     private suspend fun multipart(path: String, field: String, file: File, token: String?): Result<JSONObject> = withContext(Dispatchers.IO) {
         val body = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart(field, file.name, file.asRequestBody())
@@ -388,7 +336,6 @@ class StoreApi(private val baseUrl: String, private val context: android.content
         if (t != null) b.header("Authorization", "Bearer $t")
         execute(b.build())
     }
-
     private suspend fun execute(req: Request): Result<JSONObject> = withContext(Dispatchers.IO) {
         try {
             client.newCall(req).execute().use { resp ->
@@ -411,7 +358,6 @@ class StoreApi(private val baseUrl: String, private val context: android.content
             Result.failure(e)
         }
     }
-
     private class ProgressRequestBody(
         private val file: File,
         private val contentType: String,
@@ -435,6 +381,5 @@ class StoreApi(private val baseUrl: String, private val context: android.content
             source.close()
         }
     }
-
     private fun File.asRequestBody() = okhttp3.RequestBody.create("application/octet-stream".toMediaType(), this)
 }
