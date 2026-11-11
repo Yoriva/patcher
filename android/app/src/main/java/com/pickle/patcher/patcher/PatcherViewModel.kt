@@ -587,7 +587,7 @@ private fun externalRoot(app: Application): File {
         }
         viewModelScope.launch(Dispatchers.IO) {
             _sourceDownload.value = SourceDownloadState.Fetching
-            JobProgress.begin(app, JOB_CLIENT_APK, "Client APK", "Finding the release…")
+            JobProgress.begin(app, JOB_CLIENT_APK, "Client APK", "Finding the releaseâ€¦")
             var partial: File? = null
             try {
                 val repo = CLIENT_APK_REPO
@@ -602,7 +602,7 @@ private fun externalRoot(app: Application): File {
                 partial = part
                 ReleaseRepository.downloadUrl(url, part, total) { done, size ->
                     _sourceDownload.value = SourceDownloadState.Downloading(done, size)
-                    JobProgress.progress(app, JOB_CLIENT_APK, done, size, "Downloading…")
+                    JobProgress.progress(app, JOB_CLIENT_APK, done, size, "Downloadingâ€¦")
                 }
                 if (total > 0 && part.length() != total) {
                     part.delete()
@@ -785,7 +785,7 @@ private fun externalRoot(app: Application): File {
                     scanLibs()
                     return@launch
                 }
-                JobProgress.begin(app, JOB_LIBS, "Libraries", "Downloading ${diff.toDownload.size} files…")
+                JobProgress.begin(app, JOB_LIBS, "Libraries", "Downloading ${diff.toDownload.size} filesâ€¦")
                 jobStarted = true
                 IncrementalUpdateManager.downloadChanged(
                     diff.toDownload, libsDir, _abi.value,
@@ -811,7 +811,7 @@ private fun externalRoot(app: Application): File {
                             JOB_LIBS,
                             (overall * 100).toLong().toInt().toLong().coerceIn(0, 99),
                             100L,
-                            "${asset.cleanName} · ${
+                            "${asset.cleanName} Â· ${
                                 (fileProgress * 100).toInt().coerceIn(0, 100)
                             }%",
                         )
@@ -1084,23 +1084,23 @@ private fun externalRoot(app: Application): File {
     }
     fun fetchAndInstallAddons() {
         viewModelScope.launch(Dispatchers.IO) {
-            _addons.value = AddonsState.Downloading(0f, "Resolving latest release…")
-            JobProgress.begin(app, JOB_ADDONS, "Addons", "Resolving the release…")
+            _addons.value = AddonsState.Downloading(0f, "Resolving latest releaseâ€¦")
+            JobProgress.begin(app, JOB_ADDONS, "Addons", "Resolving the releaseâ€¦")
             try {
                 val tag = "extras"
                 val zip = File(bundleProvider.cacheDir(), "amxx-addons.zip")
-                _addons.value = AddonsState.Downloading(0f, "Downloading addons…")
+                _addons.value = AddonsState.Downloading(0f, "Downloading addonsâ€¦")
                 ReleaseRepository.downloadUrl(
                     ReleaseRepository.assetUrl(repo, tag, "amxx-addons.zip"),
                     zip,
                 ) { done, total ->
                     _addons.value = AddonsState.Downloading(
                         if (total > 0) (done.toDouble() / total).toFloat().coerceIn(0f, 1f) else 0f,
-                        "Downloading addons…"
+                        "Downloading addonsâ€¦"
                     )
-                    JobProgress.progress(app, JOB_ADDONS, done, total, "Downloading…")
+                    JobProgress.progress(app, JOB_ADDONS, done, total, "Downloadingâ€¦")
                 }
-                _addons.value = AddonsState.Downloading(1f, "Extracting into ${_installPath.value.substringAfterLast("/")}…")
+                _addons.value = AddonsState.Downloading(1f, "Extracting into ${_installPath.value.substringAfterLast("/")}â€¦")
                 val target = File(_installPath.value)
                 val count = unzipInto(zip, target)
                 patchMetamodConfig(target, _abi.value)
@@ -1159,7 +1159,7 @@ private fun externalRoot(app: Application): File {
             onStatus("Game content archive already downloaded")
         } else {
             if (zip.exists()) zip.delete()
-            onStatus("Downloading game content…")
+            onStatus("Downloading game contentâ€¦")
             val tag = "extras"
             ReleaseRepository.downloadUrl(
                 ReleaseRepository.assetUrl(repo, tag, "game-assets.zip"),
@@ -1174,7 +1174,7 @@ private fun externalRoot(app: Application): File {
             onStatus("Game content already extracted")
             return zip
         }
-        onStatus("Extracting game content…")
+        onStatus("Extracting game contentâ€¦")
         gameDir.mkdirs()
         unzipInto(zip, gameDir)
         val stillMissing = missingGameAssets(gameDir)
@@ -1298,7 +1298,7 @@ private fun externalRoot(app: Application): File {
         }
         val leaf = tick.detail.substringAfterLast('/')
         return if (leaf.isNotBlank()) {
-            "${tick.step.name.lowercase()} · $leaf$progress"
+            "${tick.step.name.lowercase()} Â· $leaf$progress"
         } else {
             "${tick.step.name.lowercase()}$progress"
         }
@@ -1377,7 +1377,7 @@ private fun externalRoot(app: Application): File {
         val out = workFile("patched.apk")
         if (out.exists()) out.delete()
         viewModelScope.launch(Dispatchers.IO) {
-            JobProgress.begin(app, JOB_PATCH, "Patching", "Analyzing the source APK…")
+            JobProgress.begin(app, JOB_PATCH, "Patching", "Analyzing the source APKâ€¦")
             _patch.value = PatchUiState.Running(ApkPatcher.Step.ANALYZE, 0f)
             try {
                 val gameDir = File(_installPath.value)
@@ -1391,7 +1391,7 @@ private fun externalRoot(app: Application): File {
                             JobProgress.detail(app, JOB_PATCH, msg)
                         },
                         onProgress = { done, total ->
-                            JobProgress.progress(app, JOB_PATCH, done, total, "Downloading game content…")
+                            JobProgress.progress(app, JOB_PATCH, done, total, "Downloading game contentâ€¦")
                         },
                     )
                 }
@@ -1699,7 +1699,7 @@ private fun externalRoot(app: Application): File {
                 val notes = buildString {
                     if (ours != null) append("Installed: $ours")
                     if (localSize != null) append(" (${mb(localSize)})")
-                    append("  →  $remoteVersion")
+                    append("  â†’  $remoteVersion")
                     if (apkSize != null && apkSize > 0) append(" (${mb(apkSize)})")
                 }
                 if (versionDiffers || sizeDiffers) {
@@ -1760,95 +1760,21 @@ private fun externalRoot(app: Application): File {
     }
     private fun mb(bytes: Long): String =
         "${(bytes / 1048576.0).let { "%.1f".format(it) }} MB"
-    data class PluginLine(val text: String, val enabled: Boolean, val editable: Boolean, val isPlugin: Boolean)
-    data class PluginIniFile(val name: String, val file: File, val lines: List<PluginLine>)
-    private val _pluginInis = MutableStateFlow<List<PluginIniFile>>(emptyList())
-    val pluginInis: StateFlow<List<PluginIniFile>> = _pluginInis.asStateFlow()
-    private val _iniText = MutableStateFlow("")
-    val iniText: StateFlow<String> = _iniText.asStateFlow()
-    private val _iniDirty = MutableStateFlow(false)
-    val iniDirty: StateFlow<Boolean> = _iniDirty.asStateFlow()
-    private val _iniSavedAt = MutableStateFlow(0L)
-    val iniSavedAt: StateFlow<Long> = _iniSavedAt.asStateFlow()
-    fun openPluginIni(file: File) {
-        viewModelScope.launch(Dispatchers.IO) {
-            _iniText.value = try {
-                if (file.exists()) file.readText() else ""
-            } catch (t: Throwable) {
-                "# could not read ${file.name}\n"
-            }
-            _iniDirty.value = false
-        }
-    }
-    fun editIniText(text: String) {
-        _iniText.value = text
-        _iniDirty.value = true
-    }
-    fun savePluginIni(file: File) {
-        val text = _iniText.value
-        viewModelScope.launch(Dispatchers.IO) {
-            val ok = try {
-                file.parentFile?.mkdirs()
-                file.writeText(text)
-                true
-            } catch (_: Throwable) {
-                false
-            }
-            if (ok) {
-                _iniDirty.value = false
-                _iniSavedAt.value = System.currentTimeMillis()
-                loadPluginInis()
-            }
-        }
-    }
-    fun revertPluginIni(file: File) = openPluginIni(file)
-    fun loadPluginInis() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val configs = File(File(_installPath.value), "addons/amxmodx/configs")
-            val files = configs.listFiles { f ->
-                f.isFile && f.name.startsWith("plugins") && f.name.endsWith(".ini")
-            }?.sortedBy { it.name } ?: emptyList()
-            _pluginInis.value = files.map { f ->
-                PluginIniFile(
-                    name = f.name,
-                    file = f,
-                    lines = f.readLines().map { line ->
-                        val t = line.trim()
-                        val stripped = t.removePrefix(";").trim()
-                        val first = stripped.split(Regex("\\s+")).firstOrNull().orEmpty()
-                        if (first.endsWith(".amxx", ignoreCase = true)) {
-                            PluginLine(line, enabled = !t.startsWith(";"), editable = true, isPlugin = true)
-                        } else {
-                            PluginLine(line, enabled = true, editable = false, isPlugin = false)
-                        }
-                    }
-                )
-            }
-        }
-    }
-    fun togglePluginLine(iniName: String, index: Int) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val current = _pluginInis.value
-            val ini = current.firstOrNull { it.name == iniName } ?: return@launch
-            if (index !in ini.lines.indices) return@launch
-            val line = ini.lines[index]
-            if (!line.editable) return@launch
-            val updated = ini.lines.toMutableList()
-            updated[index] = if (line.enabled) {
-                line.copy(text = ";" + line.text, enabled = false)
-            } else {
-                line.copy(text = line.text.replaceFirst(Regex("^\\s*;"), ""), enabled = true)
-            }
-            try {
-                ini.file.writeText(updated.joinToString("\n") { it.text })
-            } catch (_: Throwable) {
-                return@launch
-            }
-            _pluginInis.value = current.map {
-                if (it.name == iniName) it.copy(lines = updated) else it
-            }
-        }
-    }
+    private val pluginIniManager = PluginIniManager(
+        app = app,
+        scope = viewModelScope,
+        installPathProvider = { _installPath.value },
+    )
+    val pluginInis: StateFlow<List<PluginIniFile>> get() = pluginIniManager.pluginInis
+    val iniText: StateFlow<String> get() = pluginIniManager.iniText
+    val iniDirty: StateFlow<Boolean> get() = pluginIniManager.iniDirty
+    val iniSavedAt: StateFlow<Long> get() = pluginIniManager.iniSavedAt
+    fun openPluginIni(file: File) = pluginIniManager.openPluginIni(file)
+    fun editIniText(text: String) = pluginIniManager.editIniText(text)
+    fun savePluginIni(file: File) = pluginIniManager.savePluginIni(file)
+    fun revertPluginIni(file: File) = pluginIniManager.revertPluginIni(file)
+    fun loadPluginInis() = pluginIniManager.loadPluginInis()
+    fun togglePluginLine(iniName: String, index: Int) = pluginIniManager.togglePluginLine(iniName, index)
     suspend fun buildLogShareText(): String = kotlinx.coroutines.withContext(Dispatchers.IO) {
         val sb = StringBuilder()
         val pm = getApplication<Application>().packageManager
