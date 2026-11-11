@@ -24,6 +24,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -134,10 +136,8 @@ fun PluginsScreen(vm: PatcherViewModel) {
     val inis by vm.pluginInis.collectAsState()
     val text by vm.iniText.collectAsState()
     val dirty by vm.iniDirty.collectAsState()
-    val savedAt by vm.iniSavedAt.collectAsState()
     var selected by remember { mutableStateOf<File?>(null) }
     var showRevertConfirm by remember { mutableStateOf(false) }
-    val pageScroll = rememberScrollState()
     val hScroll = rememberScrollState()
     val vScroll = rememberScrollState()
     LaunchedEffect(Unit) { vm.loadPluginInis() }
@@ -165,35 +165,15 @@ fun PluginsScreen(vm: PatcherViewModel) {
         platformStyle = PlatformTextStyle(includeFontPadding = false),
     )
     val gutterText = remember(text) { (1..lineCount).joinToString("\n") }
-    val saved = savedAt > 0L
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(pageScroll)
+            .verticalScroll(vScroll)
             .imePadding()
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        ScreenHeader(
-            icon = Icons.Filled.Edit,
-            title = "Plugins",
-            subtitle = file?.name
-                ?: "No plugins-*.ini found. Set the game folder on the Addons tab.",
-            status = when {
-                dirty -> "Unsaved"
-                saved -> "Saved"
-                file == null -> "No file"
-                else -> "Ready"
-            },
-            statusTone = when {
-                dirty -> Tone.Tertiary
-                saved -> Tone.Primary
-                file == null -> Tone.Error
-                else -> Tone.Neutral
-            },
-        )
         if (inis.isNotEmpty()) {
-            Spacer(Modifier.height(20.dp))
-            SectionHeader("Config file", "Choose a plugin list")
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(inis) { ini ->
                     val active = ini.file == file
@@ -220,88 +200,89 @@ fun PluginsScreen(vm: PatcherViewModel) {
                 }
             }
         }
-        Spacer(Modifier.height(20.dp))
-        if (file != null) SectionHeader("Editor", "Edit the INI in place")
-        if (file != null) {
-            Surface(
-                shape = MaterialTheme.shapes.large,
-                color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                val editorHeight = (EditorLines * EditorLineHeight.value).dp + 16.dp
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(editorHeight)
-                        .verticalScroll(vScroll)
-                        .horizontalScroll(hScroll),
-                ) {
-                    Row(Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
-                        Text(
-                            text = gutterText,
-                            style = editorStyle.copy(
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            ),
-                            softWrap = false,
-                            textAlign = TextAlign.End,
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        BasicTextField(
-                            value = text,
-                            onValueChange = vm::editIniText,
-                            textStyle = editorStyle.copy(
-                                color = MaterialTheme.colorScheme.onSurface,
-                            ),
-                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                            visualTransformation = IniHighlight(iniColors),
-                            modifier = Modifier.widthIn(min = 240.dp),
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.height(20.dp))
-            SectionHeader("Save", "Write changes to disk")
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    when {
-                        dirty -> "unsaved changes"
-                        saved -> "saved"
-                        else -> file.name
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = when {
-                        dirty -> MaterialTheme.colorScheme.tertiary
-                        saved -> MaterialTheme.colorScheme.primary
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    modifier = Modifier.weight(1f),
-                )
-                if (dirty) {
-                    SecondaryButton("Revert", onClick = { showRevertConfirm = true })
-                    Spacer(Modifier.width(8.dp))
-                }
-                PrimaryButton(
-                    text = "Save",
-                    onClick = { vm.savePluginIni(file) },
-                    enabled = dirty,
-                    icon = { Icon(Icons.Filled.Save, null, modifier = Modifier.size(16.dp)) },
-                )
-            }
-            Spacer(Modifier.height(6.dp))
+        if (file == null) {
             Text(
-                "Restart the game for changes to take effect.",
-                style = MaterialTheme.typography.bodySmall,
+                "No plugin list found. Install addons first.",
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 24.dp),
             )
+            return@Column
+        }
+        Surface(
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surfaceContainerLowest,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            val editorHeight = (EditorLines * EditorLineHeight.value).dp + 16.dp
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(editorHeight)
+                    .verticalScroll(vScroll)
+                    .horizontalScroll(hScroll),
+            ) {
+                Row(Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
+                    Text(
+                        text = gutterText,
+                        style = editorStyle.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                        softWrap = false,
+                        textAlign = TextAlign.End,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    BasicTextField(
+                        value = text,
+                        onValueChange = vm::editIniText,
+                        textStyle = editorStyle.copy(
+                            color = MaterialTheme.colorScheme.onSurface,
+                        ),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        visualTransformation = IniHighlight(iniColors),
+                        modifier = Modifier.widthIn(min = 240.dp),
+                    )
+                }
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                when {
+                    dirty -> "unsaved changes"
+                    else -> file.name
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = when {
+                    dirty -> MaterialTheme.colorScheme.tertiary
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.weight(1f),
+            )
+            if (dirty) {
+                TextButton(onClick = { showRevertConfirm = true }) {
+                    Text("Revert")
+                }
+                Spacer(Modifier.width(8.dp))
+            }
+            FilledTonalButton(
+                onClick = { vm.savePluginIni(file) },
+                enabled = dirty,
+                modifier = Modifier.height(38.dp),
+                contentPadding = PaddingValues(horizontal = 18.dp),
+            ) {
+                Icon(Icons.Filled.Save, null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Save")
+            }
         }
         if (showRevertConfirm) {
             AlertDialog(
                 onDismissRequest = { showRevertConfirm = false },
                 title = { Text("Discard changes") },
-                text = { Text("Unsaved changes to ${file?.name ?: "this file"} will be lost.") },
+                text = { Text("Unsaved changes to ${file.name} will be lost.") },
                 confirmButton = {
                     TextButton(onClick = {
-                        file?.let(vm::revertPluginIni)
+                        vm.revertPluginIni(file)
                         showRevertConfirm = false
                     }) {
                         Text("Discard", color = MaterialTheme.colorScheme.error)
