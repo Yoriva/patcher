@@ -46,34 +46,8 @@ class AddonsManager(
             it == com.pickle.patcher.patcher.PatcherViewModel.GAME_CSTRIKE || it == com.pickle.patcher.patcher.PatcherViewModel.GAME_CZERO
         } ?: com.pickle.patcher.patcher.PatcherViewModel.GAME_CSTRIKE
 
-    private val gameRootCandidates = listOf(
-        "/storage/emulated/0/.xash",
-        "/storage/emulated/0/xash",
-        "/sdcard/.xash",
-        "/sdcard/xash",
-    )
-
-    private fun isGameDirInstalled(dir: File): Boolean =
-        dir.isDirectory && (
-            File(dir, "config.cfg").isFile ||
-                File(dir, "dlls").isDirectory ||
-                File(dir, "cl_dlls").isDirectory ||
-                File(dir, "maps").isDirectory ||
-                File(dir, "valve.rc").isFile
-            )
-
-    internal fun resolveGameRoot(): String {
-        val preferred = savedGameId()
-        for (root in gameRootCandidates) {
-            if (isGameDirInstalled(File(root, preferred))) return root
-        }
-        for (root in gameRootCandidates) {
-            for (game in listOf(com.pickle.patcher.patcher.PatcherViewModel.GAME_CSTRIKE, com.pickle.patcher.patcher.PatcherViewModel.GAME_CZERO)) {
-                if (isGameDirInstalled(File(root, game))) return root
-            }
-        }
-        return "/storage/emulated/0/.xash"
-    }
+    internal fun resolveGameRoot(): String =
+        EngineProbe.resolveGameRoot(app, savedGameId())
 
     private fun gameDirFor(gameId: String): String = "${resolveGameRoot()}/$gameId"
 

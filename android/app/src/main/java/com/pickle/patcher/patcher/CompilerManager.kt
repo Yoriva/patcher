@@ -65,12 +65,7 @@ class CompilerManager(
 
     private var scriptWatchJob: Job? = null
 
-    private val gameRootCandidates = listOf(
-        "/storage/emulated/0/.xash",
-        "/storage/emulated/0/xash",
-        "/sdcard/.xash",
-        "/sdcard/xash",
-    )
+
 
     init {
         autoFindAmxxFolder(false)
@@ -109,7 +104,7 @@ class CompilerManager(
     }
 
     private fun findAmxxRoots(): List<File> =
-        gameRootCandidates.map(::File).filter { it.isDirectory }
+        EngineProbe.gameDataRootCandidates(app).map(::File).filter { it.isDirectory }
 
     private fun findAmxxFolder(sub: String): File? {
         for (gamesRoot in findAmxxRoots()) {
@@ -130,6 +125,10 @@ class CompilerManager(
         return null
     }
 
+
+    fun failCompile(message: String) {
+        _compile.value = CompileState.Failed(message)
+    }
 
     fun refreshScripts() {
         scope.launch(Dispatchers.IO) {
@@ -265,7 +264,7 @@ class CompilerManager(
         val amxxPluginsDir = File(gameDir, "addons/amxmodx/plugins")
         val scriptDirName = scriptDir.name
         val scriptIsShipped = scriptDirName == "scripting" &&
-            scriptDir.parentFile?.parentFile?.name == "amxmodx" &&
+            scriptDir.parentFile?.name == "amxmodx" &&
             gameDir.exists()
         val compiledDir = _outputRoot.value?.let { File(it) }?.takeIf { it.isDirectory }
             ?: if (scriptIsShipped) amxxPluginsDir else File(scriptDir, "compiled")

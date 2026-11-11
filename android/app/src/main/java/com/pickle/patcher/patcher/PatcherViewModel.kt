@@ -284,14 +284,13 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
             failPatch = { msg -> patchManager.failPatch(msg) },
         )
     }
-    private val _gameClientInstalled = MutableStateFlow(checkGameClientInstalled())
-    val gameClientInstalled: StateFlow<Boolean> = _gameClientInstalled.asStateFlow()
-    private fun checkGameClientInstalled(): Boolean = runCatching {
-        getApplication<Application>().packageManager.getPackageInfo(GAME_CLIENT_PACKAGE, 0)
-        true
-    }.getOrDefault(false)
-    fun refreshGameClientInstalled() {
-        _gameClientInstalled.value = checkGameClientInstalled()
+    private val _engineInstalled = MutableStateFlow(EngineProbe.isEngineInstalled(getApplication()))
+    val engineInstalled: StateFlow<Boolean> = _engineInstalled.asStateFlow()
+    private val _gameInstalled = MutableStateFlow(EngineProbe.isGameInstalled(getApplication()) && EngineProbe.gameDataPresent(getApplication()))
+    val gameInstalled: StateFlow<Boolean> = _gameInstalled.asStateFlow()
+    fun refreshGameInstalled() {
+        _engineInstalled.value = EngineProbe.isEngineInstalled(getApplication())
+        _gameInstalled.value = EngineProbe.isGameInstalled(getApplication()) && EngineProbe.gameDataPresent(getApplication())
     }
     private val bundleManager: BundleManager by lazy {
         BundleManager(
@@ -379,6 +378,47 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     fun stopScriptWatcher() = compilerManager.stopScriptWatcher()
     fun compile(source: SmaSource) = compilerManager.compile(source)
     fun compileAll(sources: List<SmaSource>) = compilerManager.compileAll(sources)
+    fun addPluginSource(uri: android.net.Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val root = compilerManager.scriptRoot.value
+            if (root == null) {
+                compilerManager.failCompile(
+                    "Plugin folder not detected yet. Install addons first, then try again.",
+                )
+                return@launch
+            }
+            val resolver = getApplication<Application>().contentResolver
+            val name = runCatching {
+                resolver.query(
+                    uri,
+                    arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                    null, null, null,
+                )?.use { c ->
+                    if (c.moveToFirst()) c.getString(c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)) else null
+                }
+            }.getOrNull()
+                ?: uri.lastPathSegment?.substringAfterLast('/')
+                ?: "plugin-${System.currentTimeMillis()}.sma"
+            if (!name.endsWith(".sma", ignoreCase = true)) {
+                compilerManager.failCompile("The picked file is not a .sma file: $name")
+                return@launch
+            }
+            val dest = File(File(root), name)
+            val copied = runCatching {
+                resolver.openInputStream(uri)?.use { input ->
+                    dest.outputStream().use { out -> input.copyTo(out) }
+                }
+            }.isSuccess
+            if (!copied) {
+                compilerManager.failCompile("Could not copy $name to $root")
+                return@launch
+            }
+            compilerManager.autoFindAmxxFolder(true)
+            compilerManager.refreshScripts()
+            val includeDir = File(File(root), "include").isDirectory()
+            compilerManager.compile(SmaSource(dest.absolutePath, name, includeDir))
+        }
+    }
     val hasCachedBundle: Boolean get() = bundleManager.hasCachedBundle
     val repo = "berkchy/nexora"
 private val externalRoot: File = externalRoot(app)

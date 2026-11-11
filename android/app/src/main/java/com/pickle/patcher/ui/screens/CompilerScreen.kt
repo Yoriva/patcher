@@ -1,6 +1,8 @@
 package com.pickle.patcher.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -57,10 +60,10 @@ import com.pickle.patcher.patcher.SmaSource
 @Composable
 fun CompilerScreen(
     vm: PatcherViewModel,
-    gameClientInstalled: Boolean = true,
+    gameInstalled: Boolean = true,
     onGoToPatch: () -> Unit = {},
 ) {
-    if (!gameClientInstalled) {
+    if (!gameInstalled) {
         LockedScreen(
             title = "Patch it first",
             description = "Compiler becomes available after the game is patched and installed. Download the source APK on the Patch screen, build the patch, install the patched client — then come back here to build your plugins.",
@@ -77,6 +80,12 @@ fun CompilerScreen(
     val selectedSources = scripts.filter { it.path in selected }
     val failures = (compile as? CompileState.Done)?.failures ?: emptyMap()
     val context = LocalContext.current
+    val pluginPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> if (uri != null) vm.addPluginSource(uri) }
+    fun pickPlugin() {
+        pluginPicker.launch(arrayOf("*/*"))
+    }
     DisposableEffect(Unit) {
         vm.startScriptWatcher()
         onDispose { vm.stopScriptWatcher() }
@@ -118,6 +127,7 @@ fun CompilerScreen(
             },
             onErrorClick = { name, message -> stampError = name to message },
             onRetry = { vm.refreshScripts() },
+            onAddPlugin = { pickPlugin() },
         )
         BuildSection(
             compile = compile,
@@ -146,6 +156,7 @@ private fun PluginsSection(
     onSelectAll: () -> Unit,
     onErrorClick: (String, String) -> Unit,
     onRetry: () -> Unit,
+    onAddPlugin: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
@@ -161,6 +172,24 @@ private fun PluginsSection(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.weight(1f),
             )
+            TextButton(
+                onClick = onAddPlugin,
+                contentPadding = PaddingValues(horizontal = 8.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Filled.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "Add",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
             if (scripts.isNotEmpty()) {
                 TextButton(
                     onClick = onSelectAll,

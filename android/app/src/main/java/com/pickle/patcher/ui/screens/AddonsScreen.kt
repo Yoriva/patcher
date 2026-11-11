@@ -52,10 +52,10 @@ import androidx.compose.material.icons.filled.Edit
 @Composable
 fun AddonsScreen(
     vm: PatcherViewModel,
-    gameClientInstalled: Boolean = true,
+    gameInstalled: Boolean = true,
     onGoToPatch: () -> Unit = {},
 ) {
-    if (!gameClientInstalled) {
+    if (!gameInstalled) {
         LockedScreen(
             title = "Patch it first",
             description = "Addons install the mod files into your game directory. That step is available after you patch and install the client on the Patch screen.",

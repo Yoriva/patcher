@@ -1,4 +1,6 @@
 package com.pickle.patcher.ui.screens
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.InstallDesktop
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RocketLaunch
@@ -57,6 +60,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -96,6 +100,7 @@ fun PatchScreen(vm: PatcherViewModel, onOpenLibraries: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         ArchitectureSection(vm)
+        GameStatusCard(vm)
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             ClientRow(vm, index = 0, total = 3)
             LibrariesRow(vm, index = 1, total = 3, onOpenLibraries = onOpenLibraries)
@@ -137,6 +142,64 @@ private fun ArchitectureSection(vm: PatcherViewModel) {
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
                 )
+            }
+        }
+    }
+}
+@Composable
+private fun GameStatusCard(vm: PatcherViewModel) {
+    val engineInstalled by vm.engineInstalled.collectAsState()
+    val gameInstalled by vm.gameInstalled.collectAsState()
+    if (gameInstalled) return
+    val context = LocalContext.current
+    val (title, subtitle, url) = when {
+        !engineInstalled -> Triple(
+            "Xash3D engine is not installed",
+            "The patched client needs the engine to launch. Download and install it, then return here.",
+            "https://github.com/FWGS/xash3d-fwgs/releases",
+        )
+        else -> Triple(
+            "Game is not installed yet",
+            "The patched client has not been installed. Build the patch on this screen, then install it.",
+            "https://github.com/berkchy/nexora/releases",
+        )
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Info,
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+            )
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f),
+                )
+            }
+            Spacer(Modifier.width(16.dp))
+            Button(
+                onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) },
+            ) {
+                Text("Install")
             }
         }
     }
@@ -303,7 +366,7 @@ private fun BuildRow(vm: PatcherViewModel, index: Int, total: Int) {
     val source by vm.source.collectAsState()
     val bundleState by vm.bundle.collectAsState()
     val abiStatus by vm.abiStatus.collectAsState()
-    val clientInstalled by vm.gameClientInstalled.collectAsState()
+    val clientInstalled by vm.gameInstalled.collectAsState()
     val target = abiStatus.firstOrNull { it.selected }
     val hasClient = source != null
     val hasBundle = target?.installed == true ||
@@ -358,7 +421,7 @@ private fun BuildRow(vm: PatcherViewModel, index: Int, total: Int) {
                         } else {
                             SmallButton("Install", Icons.Filled.InstallDesktop, filled = true) {
                                 vm.requestInstall()
-                                vm.refreshGameClientInstalled()
+                                vm.refreshGameInstalled()
                             }
                             SmallButton("Reset", Icons.Filled.Refresh) { vm.reset() }
                         }

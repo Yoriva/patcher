@@ -167,7 +167,7 @@ class MainActivity : ComponentActivity() {
             NexoraTheme(themeChoice, themeController) {
                 val vm: PatcherViewModel = viewModel()
                 LaunchedEffect(Unit) {
-                    vm.refreshGameClientInstalled()
+                    vm.refreshGameInstalled()
                     vm.autoInstallAddons()
                     vm.scanAddonsStatus()
                 }
@@ -223,7 +223,7 @@ fun PatcherApp(vm: PatcherViewModel) {
             if (event == Lifecycle.Event.ON_RESUME) {
                 storageGranted = hasStorageAccess(context)
                 notificationsGranted = hasNotificationsAccess(context)
-                vm.refreshGameClientInstalled()
+                vm.refreshGameInstalled()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -263,7 +263,7 @@ fun PatcherApp(vm: PatcherViewModel) {
             vm.consumeDownloaded()
         }
     }
-    val clientInstalled by vm.gameClientInstalled.collectAsState()
+    val clientInstalled by vm.gameInstalled.collectAsState()
     val pendingInstall by vm.pendingInstall.collectAsState()
     LaunchedEffect(pendingInstall) {
         pendingInstall?.let {
@@ -474,12 +474,12 @@ fun PatcherApp(vm: PatcherViewModel) {
                                 )
                                 1 -> CompilerScreen(
                                     vm = vm,
-                                    gameClientInstalled = clientInstalled,
+                                    gameInstalled = clientInstalled,
                                     onGoToPatch = { tabScope.launch { pagerState.animateScrollToPage(0) } },
                                 )
                                 2 -> AddonsScreen(
                                     vm = vm,
-                                    gameClientInstalled = clientInstalled,
+                                    gameInstalled = clientInstalled,
                                     onGoToPatch = { tabScope.launch { pagerState.animateScrollToPage(0) } },
                                 )
                                 else -> {
