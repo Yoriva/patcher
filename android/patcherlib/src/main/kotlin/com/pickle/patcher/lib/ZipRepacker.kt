@@ -1,5 +1,4 @@
 package com.pickle.patcher.lib
-
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
@@ -9,68 +8,31 @@ import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.zip.CRC32
 import java.util.zip.Deflater
-
-/**
- * Byte-preserving APK repacker.
- *
- * Copies every surviving entry from the source APK verbatim (stored entries as raw bytes,
- * deflated entries as their exact compressed stream), prunes entries matched by
- * [ExcludeRule], injects [Bundle] payload entries, and aligns every stored entry
- * (mirrors zipalign -f 4, with native libs aligned to 16 KB for
- * Android 15+ / 16 KB-page devices).
- *
- * Output is an unsigned but fully valid, aligned APK ready for apksig signing.
- */
 object ZipRepacker {
-
-    /**
-     * ReGameDLL (`libcs`) guard for arm64: upstream ReGameDLL bug — weapon-item slot pointers
-     * (`m_rgpPlayerItems` / `m_pActiveItem`, read from player+0x628 / +0x670..) hold tiny garbage
-     * values (e.g. `0x1`, `0x5`, `0x9`) instead of NULL, so naked `cbz` (null-only) checks pass and
-     * the code derefs `garbage + small_offset` → SIGSEGV (fault addr `0x5`/`0x9`). Each dangerous
-     * `cbz xRt, T` is patched to `tbz xRt, #32, T` (same target): real arm64 object pointers are
-     * always ≥ 4 GiB (bit 32 set), so any sub-4 GiB value is treated as no-entity and the whole
-     * deref block is skipped. The one-byte opcode change `0xB4 -> 0xB6` yields an identical-target
-     * `tbz xRt, #32` for these `cbz` encodings. 21 patch sites total:
-     * 6 × PostThink slot-entry + 1 × PostThink m_pActiveItem + 6 × UpdateClientData slot-entry
-     * + 1 × UpdateClientData m_pActiveItem + 7 × inlined drop-current-weapon (0x628-slot) blocks
-     * in RemoveAllItems / Killed / DetachTank / Disappear / StartObserver / PlayerUse /
-     * ItemPostFrame.
-     * Single byte per site: opcode byte 0xB4 -> 0xB6.
-     *
-     * The guard is applied to BOTH the base APK's libcs (kept entry) and a
-     * bundle-shipped libcs (see the bundle-entry loop). NOTE: these file offsets
-     * are tied to a specific libcs build — when libcs is rebuilt (e.g. new
-     * ReGameDLL commit / compiler), every site MUST be re-derived from the
-     * resulting .so or the fail-safe silently skips the guard.
-     */
     val LIBCS_ENTRY = "lib/arm64-v8a/libcs_android_arm64.so"
-
-    /** (instruction file-offset, expected register bits) for every `cbz` that guards a weapon pointer. */
     private val LIBCS_PATCHES = listOf(
-        0x240be4 to 20,   // PostThink slot 0 (x20)
-        0x240c74 to 20,   // slot 1
-        0x240d04 to 20,   // slot 2
-        0x240d94 to 20,   // slot 3
-        0x240e24 to 20,   // slot 4
-        0x240eb4 to 20,   // slot 5
-        0x240fc8 to 8,    // PostThink m_pActiveItem (x8)
-        0x247bf8 to 0,    // UpdateClientData slot 0 (x0)
-        0x247c10 to 0,    // slot 1
-        0x247c28 to 0,    // slot 2
-        0x247c40 to 0,    // slot 3
-        0x247c58 to 0,    // slot 4
-        0x247c70 to 0,    // slot 5
-        0x247d20 to 0,    // UpdateClientData m_pActiveItem (x0)
-        0x236a84 to 8,    // RemoveAllItems slot0 (0x628 ptr, x8) — fault addr 0x5
-        0x238500 to 8,    // Killed slot0 (0x628 ptr, x8) — fault addr 0x5
-        0x236eb0 to 8,    // DetachTank slot0 (x8)
-        0x23c240 to 8,    // Disappear slot0 (x8)
-        0x23d2d0 to 8,    // StartObserver slot0 (x8)
-        0x23d75c to 9,    // PlayerUse slot0 (x9)
-        0x241354 to 8,    // ItemPostFrame slot0 (x8)
+        0x240be4 to 20,   
+        0x240c74 to 20,   
+        0x240d04 to 20,   
+        0x240d94 to 20,   
+        0x240e24 to 20,   
+        0x240eb4 to 20,   
+        0x240fc8 to 8,    
+        0x247bf8 to 0,    
+        0x247c10 to 0,    
+        0x247c28 to 0,    
+        0x247c40 to 0,    
+        0x247c58 to 0,    
+        0x247c70 to 0,    
+        0x247d20 to 0,    
+        0x236a84 to 8,    
+        0x238500 to 8,    
+        0x236eb0 to 8,    
+        0x23c240 to 8,    
+        0x23d2d0 to 8,    
+        0x23d75c to 9,    
+        0x241354 to 8,    
     )
-
     data class Result(
         val output: File,
         val kept: List<String>,
@@ -83,7 +45,6 @@ object ZipRepacker {
         var bytesWritten: Long = 0,
         var patchedLibs: List<String> = emptyList(),
     )
-
     fun repack(
         source: File,
         output: File,
@@ -97,17 +58,13 @@ object ZipRepacker {
     ): Result {
         val src = ZipRaw.open(source) ?: throw IOException("Source APK could not be parsed")
         val srcLen = source.length()
-
         try {
-            // ---- decide keep/remove/add ----
             val removed = ArrayList<String>()
             val keptEntries = ArrayList<ZipRaw.ZipEntryInfo>()
             for ((name, entry) in src.entries) {
                 val excluded = excludable(name, exclude) || prunedByAbi(name, pruneAbiExcept)
                 if (excluded) removed.add(name) else keptEntries.add(entry)
             }
-
-            // bundle targets shadow existing kept entries
             val bundleTargets = bundle.manifest.entries.map { it.target }.toHashSet()
             val iterator = keptEntries.iterator()
             while (iterator.hasNext()) {
@@ -117,22 +74,14 @@ object ZipRepacker {
                     iterator.remove()
                 }
             }
-
-            // The caller's output directory is not always there yet (the app's
-            // external files dir only appears once something writes into it),
-            // and RandomAccessFile does not create parents: without this the
-            // patch dies with "open failed: ENOENT".
             output.parentFile?.mkdirs()
-
             val raf = RandomAccessFile(output, "rw")
             val cdEntries = ArrayList<CdRecord>()
             var alignPadBytes = 0L
             var alignedStored = 0
             var bytesWritten = 0L
-
             try {
                 raf.setLength(0)
-
                 fun writeLocalHeader(
                     name: String,
                     method: Int,
@@ -144,12 +93,6 @@ object ZipRepacker {
                     var localOffset = raf.filePointer
                     var extraLen = 0
                     if (method == 0) {
-                        // zipalign behaviour: native libs (lib/**) must be 16 KB
-                        // aligned for Android 15+ / 16 KB-page devices; everything
-                        // else just needs 4-byte alignment. Directory entries are
-                        // excluded by the .so test - they carry no payload, and
-                        // padding them to 16 KB would cost more than the whole
-                        // shell APK.
                         val unit = if (name.startsWith("lib/") && name.endsWith(".so")) 16384 else 4
                         val base = localOffset + 30 + name.length
                         val rem = (base % unit).toInt()
@@ -157,15 +100,14 @@ object ZipRepacker {
                         alignPadBytes += extraLen
                         alignedStored++
                     }
-
                     val hdr = ByteArray(30)
                     val b = ByteBuffer.wrap(hdr).order(ByteOrder.LITTLE_ENDIAN)
                     b.putInt(0x04034b50)
-                    b.putShort(20)                                   // version needed
-                    b.putShort(0)                                    // flags (no data descriptor)
+                    b.putShort(20)                                   
+                    b.putShort(0)                                    
                     b.putShort(method.toShort())
-                    b.putShort(0)                                    // mod time
-                    b.putShort(0x0821)                               // mod date (2026-08-29)
+                    b.putShort(0)                                    
+                    b.putShort(0x0821)                               
                     b.putInt(crc.toInt())
                     b.putInt(compressedSize.toInt())
                     b.putInt(uncompressedSize.toInt())
@@ -174,10 +116,8 @@ object ZipRepacker {
                     raf.write(hdr)
                     raf.write(name.toByteArray(Charsets.UTF_8))
                     if (extraLen > 0) raf.write(ByteArray(extraLen))
-
                     val dataOffset = raf.filePointer
                     raf.write(data)
-
                     cdEntries.add(
                         CdRecord(
                             name = name,
@@ -191,16 +131,6 @@ object ZipRepacker {
                     )
                     bytesWritten += 30 + name.length + extraLen + data.size
                 }
-
-                // Directory entries, created for any folder the bundle is about
-                // to write into that the source does not already have.
-                //
-                // The shell client APK ships no lib/ at all - the client and the
-                // menu are injected here - so demanding a lib/<abi>/ directory
-                // from the source is asking for something this pass is about to
-                // create itself. Android groups native libraries by their
-                // directory entry when it installs them, so it has to be written
-                // rather than left implicit.
                 val existingDirs = HashSet<String>()
                 for (name in src.entries.keys) {
                     if (name.endsWith("/")) existingDirs.add(name)
@@ -208,7 +138,6 @@ object ZipRepacker {
                 fun parentsOf(path: String): List<String> {
                     val out = ArrayList<String>()
                     var acc = ""
-                    // dropLast(1): the last segment is the file itself.
                     for (p in path.split('/').dropLast(1)) {
                         acc += "$p/"
                         out.add(acc)
@@ -232,8 +161,6 @@ object ZipRepacker {
                         data = ByteArray(0),
                     )
                 }
-
-                // copy preserved entries (raw bytes, method as-is)
                 val total = keptEntries.size + bundle.manifest.entries.size
                 var done = 0
                 val patchedLibs = ArrayList<String>()
@@ -268,11 +195,9 @@ object ZipRepacker {
                             continue
                         }
                     }
-
                     val raw = ByteArray(entry.compressedSize.toInt())
                     src.file.seek(entry.dataOffset)
                     src.file.readFully(raw)
-
                     writeLocalHeader(
                         name = entry.name,
                         method = entry.method,
@@ -284,8 +209,6 @@ object ZipRepacker {
                     done++
                     progress?.invoke(bytesWritten, srcLen)
                 }
-
-                // add bundle entries
                 val added = ArrayList<String>()
                 val bundleItems = bundle.manifest.entries.mapNotNull { be ->
                     bundle.resolveEntry(be)?.let { be to it }
@@ -293,9 +216,6 @@ object ZipRepacker {
                 val preparedBundle = parallelMap(bundleItems, workers) { (be, raw) ->
                     var content = raw
                     var patched = false
-
-                    // a bundled libcs replaces the base entry (removed above); it still
-                    // needs the weapon-slot guard, so apply it here too (fail-safe).
                     if (be.target == LIBCS_ENTRY) {
                         val guarded = patchLibCs(content)
                         if (guarded != null) {
@@ -303,7 +223,6 @@ object ZipRepacker {
                             patched = true
                         }
                     }
-
                     val stored = be.method == BundleManifest.Compression.STORED
                     PreparedBundleEntry(
                         target = be.target,
@@ -313,13 +232,11 @@ object ZipRepacker {
                         patched = patched,
                     )
                 }
-
                 for (entry in preparedBundle) {
                     onEntry?.invoke(done, total, entry.target, "add")
                     added.add(entry.target)
                     if (entry.patched)
                         patchedLibs.add(entry.target)
-
                     if (entry.stored) {
                         val crc = crc32(entry.content)
                         writeLocalHeader(entry.target, 0, entry.content.size.toLong(), entry.content.size.toLong(), crc, entry.content)
@@ -330,25 +247,11 @@ object ZipRepacker {
                     done++
                     progress?.invoke(bytesWritten, srcLen)
                 }
-
-                // ---- game content ----
-                //
-                // The shell client APK is ~2 MB and carries no assets at all;
-                // the content lives in the release as game-assets.zip. It has
-                // to be written back *into* the package rather than left in the
-                // game directory, because XashActivity resolves it with
-                // getResourcesForApplication(getCallingPackage()) - the engine
-                // reads sound, gfx, the touch layout and the bot databases out
-                // of the client package's AssetManager, not off the filesystem.
-                // A patched APK without them starts and then plays silently
-                // with a blank menu.
                 val addedAssets = ArrayList<String>()
                 if (extraAssetsZip != null && extraAssetsZip.isFile) {
                     val assetNames = java.util.zip.ZipFile(extraAssetsZip).use { zf ->
                         zf.entries().asSequence()
                             .filter { !it.isDirectory && it.name.isNotBlank() }
-                            // Defensive: a zip that escapes assets/ would let a
-                            // crafted archive overwrite the manifest or a lib.
                             .filter { !it.name.contains("..") && !it.name.startsWith("/") }
                             .map { it.name }
                             .filter { "assets/${it}" !in bundleTargets }
@@ -375,9 +278,6 @@ object ZipRepacker {
                         }
                         for (asset in preparedAssets) {
                             onEntry?.invoke(done, done + assetNames.size, asset.target, "asset")
-                            // Assets are deflated, not stored: aapt already
-                            // compresses them that way in a normal build, and
-                            // the 26 MB tree would otherwise land uncompressed.
                             writeLocalHeader(
                                 name = asset.target,
                                 method = 8,
@@ -393,17 +293,15 @@ object ZipRepacker {
                         assetIndex = chunkEnd
                     }
                 }
-
-                // ---- central directory ----
                 val cdOffset = raf.filePointer
                 run {
                     val cb = java.io.ByteArrayOutputStream()
                     for (rec in cdEntries) {
                         val b = ByteBuffer.allocate(46).order(ByteOrder.LITTLE_ENDIAN)
                         b.putInt(0x02014b50)
-                        b.putShort(20)                     // version made by
-                        b.putShort(20)                     // version needed
-                        b.putShort(0)                      // flags
+                        b.putShort(20)                     
+                        b.putShort(20)                     
+                        b.putShort(0)                      
                         b.putShort(rec.method.toShort())
                         b.putShort(0)
                         b.putShort(0x0821)
@@ -411,19 +309,17 @@ object ZipRepacker {
                         b.putInt(rec.compressedSize.toInt())
                         b.putInt(rec.uncompressedSize.toInt())
                         b.putShort(rec.name.length.toShort())
-                        b.putShort(0)                      // extra len
-                        b.putShort(0)                      // comment len
-                        b.putShort(0)                      // disk
-                        b.putShort(0)                      // internal attrs
-                        b.putInt(0)                        // external attrs
+                        b.putShort(0)                      
+                        b.putShort(0)                      
+                        b.putShort(0)                      
+                        b.putShort(0)                      
+                        b.putInt(0)                        
                         b.putInt(rec.localOffset.toInt())
                         cb.write(b.array())
                         cb.write(rec.name.toByteArray(Charsets.UTF_8))
                     }
                     raf.write(cb.toByteArray())
                 }
-
-                // ---- EOCD ----
                 val cdSize = raf.filePointer - cdOffset
                 run {
                     val b = ByteBuffer.allocate(22).order(ByteOrder.LITTLE_ENDIAN)
@@ -437,9 +333,7 @@ object ZipRepacker {
                     b.putShort(0)
                     raf.write(b.array())
                 }
-
                 raf.fd.sync()
-
                 return Result(
                     output = output,
                     kept = keptEntries.map { it.name },
@@ -459,50 +353,30 @@ object ZipRepacker {
             src.close()
         }
     }
-
-    /**
-     * Apply the ReGameDLL weapon-slot guard to [content] (the decompressed libcs bytes).
-     * Returns the patched bytes, or null when at least one expected instruction is absent
-     * (different build / already fixed) so we leave it entirely untouched.
-     */
     private fun patchLibCs(content: ByteArray): ByteArray? {
         val out = content.copyOf()
         for ((off, rt) in LIBCS_PATCHES) {
             if (out.size < off + 4) return null
-            // verify cbz encoding: opcode high nibble 0xB4, register bits match
             val high = out[off + 3].toInt() and 0xFF
             val reg = out[off].toInt() and 0x1F
             if (high != 0xB4 || reg != rt) return null
-            out[off + 3] = 0xB6.toByte()   // cbz -> tbz #32
+            out[off + 3] = 0xB6.toByte()   
         }
         return out
     }
-
     private fun excludable(name: String, exclude: ExcludeRule): Boolean {
-        // do not prune the signature block / meta unless explicitly requested; default prune keeps
-        // the old amxx libs out but must NOT delete the signing-dir of the ORIGINAL apk blindly.
         for (p in exclude.exact) if (name == p) return true
-        // exact rules for prefixes
         for (p in exclude.prefixes) {
             if (name.startsWith(p)) return true
         }
         return false
     }
-
-    /**
-     * ABIs we do not ship are dropped entirely so the patched APK only contains the
-     * native libs for the target ABI (e.g. "arm64-v8a"). This keeps Xash from loading
-     * a wrong-ABI engine/gamedll lib that would otherwise shadow the injected metamod.
-     */
     private fun prunedByAbi(name: String, keepAbi: String?): Boolean {
         if (keepAbi == null) return false
         if (!name.startsWith("lib/")) return false
-        // under lib/<abi>/ if the abi matches, keep; every other lib entry (other abi
-        // dirs, or a stray lib at the root) is pruned.
         if (name.startsWith("lib/$keepAbi/")) return false
         return true
     }
-
     private fun deflate(data: ByteArray): ByteArray {
         val out = java.io.ByteArrayOutputStream()
         val def = Deflater(9, true)
@@ -519,7 +393,6 @@ object ZipRepacker {
         }
         return out.toByteArray()
     }
-
     private fun <T, R> parallelMap(
         items: List<T>,
         workers: Int,
@@ -534,13 +407,11 @@ object ZipRepacker {
             pool.shutdown()
         }
     }
-
     private fun crc32(data: ByteArray): Long {
         val c = CRC32()
         c.update(data)
         return c.value
     }
-
     private data class PreparedBundleEntry(
         val target: String,
         val content: ByteArray,
@@ -548,13 +419,11 @@ object ZipRepacker {
         val stored: Boolean,
         val patched: Boolean,
     )
-
     private data class PreparedAssetEntry(
         val target: String,
         val content: ByteArray,
         val compressed: ByteArray,
     )
-
     private data class CdRecord(
         val name: String,
         val method: Int,

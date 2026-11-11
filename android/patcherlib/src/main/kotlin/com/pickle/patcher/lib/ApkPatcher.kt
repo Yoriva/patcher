@@ -1,20 +1,7 @@
 package com.pickle.patcher.lib
-
 import java.io.File
-
-/**
- * End-to-end patch: analyze source -> repack (inject + align) -> sign (V1/V2) -> verify.
- * Produces a structured report the UI can animate and the user can read.
- */
 object ApkPatcher {
-
     enum class Step { ANALYZE, INJECT, ALIGN, SIGN, VERIFY }
-
-    /**
-     * One progress tick: which stage, how far in total, and the concrete item
-     * being worked on. The UI renders the counters and the live console from
-     * this, so it never has to guess a label from a float.
-     */
     data class Progress(
         val step: Step,
         val fraction: Float,
@@ -23,7 +10,6 @@ object ApkPatcher {
         val total: Int = 0,
         val kind: String = "",
     )
-
     data class PatchRequest(
         val sourceApk: File,
         val outputApk: File,
@@ -33,17 +19,8 @@ object ApkPatcher {
         val minSdk: Int = 21,
         val keepAbi: String? = null,
         val workers: Int = 1,
-        /**
-         * game-assets.zip, written into assets/ of the output.
-         *
-         * The shell source APK has an empty assets/, and the engine reads the
-         * game content from the *client package* - XashActivity hands it a
-         * getCallingPackage() AssetManager - so the content has to end up inside
-         * the APK, not merely next to it in the game directory.
-         */
         val assetsZip: File? = null,
     )
-
     data class PatchReport(
         val sourceName: String,
         val sourceSizeBytes: Long,
@@ -67,20 +44,17 @@ object ApkPatcher {
         val sourceSizeMb: Double get() = sourceSizeBytes / 1048576.0
         val outputSizeMb: Double get() = signedSizeBytes / 1048576.0
     }
-
     fun patch(
         request: PatchRequest,
         onProgress: (Progress) -> Unit = {},
     ): PatchReport {
         val t0 = System.nanoTime()
-
         onProgress(Progress(Step.ANALYZE, 0.02f, "reading source archive"))
         val src = ZipRaw.open(request.sourceApk)
             ?: throw IllegalArgumentException("Source APK could not be parsed: ${request.sourceApk}")
         val sourceEntries = src.entries.size
         src.close()
         val arscBefore = ZipRaw.open(request.sourceApk)?.entries?.get("resources.arsc")
-
         onProgress(Progress(Step.INJECT, 0.1f, "writing entries"))
         var progressLast = 0L
         val repack = ZipRepacker.repack(
@@ -100,7 +74,6 @@ object ApkPatcher {
                 onProgress(Progress(Step.INJECT, p.coerceIn(0.1f, 0.6f), name, index + 1, total, kind))
             },
         )
-
         onProgress(Progress(Step.ALIGN, 0.62f, "aligning stored entries"))
         val arsc = ZipRaw.open(request.outputApk)?.entries?.get("resources.arsc")
         val arscStored = arsc != null && arsc.method == 0
@@ -111,28 +84,20 @@ object ApkPatcher {
         val modules = repack.added.filter { it.startsWith(abiPrefix) && it.endsWith(modSuffix) }
             .plus(request.bundle.manifest.entries.map { it.target }.filter { it.startsWith(abiPrefix) && it.endsWith(modSuffix) })
             .distinct()
-
-        // sanity: align ALL stored entries of output
         val out = ZipRaw.open(request.outputApk)
         val misaligned = out?.entries?.values?.filter { it.method == 0 && (it.dataOffset % 4) != 0L }?.map { it.name } ?: emptyList()
         if (misaligned.isNotEmpty()) {
             throw IllegalArgumentException("Output has misaligned stored entries: $misaligned")
         }
         out?.close()
-
         onProgress(Progress(Step.SIGN, 0.68f, "signing v1 + v2"))
-        val tmpSigned = File("${request.outputApk.path}.tmp")
-        val outcome = ApkSignerTool.sign(request.outputApk, tmpSigned, request.keystore, request.minSdk)
-        if (request.outputApk.exists()) request.outputApk.delete()
-        if (!tmpSigned.renameTo(request.outputApk)) {
-            tmpSigned.copyTo(request.outputApk, overwrite = true)
-            tmpSigned.delete()
-        }
-
+        val tmpIn = java.io.File.createTempFile("nexora-unsigned", ".apk")
+        tmpIn.deleteOnExit()
+        java.nio.file.Files.copy(request.outputApk.toPath(), tmpIn.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        val outcome = ApkSignerTool.sign(tmpIn, request.outputApk, request.keystore, request.minSdk)
         onProgress(Progress(Step.VERIFY, 0.9f, "verifying signature"))
         val seconds = (System.nanoTime() - t0) / 1_000_000_000.0
         onProgress(Progress(Step.VERIFY, 1.0f, "verified"))
-
         return PatchReport(
             sourceName = request.sourceApk.name,
             sourceSizeBytes = request.sourceApk.length(),

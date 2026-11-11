@@ -1,9 +1,6 @@
 package com.pickle.patcher.lib
-
 import java.io.File
-
 object ZipAnalyzer {
-
     data class ArchiveInfo(
         val name: String,
         val sizeBytes: Long,
@@ -14,9 +11,7 @@ object ZipAnalyzer {
         val libCount: Int,
         val misalignedStored: List<String>,
     )
-
     private val KNOWN_ABIS = listOf("arm64-v8a", "armeabi-v7a")
-
     fun analyze(file: File): ArchiveInfo {
         val zip = ZipRaw.open(file)
             ?: return ArchiveInfo(file.name, file.length(), 0, false, null, emptyList(), 0, emptyList())
@@ -24,14 +19,12 @@ object ZipAnalyzer {
             val arsc = zip.entries["resources.arsc"]
             val libs = zip.entries.keys.filter { it.startsWith("lib/") && it.endsWith(".so") }
             val detected = mutableSetOf<String>()
-
             for (lib in libs) {
                 when {
                     lib.startsWith("lib/arm64-v8a/") || lib.startsWith("lib/arm64/") -> detected.add("arm64-v8a")
                     lib.startsWith("lib/armeabi-v7a/") || lib.startsWith("lib/armeabi/") -> detected.add("armeabi-v7a")
                 }
             }
-
             if (detected.isEmpty() && libs.isNotEmpty()) {
                 for (libPath in libs) {
                     val entry = zip.entries[libPath] ?: continue
@@ -50,7 +43,6 @@ object ZipAnalyzer {
                     }
                 }
             }
-
             val abis = KNOWN_ABIS.filter { it in detected }
             val abi = abis.firstOrNull()
             val misaligned = zip.entries.values
@@ -70,7 +62,6 @@ object ZipAnalyzer {
             zip.close()
         }
     }
-
     fun entryState(file: File, path: String): Triple<Boolean, Int, Long> {
         val zip = ZipRaw.open(file) ?: return Triple(false, -1, -1)
         try {
