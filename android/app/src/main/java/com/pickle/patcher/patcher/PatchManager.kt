@@ -7,14 +7,9 @@ import com.pickle.patcher.data.BundleProvider
 import com.pickle.patcher.data.ReleaseRepository
 import com.pickle.patcher.jobs.JobProgress
 import com.pickle.patcher.lib.ApkPatcher
-import com.pickle.patcher.lib.ApkSignerTool
 import com.pickle.patcher.lib.Bundle
 import com.pickle.patcher.lib.BundleManifest
 import com.pickle.patcher.lib.SigningKeystore
-import com.pickle.patcher.lib.ZipRaw
-import com.pickle.patcher.patcher.PatcherViewModel.PatchHistoryEntry
-import com.pickle.patcher.patcher.PatcherViewModel.PatchSummary
-import com.pickle.patcher.patcher.PatcherViewModel.PatchCheck
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -60,12 +55,6 @@ class PatchManager(
 
     private val _patchLog = MutableStateFlow<List<String>>(emptyList())
     val patchLog: StateFlow<List<String>> = _patchLog.asStateFlow()
-
-    private val _patchHistory = MutableStateFlow<List<PatchHistoryEntry>>(emptyList())
-    val patchHistory: StateFlow<List<PatchHistoryEntry>> = _patchHistory.asStateFlow()
-
-    private val _patchCheck = MutableStateFlow<PatchCheck>(PatchCheck.Idle)
-    val patchCheck: StateFlow<PatchCheck> = _patchCheck.asStateFlow()
 
     private val _patch = MutableStateFlow<PatchUiState>(PatchUiState.Idle)
     val patch: StateFlow<PatchUiState> = _patch.asStateFlow()
@@ -272,23 +261,6 @@ class PatchManager(
         return mapOf("libs" to libs.toString(), "entries" to entries)
     }
 
-    fun confirmReplaceAndPatch(selectedComponentKeys: Set<String>? = null) {
-        val old = _replacePrompt.value
-        _replacePrompt.value = null
-        if (old != null && old.exists() && !old.delete()) {
-            _patch.value = PatchUiState.Failed("Could not delete ${old.name}")
-            return
-        }
-        startPatch(selectedComponentKeys)
-    }
-
-    fun dismissReplacePrompt() {
-        _replacePrompt.value = null
-    }
-
-    private val _replacePrompt = MutableStateFlow<File?>(null)
-    val replacePrompt: StateFlow<File?> = _replacePrompt.asStateFlow()
-
     fun startPatch(selectedComponentKeys: Set<String>? = null) {
         val src = sourceProvider() ?: return
         val b = bundleManager.loadedBundle ?: return
@@ -393,7 +365,6 @@ class PatchManager(
                         emptyList()
                     }
                 _patch.value = PatchUiState.Done(report, finished)
-                persistPatchRun(selAbi, report, finished)
                 JobProgress.finish(
                     app,
                     com.pickle.patcher.patcher.PatcherViewModel.JOB_PATCH,
@@ -406,7 +377,6 @@ class PatchManager(
                 }
             } catch (t: Throwable) {
                 _patch.value = PatchUiState.Failed(t.message ?: "Unknown error")
-                writePatchLog(selAbi, null, _patchLog.value, t.message ?: "Unknown error")
                 JobProgress.finish(app, com.pickle.patcher.patcher.PatcherViewModel.JOB_PATCH, t.message ?: "Patch failed", ok = false)
                 installAfterPatch = false
             }
@@ -414,26 +384,6 @@ class PatchManager(
     }
 
     fun outputApk(): File? = lastReport?.let { workFile("patched.apk") }
-
-    fun installedClientPackages(): List<String> {
-        val pm = app.packageManager
-        return runCatching {
-            pm.getInstalledPackages(0)
-                .map { it.packageName }
-                .filter { it != app.packageName && isClientPackage(it) }
-                .sorted()
-        }.getOrElse { emptyList() }
-    }
-
-    private fun isClientPackage(name: String): Boolean =
-        name.contains("cs16client", ignoreCase = true) || name.contains("xash", ignoreCase = true)
-
-    private val _uninstallPrompt = MutableStateFlow<List<String>>(emptyList())
-    val uninstallPrompt: StateFlow<List<String>> = _uninstallPrompt.asStateFlow()
-
-    fun dismissUninstallPrompt() {
-        _uninstallPrompt.value = emptyList()
-    }
 
     private val _pendingInstall = MutableStateFlow<Intent?>(null)
     val pendingInstall: StateFlow<Intent?> = _pendingInstall.asStateFlow()
@@ -462,7 +412,7 @@ class PatchManager(
                     .putExtra(Intent.EXTRA_RETURN_RESULT, true)
             return
         }
-        _pendingInstall.value = installIntent()
+        _pendingInstall.value = outputApk()?.let { installIntentFor(it) }
     }
 
     fun onUninstallFinished() {
@@ -474,31 +424,6 @@ class PatchManager(
             installAfterPatch = true
             startPatch()
         }
-    }
-
-    fun confirmUninstallAndPatch() {
-        val packages = _uninstallPrompt.value
-        _uninstallPrompt.value = emptyList()
-        for (pkg in packages) {
-            runCatching {
-                app.startActivity(
-                    Intent(Intent.ACTION_UNINSTALL_PACKAGE, android.net.Uri.parse("package:$pkg"))
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-            }
-        }
-        val out = outputApk()
-        if (out != null && out.exists() && lastReport != null) {
-            _pendingInstall.value = installIntentFor(out)
-            return
-        }
-        installAfterPatch = true
-        startPatch()
-    }
-
-    fun installIntent(): Intent? {
-        val out = outputApk() ?: return null
-        return installIntentFor(out)
     }
 
     fun installIntentFor(apk: File): Intent? {
@@ -519,107 +444,6 @@ class PatchManager(
         _patch.value = PatchUiState.Idle
         lastReport = null
         _patchLog.value = emptyList()
-        _patchCheck.value = PatchCheck.Idle
     }
 
-    private fun persistPatchRun(abi: String, report: ApkPatcher.PatchReport, log: List<String>) {
-        val entry = PatchHistoryEntry(
-            time = System.currentTimeMillis(),
-            abi = abi,
-            source = report.sourceName,
-            entries = report.addedEntries.size,
-            libs = report.moduleLibs.size,
-            verified = report.verification?.verified == true,
-            ok = report.success,
-        )
-        val history = (listOf(entry) + _patchHistory.value).take(20)
-        _patchHistory.value = history
-        try {
-            val file = File(installPathProvider(), "patch-history.json")
-            file.writeText(history.joinToString(",", prefix = "[", postfix = "]") { h ->
-                "\"{\"time\":${h.time},\"abi\":\"${h.abi}\",\"source\":\"${h.source}\",\"entries\":${h.entries},\"libs\":${h.libs},\"verified\":${h.verified},\"ok\":${h.ok}}"
-            })
-        } catch (_: Throwable) {
-        }
-        writePatchLog(abi, report, log, null)
-    }
-
-    private fun writePatchLog(
-        abi: String,
-        report: ApkPatcher.PatchReport?,
-        log: List<String>,
-        error: String?,
-    ) {
-        try {
-            val dir = File(installPathProvider())
-            if (!dir.exists()) return
-            val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
-                .format(java.util.Date())
-            val head = buildString {
-                append("---- patch ").append(stamp).append(" abi=").append(abi).append(" ----\n")
-                if (report != null) {
-                    append("source=").append(report.sourceName)
-                        .append(" entries=").append(report.addedEntries.size)
-                        .append(" libs=").append(report.moduleLibs.size)
-                        .append(" verified=").append(report.verification?.verified).append('\n')
-                }
-                if (error != null) append("error=").append(error).append('\n')
-            }
-            File(dir, "patch.log").appendText(head + log.joinToString("\n") + "\n")
-        } catch (_: Throwable) {
-        }
-    }
-
-    fun patchSummary(): PatchSummary? {
-        val b = bundleManager.loadedBundle ?: return null
-        val src = sourceProvider() ?: return null
-        val abi = abiProvider()
-        val payload = b.files.entries
-            .filter { it.key.contains(abi) || it.key.startsWith("addons/") }
-            .sumOf { it.value.size.toLong() }
-        return PatchSummary(
-            abi = abi,
-            source = src.name,
-            sourceSize = src.length(),
-            components = b.manifest.entries.groupBy { bundleManager.componentKeyFor(it.target) }.size,
-            entries = b.manifest.entries.size,
-            payloadSize = payload,
-        )
-    }
-
-    fun verifyPatchedApk() {
-        val out = outputApk() ?: return
-        if (!out.exists()) {
-            _patchCheck.value = PatchCheck.Failed("patched.apk is missing")
-            return
-        }
-        _patchCheck.value = PatchCheck.Running
-        scope.launch(Dispatchers.IO) {
-            try {
-                val abi = abiProvider()
-                val v = ApkSignerTool.verify(out)
-                val zip = ZipRaw.open(out)
-                val prefix = "lib/$abi/"
-                val present = zip?.entries?.keys?.count { it.startsWith(prefix) && it.endsWith(".so") } ?: 0
-                zip?.close()
-                val expected = bundleManager.loadedBundle?.manifest?.entries?.count { it.target.startsWith(prefix) } ?: present
-                val engine = File(installPathProvider(), "engine.log")
-                val commit = if (engine.exists()) {
-                    engine.useLines { seq ->
-                        seq.firstOrNull { it.contains("Commit hash") }?.trim()?.removePrefix("Commit hash  :")?.trim().orEmpty()
-                    }
-                } else ""
-                _patchCheck.value = PatchCheck.Result(
-                    signatureOk = v.verified,
-                    usedV1 = v.usedV1,
-                    usedV2 = v.usedV2,
-                    expectedLibs = expected,
-                    presentLibs = present,
-                    engineCommit = commit,
-                )
-            } catch (t: Throwable) {
-                _patchCheck.value = PatchCheck.Failed(t.message ?: "verification failed")
-            }
-        }
-    }
 }

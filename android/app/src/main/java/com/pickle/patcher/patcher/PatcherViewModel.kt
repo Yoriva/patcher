@@ -231,36 +231,6 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         val installed: Boolean get() = hasBundle && libCount > 0
     }
-    data class PatchHistoryEntry(
-        val time: Long,
-        val abi: String,
-        val source: String,
-        val entries: Int,
-        val libs: Int,
-        val verified: Boolean,
-        val ok: Boolean,
-    )
-    data class PatchSummary(
-        val abi: String,
-        val source: String,
-        val sourceSize: Long,
-        val components: Int,
-        val entries: Int,
-        val payloadSize: Long,
-    )
-    sealed interface PatchCheck {
-        data object Idle : PatchCheck
-        data object Running : PatchCheck
-        data class Result(
-            val signatureOk: Boolean,
-            val usedV1: Boolean,
-            val usedV2: Boolean,
-            val expectedLibs: Int,
-            val presentLibs: Int,
-            val engineCommit: String,
-        ) : PatchCheck
-        data class Failed(val message: String) : PatchCheck
-    }
     val bundleVersion: StateFlow<String> get() = bundleManager.bundleVersion
     private val _updateAvailable = MutableStateFlow(false)
     val updateAvailable: StateFlow<Boolean> = _updateAvailable.asStateFlow()
@@ -375,8 +345,6 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     fun setPatchWorkers(count: Int) = patchManager.setPatchWorkers(count)
     val patch: StateFlow<PatchUiState> get() = patchManager.patch
     val patchLog: StateFlow<List<String>> get() = patchManager.patchLog
-    val patchHistory: StateFlow<List<PatchHistoryEntry>> get() = patchManager.patchHistory
-    val patchCheck: StateFlow<PatchCheck> get() = patchManager.patchCheck
         private val compilerManager = CompilerManager(
         app = app,
         bundleProvider = bundleProvider,
@@ -449,7 +417,6 @@ private fun externalRoot(app: Application): File {
     private fun cachedClientApk(): File? = sourceManager.cachedClientApk()
     fun refreshSourceApkStatus() = sourceManager.refreshSourceApkStatus()
     fun downloadSourceApk() = sourceManager.downloadSourceApk()
-    fun clearSourceDownloadState() = sourceManager.clearSourceDownloadState()
     fun useCachedBundle() = bundleManager.useCachedBundle()
     fun useLoadedBundle() = bundleManager.useLoadedBundle()
     fun scanLibs(autoLoad: Boolean = false, checkRemote: Boolean = false) = bundleManager.scanLibs(autoLoad, checkRemote)
@@ -486,26 +453,15 @@ private fun externalRoot(app: Application): File {
     private fun unzipInto(zip: File, target: File): Int = patchManager.unzipInto(zip, target)
     private fun patchMetamodConfig(gameDir: File, abi: String) = patchManager.patchMetamodConfig(gameDir, abi)
     private fun applyGamedataAbiPolicy(gameDir: File, abi: String): Boolean = patchManager.applyGamedataAbiPolicy(gameDir, abi)
-    val replacePrompt: StateFlow<File?> get() = patchManager.replacePrompt
-    val uninstallPrompt: StateFlow<List<String>> get() = patchManager.uninstallPrompt
     val pendingInstall: StateFlow<Intent?> get() = patchManager.pendingInstall
     val pendingUninstall: StateFlow<Intent?> get() = patchManager.pendingUninstall
-    fun confirmReplaceAndPatch(selectedComponentKeys: Set<String>? = null) = patchManager.confirmReplaceAndPatch(selectedComponentKeys)
-    fun dismissReplacePrompt() = patchManager.dismissReplacePrompt()
-    fun dismissUninstallPrompt() = patchManager.dismissUninstallPrompt()
     fun consumePendingInstall() = patchManager.consumePendingInstall()
     fun consumePendingUninstall() = patchManager.consumePendingUninstall()
     fun startPatch(selectedComponentKeys: Set<String>? = null) = patchManager.startPatch(selectedComponentKeys)
-    fun outputApk(): File? = patchManager.outputApk()
-    fun installedClientPackages(): List<String> = patchManager.installedClientPackages()
     fun requestInstall() = patchManager.requestInstall()
     fun onUninstallFinished() = patchManager.onUninstallFinished()
-    fun confirmUninstallAndPatch() = patchManager.confirmUninstallAndPatch()
-    fun installIntent(): Intent? = patchManager.installIntent()
     fun installIntentFor(apk: File): Intent? = patchManager.installIntentFor(apk)
     fun reset() = patchManager.reset()
-    fun patchSummary(): PatchSummary? = patchManager.patchSummary()
-    fun verifyPatchedApk() = patchManager.verifyPatchedApk()
     val appUpdate: StateFlow<AppUpdate> get() = updateManager.appUpdate
     fun checkAppUpdate() = updateManager.checkAppUpdate()
     fun downloadAppUpdate() = updateManager.downloadAppUpdate()

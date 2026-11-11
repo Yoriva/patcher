@@ -110,16 +110,16 @@ class SourceManager(
             val remote = tag.let {
                 ReleaseRepository.probe(ReleaseRepository.assetUrl(com.pickle.patcher.patcher.PatcherViewModel.CLIENT_APK_REPO, it, com.pickle.patcher.patcher.PatcherViewModel.CLIENT_APK_ASSET))
             }
-            val recorded = cached.let { readSourceStamp(it) }
-            val problem = cached.let { apkProblem(it) }
-            val outdated = if (cached != null && remote != null) {
+            val recorded = readSourceStamp(cached)
+            val problem = apkProblem(cached)
+            val outdated = if (remote != null) {
                 outdatedReasons(cached, remote, recorded)
             } else {
                 emptyList()
             }
             _sourceDownload.value = when {
                 problem != null -> SourceDownloadState.Corrupt(com.pickle.patcher.patcher.PatcherViewModel.CLIENT_APK_ASSET, problem)
-                outdated.isNotEmpty() && cached != null -> SourceDownloadState.Outdated(
+                outdated.isNotEmpty() -> SourceDownloadState.Outdated(
                     com.pickle.patcher.patcher.PatcherViewModel.CLIENT_APK_ASSET,
                     cached.length(),
                     remote?.size ?: 0L,
@@ -128,7 +128,6 @@ class SourceManager(
                 else -> SourceDownloadState.Done(com.pickle.patcher.patcher.PatcherViewModel.CLIENT_APK_ASSET)
             }
             if (_sourceDownload.value is SourceDownloadState.Done &&
-                cached != null &&
                 _receivedSource.value?.absolutePath != cached.absolutePath &&
                 tag.isNotEmpty()
             ) {
@@ -255,7 +254,4 @@ class SourceManager(
         }
     }
 
-    fun clearSourceDownloadState() {
-        _sourceDownload.value = null
-    }
 }
