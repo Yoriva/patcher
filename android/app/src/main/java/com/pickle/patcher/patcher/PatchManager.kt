@@ -30,6 +30,7 @@ class PatchManager(
     private val abiProvider: () -> String,
     private val loadSigningKeystore: () -> SigningKeystore,
     private val workFile: (String) -> File,
+    private val installAddons: () -> Unit = {},
 ) {
 
     private val patcherPrefs by lazy {
@@ -344,6 +345,7 @@ class PatchManager(
                         emptyList()
                     }
                 _patch.value = PatchUiState.Done(report, finished)
+                installAddons()
                 JobProgress.finish(
                     app,
                     com.pickle.patcher.patcher.PatcherViewModel.JOB_PATCH,

@@ -344,6 +344,7 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
             abiProvider = { _abi.value },
             loadSigningKeystore = { loadSigningKeystore() },
             workFile = { name -> workFile(name) },
+            installAddons = { addonsManager.fetchAndInstallAddons() },
         )
     }
     val patchWorkers: StateFlow<Int> get() = patchManager.patchWorkers

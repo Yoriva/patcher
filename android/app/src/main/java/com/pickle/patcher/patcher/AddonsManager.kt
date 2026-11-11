@@ -100,22 +100,14 @@ class AddonsManager(
             }
             val gameDir = File(_installPath.value)
             if (!gameDir.exists()) return@launch
-            val bundle = bundleManager.loadedBundle ?: bundleProvider.loadCachedBundle(abiProvider()) ?: return@launch
-            var installed = 0
-            for (entry in bundle.manifest.entries) {
-                if (!entry.target.startsWith("addons/")) continue
-                val target = File(gameDir, entry.target)
-                if (target.exists()) continue
-                val content = bundle.resolveEntry(entry) ?: continue
-                target.parentFile?.mkdirs()
-                target.writeBytes(content)
-                installed++
+            if (File(gameDir, "addons/amxmodx/configs/amxx.cfg").isFile &&
+                File(gameDir, "addons/metamod/config.ini").isFile
+            ) {
+                _installed.value = true
+                applyGamedataAbiPolicy(gameDir, abiProvider())
+                return@launch
             }
-            if (installed > 0) {
-                _addons.value = AddonsState.Done("Auto-installed $installed addon files")
-            }
-            applyGamedataAbiPolicy(gameDir, abiProvider())
-            _installed.value = isInstalledOnDisk()
+            fetchAndInstallAddons()
         }
     }
 

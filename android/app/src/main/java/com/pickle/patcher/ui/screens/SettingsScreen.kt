@@ -18,6 +18,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Speed
@@ -63,6 +65,8 @@ fun SettingsScreen(
     onOpenAbout: () -> Unit = {},
     onShareLogs: () -> Unit = {},
     onRedownloadBundle: () -> Unit = {},
+    onReinstallAddons: () -> Unit = {},
+    onOpenPluginConfig: () -> Unit = {},
 ) {
     BackHandler(onBack = onBack)
     val context = LocalContext.current
@@ -303,7 +307,7 @@ fun SettingsScreen(
                 subtitle = "Scan GitHub releases and module updates",
                 icon = Icons.Filled.SystemUpdate,
                 index = 0,
-                total = 4,
+                total = 6,
                 onClick = {
                     vm.checkAppUpdate()
                     vm.refreshLibStatus()
@@ -314,23 +318,39 @@ fun SettingsScreen(
                 subtitle = "Fetch latest libraries and configuration assets",
                 icon = Icons.Filled.Download,
                 index = 1,
-                total = 4,
+                total = 6,
                 onClick = onRedownloadBundle,
+            )
+            GroupedActionCard(
+                title = "Reinstall Addons",
+                subtitle = "Re-fetch AMXX addon scripts and configs",
+                icon = Icons.Filled.Extension,
+                index = 2,
+                total = 6,
+                onClick = onReinstallAddons,
+            )
+            GroupedActionCard(
+                title = "Plugin Config",
+                subtitle = "Edit plugins.ini plugin order and toggles",
+                icon = Icons.Filled.Edit,
+                index = 3,
+                total = 6,
+                onClick = onOpenPluginConfig,
             )
             GroupedActionCard(
                 title = "Share Logs",
                 subtitle = "Export system, patcher, and compiler debug logs",
                 icon = Icons.Filled.Share,
-                index = 2,
-                total = 4,
+                index = 4,
+                total = 6,
                 onClick = onShareLogs,
             )
             GroupedActionCard(
                 title = "About Nexora",
                 subtitle = "Version, license, and repository information",
                 iconRes = R.drawable.nexora_logo,
-                index = 3,
-                total = 4,
+                index = 5,
+                total = 6,
                 onClick = onOpenAbout,
             )
         }

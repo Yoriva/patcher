@@ -134,11 +134,11 @@ import androidx.navigation.navArgument
 import com.pickle.patcher.data.StoreApi
 import com.pickle.patcher.patcher.AppUpdate
 import com.pickle.patcher.patcher.PatcherViewModel
-import com.pickle.patcher.ui.screens.AddonsScreen
 import com.pickle.patcher.ui.screens.AdminScreen
 import com.pickle.patcher.ui.screens.CompilerScreen
 import com.pickle.patcher.ui.screens.LibraryScreen
 import com.pickle.patcher.ui.screens.PatchScreen
+import com.pickle.patcher.ui.screens.PluginsScreen
 import com.pickle.patcher.ui.screens.SettingsScreen
 import com.pickle.patcher.ui.screens.StoreManageScreen
 import com.pickle.patcher.ui.screens.StoreProfileScreen
@@ -286,15 +286,15 @@ fun PatcherApp(vm: PatcherViewModel) {
         listOf(
             BottomNavItem(0, "Patch", Icons.Filled.RocketLaunch, Icons.Outlined.RocketLaunch),
             BottomNavItem(1, "Compiler", Icons.Filled.Code, Icons.Outlined.Code),
-            BottomNavItem(2, "Addons", Icons.Filled.Extension, Icons.Outlined.Extension),
-            BottomNavItem(3, "Store", Icons.Filled.Storefront, Icons.Outlined.Storefront),
+            BottomNavItem(2, "Store", Icons.Filled.Storefront, Icons.Outlined.Storefront),
         )
     }
     val isMainTab = currentRoute == Dest.Tabs.route
-    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 4 })
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
     val tabScope = rememberCoroutineScope()
     var showSettings by remember { mutableStateOf(false) }
     var showTheme by remember { mutableStateOf(false) }
+    var showPluginConfig by remember { mutableStateOf(false) }
     BackHandler(
         enabled = isMainTab && pagerState.currentPage != 0 && !showSettings && !showTheme && !showSetup,
     ) {
@@ -390,7 +390,7 @@ fun PatcherApp(vm: PatcherViewModel) {
                         tonalElevation = 0.dp,
                     ) {
                         bottomNavItems.forEach { item ->
-                            val locked = !clientInstalled && (item.index == 1 || item.index == 2)
+                            val locked = !clientInstalled && item.index == 1
                             val selected = pagerState.currentPage == item.index
                             NavigationBarItem(
                                 selected = selected,
@@ -472,11 +472,6 @@ fun PatcherApp(vm: PatcherViewModel) {
                                     onOpenLibraries = { nav.navigate(Dest.Libraries.route) },
                                 )
                                 1 -> CompilerScreen(
-                                    vm = vm,
-                                    gameInstalled = clientInstalled,
-                                    onGoToPatch = { tabScope.launch { pagerState.animateScrollToPage(0) } },
-                                )
-                                2 -> AddonsScreen(
                                     vm = vm,
                                     gameInstalled = clientInstalled,
                                     onGoToPatch = { tabScope.launch { pagerState.animateScrollToPage(0) } },
@@ -583,6 +578,8 @@ fun PatcherApp(vm: PatcherViewModel) {
                             }
                         },
                         onRedownloadBundle = { vm.fetchAndDownloadBundle() },
+                        onReinstallAddons = { vm.fetchAndInstallAddons() },
+                        onOpenPluginConfig = { showPluginConfig = true },
                     )
                     AnimatedVisibility(
                         visible = showTheme,
@@ -603,6 +600,49 @@ fun PatcherApp(vm: PatcherViewModel) {
                                 onBack = { showTheme = false },
                             )
                         }
+                    }
+                }
+            }
+        }
+        AnimatedVisibility(
+            visible = showPluginConfig,
+            enter = slideInHorizontally(
+                initialOffsetX = { fullWidth -> fullWidth },
+                animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+            ) + fadeIn(animationSpec = tween(durationMillis = 250)),
+            exit = slideOutHorizontally(
+                targetOffsetX = { fullWidth -> fullWidth },
+                animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+            ) + fadeOut(animationSpec = tween(durationMillis = 250)),
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background,
+            ) {
+                Scaffold(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    topBar = {
+                        TopAppBar(
+                            title = {
+                                Text(
+                                    text = "Plugin Config",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                )
+                            },
+                            navigationIcon = {
+                                TopBarBackButton(onClick = { showPluginConfig = false })
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = MaterialTheme.colorScheme.background,
+                                titleContentColor = MaterialTheme.colorScheme.onBackground,
+                            ),
+                        )
+                    },
+                ) { padding ->
+                    Column(Modifier.fillMaxSize().padding(padding)) {
+                        PluginsScreen(vm)
                     }
                 }
             }
