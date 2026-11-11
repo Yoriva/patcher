@@ -95,9 +95,6 @@ sealed interface PatchUiState {
     ) : PatchUiState
     data class Failed(val message: String) : PatchUiState
 }
-data class SmaSource(val path: String, val name: String, val hasInclude: Boolean) {
-    val scriptDir: String get() = File(path).parentFile?.absolutePath.orEmpty()
-}
 data class LibInfo(
     val name: String,
     val localSize: Long,
@@ -106,17 +103,6 @@ data class LibInfo(
     val downloading: Boolean = false,
     val downloadProgress: Float = -1f,
 )
-sealed interface CompileState {
-    data object Idle : CompileState
-    data class Compiling(val source: String) : CompileState
-    data class Done(
-        val log: String,
-        val failures: Map<String, String> = emptyMap(),
-        val ok: Int = 0,
-        val total: Int = 0,
-    ) : CompileState
-    data class Failed(val message: String) : CompileState
-}
 class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     private val bundleProvider = BundleProvider(app)
     private val app: Application = app
@@ -357,36 +343,42 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshLibStatus() {
         scanLibs(checkRemote = true)
     }
-    private val _scripts = MutableStateFlow<List<SmaSource>>(emptyList())
-    val scripts: StateFlow<List<SmaSource>> = _scripts.asStateFlow()
-    private val _scriptRoot = MutableStateFlow<String?>(null)
-    val scriptRoot: StateFlow<String?> = _scriptRoot.asStateFlow()
-    private val _outputRoot = MutableStateFlow<String?>(null)
-    val outputRoot: StateFlow<String?> = _outputRoot.asStateFlow()
-    private val compilerPrefs by lazy {
-        getApplication<Application>().getSharedPreferences("compiler_prefs", Context.MODE_PRIVATE)
-    }
     private val patcherPrefs by lazy {
         getApplication<Application>().getSharedPreferences("patcher_prefs", Context.MODE_PRIVATE)
     }
-    private val _compileWorkers = MutableStateFlow(0)
-    val compileWorkers: StateFlow<Int> = _compileWorkers.asStateFlow()
     private val _patchWorkers = MutableStateFlow(0)
     val patchWorkers: StateFlow<Int> = _patchWorkers.asStateFlow()
+    private var loadedBundle: Bundle? = null
+    private val compilerManager = CompilerManager(
+        app = app,
+        bundleProvider = bundleProvider,
+        scope = viewModelScope,
+        abiProvider = { _abi.value },
+        loadedBundleProvider = { loadedBundle },
+        installPathProvider = { _installPath.value },
+    )
+    val scripts: StateFlow<List<SmaSource>> get() = compilerManager.scripts
+    val scriptRoot: StateFlow<String?> get() = compilerManager.scriptRoot
+    val outputRoot: StateFlow<String?> get() = compilerManager.outputRoot
+    val compile: StateFlow<CompileState> get() = compilerManager.compile
+    val compileWorkers: StateFlow<Int> get() = compilerManager.compileWorkers
+    fun maxCompileWorkers(): Int = compilerManager.maxCompileWorkers()
+    fun effectiveCompileWorkers(): Int = compilerManager.effectiveCompileWorkers()
+    fun setCompileWorkers(count: Int) = compilerManager.setCompileWorkers(count)
+    fun refreshScripts() = compilerManager.refreshScripts()
+    fun startScriptWatcher() = compilerManager.startScriptWatcher()
+    fun stopScriptWatcher() = compilerManager.stopScriptWatcher()
+    fun setScriptRoot(uri: Uri?) = compilerManager.setScriptRoot(uri)
+    fun setOutputRoot(uri: Uri?) = compilerManager.setOutputRoot(uri)
+    fun clearOutputRoot() = compilerManager.clearOutputRoot()
+    fun clearScriptRoot() = compilerManager.clearScriptRoot()
+    fun autoFindAmxxFolder(forOutput: Boolean): Boolean = compilerManager.autoFindAmxxFolder(forOutput)
+    fun autoFindTargetName(forOutput: Boolean): String = compilerManager.autoFindTargetName(forOutput)
+    fun compile(source: SmaSource) = compilerManager.compile(source)
+    fun compileAll(sources: List<SmaSource>) = compilerManager.compileAll(sources)
     init {
-        val saved = compilerPrefs.getInt("compile_workers", 0)
-        _compileWorkers.value = if (saved > 0) saved.coerceIn(1, maxCompileWorkers()) else maxCompileWorkers()
         val savedPatch = patcherPrefs.getInt("patch_workers", 0)
         _patchWorkers.value = if (savedPatch > 0) savedPatch.coerceIn(1, maxPatchWorkers()) else maxPatchWorkers()
-    }
-    fun maxCompileWorkers(): Int = Runtime.getRuntime().availableProcessors().coerceAtLeast(2)
-    fun effectiveCompileWorkers(): Int =
-        _compileWorkers.value.coerceIn(1, maxCompileWorkers())
-    fun setCompileWorkers(count: Int) {
-        val clamped = count.coerceIn(1, maxCompileWorkers())
-        if (clamped == _compileWorkers.value) return
-        _compileWorkers.value = clamped
-        compilerPrefs.edit().putInt("compile_workers", clamped).apply()
     }
     fun maxPatchWorkers(): Int = Runtime.getRuntime().availableProcessors().coerceAtLeast(2)
     fun effectivePatchWorkers(): Int =
@@ -397,7 +389,6 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
         _patchWorkers.value = clamped
         patcherPrefs.edit().putInt("patch_workers", clamped).apply()
     }
-    private var loadedBundle: Bundle? = null
     private var lastReport: ApkPatcher.PatchReport? = null
     val hasCachedBundle: Boolean get() = bundleProvider.hasCachedBundle(_abi.value)
     val repo = "berkchy/nexora"
@@ -422,22 +413,11 @@ private fun externalRoot(app: Application): File {
     }
     private val libsDir = File(externalRoot, "libs")
     init {
-        val savedScripts = compilerPrefs.getString("script_root", null)
-        if (!savedScripts.isNullOrEmpty() && File(savedScripts).isDirectory) {
-            _scriptRoot.value = savedScripts
-            refreshScripts()
-        }
-        val savedOutput = compilerPrefs.getString("output_root", null)
-        if (!savedOutput.isNullOrEmpty() && File(savedOutput).isDirectory) {
-            _outputRoot.value = savedOutput
-        }
         scanLibs()
         useCachedBundle()
         scanCustomLibs()
         runAutoDetectAbi()
     }
-    private val _compile = MutableStateFlow<CompileState>(CompileState.Idle)
-    val compile: StateFlow<CompileState> = _compile.asStateFlow()
     private val _releaseNote = MutableStateFlow<String?>(null)
     val releaseNote: StateFlow<String?> = _releaseNote.asStateFlow()
     private val _patch = MutableStateFlow<PatchUiState>(PatchUiState.Idle)
@@ -1905,441 +1885,7 @@ private fun externalRoot(app: Application): File {
         }
         sb.toString()
     }
-    fun setScriptRoot(uri: Uri?) {
-        if (uri == null) return
-        val app = getApplication<Application>()
-        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-        try {
-            app.contentResolver.takePersistableUriPermission(uri, flags)
-        } catch (_: Exception) {
-        }
-        val dir = uriToDir(uri) ?: let {
-            _compile.value = CompileState.Failed(
-                "Could not resolve the picked folder to a disk path.\n" +
-                    "Pick a folder on the device's internal storage (e.g. .../xash/cstrike/addons/amxmodx/scripting)."
-            )
-            return
-        }
-        _scriptRoot.value = dir.absolutePath
-        compilerPrefs.edit().putString("script_root", dir.absolutePath).apply()
-        _compile.value = CompileState.Idle
-        refreshScripts()
-    }
-    fun setOutputRoot(uri: Uri?) {
-        if (uri == null) return
-        val app = getApplication<Application>()
-        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-        try {
-            app.contentResolver.takePersistableUriPermission(uri, flags)
-        } catch (_: Exception) {
-        }
-        val dir = uriToDir(uri) ?: let {
-            _compile.value = CompileState.Failed(
-                "Could not resolve the picked folder to a disk path.\n" +
-                    "Pick a folder on the device's internal storage."
-            )
-            return
-        }
-        _outputRoot.value = dir.absolutePath
-        compilerPrefs.edit().putString("output_root", dir.absolutePath).apply()
-    }
-    fun clearOutputRoot() {
-        _outputRoot.value = null
-        compilerPrefs.edit().remove("output_root").apply()
-    }
-    fun clearScriptRoot() {
-        _scriptRoot.value = null
-        _scripts.value = emptyList()
-        _compile.value = CompileState.Idle
-        compilerPrefs.edit().remove("script_root").apply()
-    }
-    fun autoFindAmxxFolder(forOutput: Boolean): Boolean {
-        val sub = if (forOutput) "plugins" else "scripting"
-        val found = findAmxxFolder(sub) ?: return false
-        if (forOutput) {
-            _outputRoot.value = found.absolutePath
-            compilerPrefs.edit().putString("output_root", found.absolutePath).apply()
-        } else {
-            _scriptRoot.value = found.absolutePath
-            compilerPrefs.edit().putString("script_root", found.absolutePath).apply()
-            _compile.value = CompileState.Idle
-            refreshScripts()
-        }
-        return true
-    }
-    fun autoFindTargetName(forOutput: Boolean): String =
-        "addons/amxmodx/" + if (forOutput) "plugins" else "scripting"
-    private fun findAmxxRoots(): List<File> =
-        gameRootCandidates.map(::File).filter { it.isDirectory }
-    private fun findAmxxFolder(sub: String): File? {
-        for (gamesRoot in findAmxxRoots()) {
-            val games = ArrayList<String>()
-            games.add(GAME_CSTRIKE)
-            games.add(GAME_CZERO)
-            try {
-                gamesRoot.listFiles()?.forEach { f ->
-                    if (f.isDirectory && !games.contains(f.name)) games.add(f.name)
-                }
-            } catch (_: Exception) {
-            }
-            for (game in games) {
-                val dir = File(File(File(gamesRoot, game), "addons/amxmodx"), sub)
-                if (dir.isDirectory) return dir
-            }
-        }
-        return null
-    }
-    private fun uriToDir(uri: Uri): File? {
-        val path = uri.path ?: return null
-        val marker = "/tree/"
-        val idx = path.indexOf(marker)
-        val doc = if (idx >= 0) path.substring(idx + marker.length) else path.trimStart('/')
-        val decoded = URLDecoder.decode(doc, Charsets.UTF_8.name()) 
-        val volumeSep = decoded.indexOf(':')
-        if (volumeSep < 0) return null
-        val volume = decoded.substring(0, volumeSep) 
-        val rel = decoded.substring(volumeSep + 1).trimStart('/')
-        if (volume == "primary") {
-            return File(File(Environment.getExternalStorageDirectory(), ""), rel)
-        }
-        if (android.os.Build.VERSION.SDK_INT >= 30) {
-            val manager = getApplication<Application>().getSystemService(Context.STORAGE_SERVICE) as android.os.storage.StorageManager
-            for (v in manager.storageVolumes) {
-                val dirPath = v.directory?.absolutePath ?: continue
-                if (v.uuid == volume && File(dirPath).isDirectory) {
-                    return File(File(dirPath, ""), rel)
-                }
-            }
-        }
-        return null
-    }
-    fun refreshScripts() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val dir = _scriptRoot.value?.let { File(it) } ?: run {
-                _scripts.value = emptyList()
-                return@launch
-            }
-            _scripts.value = if (dir.isDirectory) {
-                dir.listFiles { f ->
-                    f.isFile && f.name.endsWith(".sma", ignoreCase = true)
-                }?.sortedBy { it.name }?.map { f ->
-                    SmaSource(
-                        path = f.absolutePath,
-                        name = f.name,
-                        hasInclude = File(f.parentFile, "include").isDirectory,
-                    )
-                }.orEmpty()
-            } else {
-                emptyList()
-            }
-        }
-    }
-    private var scriptWatchJob: Job? = null
-    fun startScriptWatcher() {
-        scriptWatchJob?.cancel()
-        scriptWatchJob = viewModelScope.launch(Dispatchers.IO) {
-            while (true) {
-                kotlinx.coroutines.delay(SCRIPT_POLL_MS)
-                if (_scriptRoot.value == null) continue
-                val current = _scripts.value
-                val updated = readScriptFolder()
-                if (updated != current) {
-                    _scripts.value = updated
-                }
-            }
-        }
-    }
-    fun stopScriptWatcher() {
-        scriptWatchJob?.cancel()
-        scriptWatchJob = null
-    }
-    private fun readScriptFolder(): List<SmaSource> {
-        val dir = _scriptRoot.value?.let { File(it) } ?: return emptyList()
-        if (!dir.isDirectory) return emptyList()
-        return dir.listFiles { f ->
-            f.isFile && f.name.endsWith(".sma", ignoreCase = true)
-        }?.sortedBy { it.name }?.map { f ->
-            SmaSource(
-                path = f.absolutePath,
-                name = f.name,
-                hasInclude = File(f.parentFile, "include").isDirectory,
-            )
-        }.orEmpty()
-    }
-    fun compile(source: SmaSource) = compileAll(listOf(source))
-    fun compileAll(sources: List<SmaSource>) {
-        if (sources.isEmpty()) return
-        viewModelScope.launch(Dispatchers.IO) {
-            val total = sources.size
-            val scriptFolder = File(sources.first().path).parentFile
-            val logDir = if (scriptFolder != null) File(scriptFolder, "logs") else null
-            logDir?.mkdirs()
-            val parallelism = effectiveCompileWorkers()
-            val gate = Semaphore(parallelism)
-            val finished = AtomicInteger(0)
-            val results = arrayOfNulls<Pair<Boolean, String>>(total)
-            coroutineScope {
-                sources.mapIndexed { index, source ->
-                    async(Dispatchers.IO) {
-                        gate.withPermit {
-                            val outcome = try {
-                                compileOne(source)
-                            } catch (t: Throwable) {
-                                false to (t.message ?: "Compile error")
-                            }
-                            results[index] = outcome
-                            val done = finished.incrementAndGet()
-                            _compile.value = CompileState.Compiling(
-                                "$done of $total compiled (${source.name})"
-                            )
-                        }
-                    }
-                }.awaitAll()
-            }
-            val log = StringBuilder()
-            val failures = LinkedHashMap<String, String>()
-            var failed = 0
-            val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
-            for ((i, source) in sources.withIndex()) {
-                val (ok, body) = results[i] ?: (false to "Compile did not run.")
-                log
-                    .append("── ${source.name} ──\n")
-                    .append(body.trim().ifEmpty { if (ok) "Done." else "Compile failed." })
-                    .append('\n')
-                    .append('\n')
-                val entry = "── ${source.name} ──\n${body.trim()}\n\n"
-                val target = if (ok) {
-                    logDir?.let { File(it, "compiler.log") }
-                } else {
-                    logDir?.let { File(it, "error.log") }
-                }
-                if (target != null) {
-                    try {
-                        target.appendText(
-                            if (ok) entry
-                            else "===== ${stamp.format(java.util.Date())} ${source.name} =====\n$entry"
-                        )
-                    } catch (_: Throwable) {}
-                }
-                if (!ok) {
-                    failed++
-                    failures[source.path] = body.trim().ifEmpty { "Compile failed." }
-                }
-            }
-            val okCount = total - failed
-            val summary = "\n=== $okCount ok, $failed failed ($parallelism at a time) ==="
-            _compile.value = CompileState.Done(
-                log = log.toString() + summary,
-                failures = failures,
-                ok = okCount,
-                total = total,
-            )
-        }
-    }
-    private fun compileOne(source: SmaSource): Pair<Boolean, String> {
-        val f = File(source.path)
-        if (!f.exists()) error("Source not found: ${source.name}")
-        val scriptDir = f.parentFile ?: error("Bad source path")
-        val includeDir = File(scriptDir, "include")
-        val amxxpc = prepareCompiler(scriptDir) ?: error(
-            "Compiler (amxxpc) is missing from this build.\n" +
-                "Install the latest Nexora APK from the Releases page — it bundles the on-device compiler — then try again.\n" +
-                "Alternatively, place an amxxpc binary next to your .sma files."
-        )
-        val cmd = mutableListOf(amxxpc.absolutePath)
-        if (includeDir.isDirectory) {
-            cmd.add("-i${includeDir.absolutePath}")
-        }
-        val gameDir = File(_installPath.value)
-        val amxxPluginsDir = File(gameDir, "addons/amxmodx/plugins")
-        val scriptDirName = scriptDir.name
-        val scriptIsShipped = scriptDirName == "scripting" &&
-            scriptDir.parentFile?.parentFile?.name == "amxmodx" &&
-            gameDir.exists()
-        val compiledDir = _outputRoot.value?.let { File(it) }?.takeIf { it.isDirectory }
-            ?: if (scriptIsShipped) amxxPluginsDir else File(scriptDir, "compiled")
-        compiledDir.mkdirs()
-        val outPath = File(compiledDir, f.nameWithoutExtension + ".amxx").absolutePath
-        cmd.add("-o$outPath")
-        cmd.add(source.path)
-        val compilerDir = amxxpc.parentFile
-        val workDir = if (compilerDir != null && compilerDir.isDirectory) compilerDir else scriptDir
-        val kernelBesideDriver = if (compilerDir != null) File(compilerDir, "amxxpc32.so") else null
-        val filesKernel = File(compilerHome(), "amxxpc32.so")
-        val kernelFound = (kernelBesideDriver != null && kernelBesideDriver.exists()) ||
-            (filesKernel.exists() && matchesDeviceAbi(filesKernel))
-        if (!kernelFound) {
-            error(
-                "Compiler kernel missing.\n" +
-                    "Driver: ${amxxpc.absolutePath} (${amxxpc.length()} bytes)\n" +
-                    "Looked in: ${kernelBesideDriver?.absolutePath ?: "(unknown)"} and ${filesKernel.absolutePath}\n" +
-                    "Reinstall the app or re-download the bundle, then retry."
-            )
-        }
-        val pb = ProcessBuilder(cmd).directory(workDir).redirectErrorStream(true)
-        val ldDirs = listOfNotNull(
-            compilerDir?.takeIf { it.isDirectory }?.absolutePath,
-            compilerHome().takeIf { it.isDirectory }?.absolutePath,
-        ).distinct()
-        if (ldDirs.isNotEmpty()) {
-            val oldLd = pb.environment()["LD_LIBRARY_PATH"]
-            pb.environment()["LD_LIBRARY_PATH"] = (ldDirs + listOfNotNull(oldLd?.takeIf { it.isNotEmpty() })).joinToString(":")
-        }
-        if (!amxxpc.canExecute()) {
-            try { Runtime.getRuntime().exec(arrayOf("chmod", "755", amxxpc.absolutePath)).waitFor() } catch (_: Throwable) {}
-            amxxpc.setExecutable(true, false)
-        }
-        val process = pb.start()
-        val output = process.inputStream.bufferedReader().use { it.readText() }
-        val exit = process.waitFor()
-        var ok = exit == 0
-        val body = buildString {
-            append(output.trim().ifEmpty { if (ok) "Done." else "Compile failed." })
-            if (output.isBlank() && exit != 0) {
-                val kernel = amxxpc.parentFile?.let { File(it, "amxxpc32.so") }
-                append("\n[no output, exit=$exit, driver=${amxxpc.length()} bytes" +
-                    (if (kernel != null && kernel.exists()) ", kernel=${kernel.length()} bytes" else ", no kernel") +
-                    "]")
-            }
-            val out = File(compiledDir, f.nameWithoutExtension + ".amxx")
-            if (exit != 0 || !out.exists()) {
-                ok = false
-                append("\nCompile failed.")
-            }
-        }
-        return ok to body
-    }
-    private fun elfMachine(file: File): Int? = try {
-        file.inputStream().use { ins ->
-            val hdr = ByteArray(20)
-            if (ins.read(hdr) < 20) return null
-            if (!(hdr[0] == 0x7F.toByte() && hdr[1] == 'E'.code.toByte() &&
-                    hdr[2] == 'L'.code.toByte() && hdr[3] == 'F'.code.toByte())
-            ) return null
-            ((hdr[19].toInt() and 0xFF) shl 8) or (hdr[18].toInt() and 0xFF)
-        }
-    } catch (_: Throwable) {
-        null
-    }
-    private fun matchesDeviceAbi(file: File): Boolean {
-        val machine = elfMachine(file) ?: return false
-        val want64 = Build.SUPPORTED_ABIS.firstOrNull()?.contains("64") == true
-        return if (want64) machine == 183 else machine == 40
-    }
-    private fun compilerHome(): File = File(getApplication<Application>().filesDir, "compiler")
-    private fun readCompilerStamp(): String? = try {
-        File(compilerHome(), ".stamp").takeIf { it.exists() }?.readText()?.trim()
-    } catch (_: Throwable) {
-        null
-    }
-    private fun writeCompilerStamp(s: String) {
-        try {
-            compilerHome().mkdirs()
-            File(compilerHome(), ".stamp").writeText(s)
-        } catch (_: Throwable) {}
-    }
-    private fun appVersionCode(): Long = try {
-        val app = getApplication<Application>()
-        val info = app.packageManager.getPackageInfo(app.packageName, 0)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode
-        else @Suppress("DEPRECATION") info.versionCode.toLong()
-    } catch (_: Throwable) {
-        0L
-    }
-    private fun prepareCompiler(fallbackDir: File): File? {
-        try {
-            val nativeDir = File(getApplication<Application>().applicationInfo.nativeLibraryDir)
-            val nativeAmxxpc = File(nativeDir, "libamxxpc.so")
-            val nativeKernel = File(nativeDir, "libamxxpc32.so")
-            if (nativeAmxxpc.exists() && nativeAmxxpc.canExecute()) {
-                try {
-                    val dir = compilerHome()
-                    dir.mkdirs()
-                    val kernelCopy = File(dir, "amxxpc32.so")
-                    val stamp = "native:${appVersionCode()}:${if (nativeKernel.exists()) nativeKernel.length() else -1}"
-                    if (nativeKernel.exists() && (readCompilerStamp() != stamp || !matchesDeviceAbi(kernelCopy))) {
-                        kernelCopy.delete()
-                        kernelCopy.writeBytes(nativeKernel.readBytes())
-                        try { Runtime.getRuntime().exec(arrayOf("chmod", "644", kernelCopy.absolutePath)).waitFor() } catch (_: Throwable) {}
-                        kernelCopy.setReadable(true, false)
-                        writeCompilerStamp(stamp)
-                    }
-                    if (!nativeKernel.exists() && !matchesDeviceAbi(kernelCopy)) {
-                        val kb = try {
-                            (loadedBundle ?: bundleProvider.loadCachedBundle(_abi.value))
-                                ?.files?.get("compiler/amxxpc32.so")
-                        } catch (_: Throwable) {
-                            null
-                        }
-                        if (kb != null && kb.isNotEmpty()) {
-                            kernelCopy.delete()
-                            kernelCopy.writeBytes(kb)
-                            if (matchesDeviceAbi(kernelCopy)) {
-                                try { Runtime.getRuntime().exec(arrayOf("chmod", "644", kernelCopy.absolutePath)).waitFor() } catch (_: Throwable) {}
-                                kernelCopy.setReadable(true, false)
-                                writeCompilerStamp("bundled-kernel:${kb.size}")
-                            } else {
-                                kernelCopy.delete()
-                            }
-                        }
-                    }
-                } catch (_: Throwable) {}
-                return nativeAmxxpc
-            }
-        } catch (_: Throwable) {}
-        val compilerDir = File(getApplication<Application>().filesDir, "compiler")
-        val amxxpc = File(compilerDir, "amxxpc")
-        val kernel = File(compilerDir, "amxxpc32.so")
-        val bundleFiles = try {
-            loadedBundle ?: bundleProvider.loadCachedBundle(_abi.value)
-        } catch (_: Throwable) {
-            null
-        }
-        val driverBytes = bundleFiles?.files?.get("compiler/amxxpc")
-        if (driverBytes != null && driverBytes.isNotEmpty()) {
-            try {
-                compilerDir.mkdirs()
-                val kernelBytes = bundleFiles.files["compiler/amxxpc32.so"]
-                val stamp = "bundle:${driverBytes.size}:${kernelBytes?.size ?: -1}"
-                if (readCompilerStamp() == stamp && amxxpc.exists() && matchesDeviceAbi(amxxpc) &&
-                    (kernelBytes == null || (kernel.exists() && matchesDeviceAbi(kernel)))
-                ) {
-                    return amxxpc
-                }
-                amxxpc.writeBytes(driverBytes)
-                if (!matchesDeviceAbi(amxxpc)) {
-                    amxxpc.delete()
-                } else {
-                    try { Runtime.getRuntime().exec(arrayOf("chmod", "755", amxxpc.absolutePath)).waitFor() } catch (_: Throwable) {}
-                    amxxpc.setExecutable(true, false)
-                    amxxpc.setReadable(true, false)
-                    bundleFiles.files["compiler/amxxpc32.so"]?.let {
-                        if (it.isNotEmpty()) {
-                            kernel.writeBytes(it)
-                            if (!matchesDeviceAbi(kernel)) {
-                                kernel.delete()
-                            } else {
-                                try { Runtime.getRuntime().exec(arrayOf("chmod", "755", kernel.absolutePath)).waitFor() } catch (_: Throwable) {}
-                                kernel.setReadable(true, false)
-                                try { Runtime.getRuntime().exec(arrayOf("chmod", "644", kernel.absolutePath)).waitFor() } catch (_: Throwable) {}
-                            }
-                        }
-                    }
-                    if (amxxpc.exists()) {
-                        writeCompilerStamp(stamp)
-                        return amxxpc
-                    }
-                }
-            } catch (_: Throwable) {
-            }
-        }
-        val root = _scriptRoot.value?.let { File(it) }
-        return listOfNotNull(root, fallbackDir)
-            .map { File(it, "amxxpc") }
-            .firstOrNull { it.exists() && it.canExecute() && matchesDeviceAbi(it) }
-    }
     companion object {
-        const val SCRIPT_POLL_MS = 3_000L
         const val JOB_CLIENT_APK = "client-apk"
         const val JOB_LIBS = "libs"
         const val JOB_ADDONS = "addons"
