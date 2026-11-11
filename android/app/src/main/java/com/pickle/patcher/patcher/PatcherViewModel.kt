@@ -5,38 +5,22 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
-import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pickle.patcher.data.BundleProvider
 import com.pickle.patcher.data.IncrementalUpdateManager
 import com.pickle.patcher.data.NEXORA_ROOT
-import com.pickle.patcher.data.ReleaseRepository
 import com.pickle.patcher.lib.ApkPatcher
 import com.pickle.patcher.lib.Bundle
 import com.pickle.patcher.lib.SigningKeystore
 import com.pickle.patcher.lib.ZipAnalyzer
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
-import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.IOException
-import java.net.URLDecoder
-import com.pickle.patcher.jobs.JobProgress
 data class SourceInfo(
     val name: String,
     val sizeBytes: Long,
@@ -103,11 +87,8 @@ data class LibInfo(
 class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     private val bundleProvider = BundleProvider(app)
     private val app: Application = app
-    private val _source = MutableStateFlow<SourceInfo?>(null)
-    val source: StateFlow<SourceInfo?> = _source.asStateFlow()
-    private val _receivedSource: MutableStateFlow<File?> = MutableStateFlow(null)
-    private val _sourceDownload = MutableStateFlow<SourceDownloadState?>(null)
-    val sourceDownload: StateFlow<SourceDownloadState?> = _sourceDownload.asStateFlow()
+    val source: StateFlow<SourceInfo?> get() = sourceManager.source
+    val sourceDownload: StateFlow<SourceDownloadState?> get() = sourceManager.sourceDownload
     val bundle: StateFlow<BundleState> get() = bundleManager.bundle
     private val deviceAbi: String =
         Build.SUPPORTED_ABIS.firstOrNull { it in SUPPORTED_ABIS } ?: SUPPORTED_ABIS.first()
@@ -117,7 +98,7 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     val autoDetectedAbi: StateFlow<String> = _autoDetectedAbi.asStateFlow()
     fun autoDetectAbi(): String {
         try {
-            _receivedSource.value?.let { file ->
+            sourceManager.receivedFile()?.let { file ->
                 val info = ZipAnalyzer.analyze(file)
                 val supported = info.abis.filter { it in SUPPORTED_ABIS }
                 if (supported.size == 1) return supported.first()
@@ -139,8 +120,8 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
             }
         } catch (_: Throwable) {
         }
-        val path = try { _installPath.value } catch (_: Throwable) { null }
-        val detectedRoot = runCatching { resolveGameRoot() }.getOrNull()
+        val path = try { addonsManager.installPathValue() } catch (_: Throwable) { null }
+        val detectedRoot = runCatching { addonsManager.resolveGameRoot() }.getOrNull()
         val gameDir = File(path ?: ((detectedRoot ?: "/storage/emulated/0/.xash") + "/cstrike"))
         val historyCandidates = buildList {
             add(File(gameDir, "patch-history.json"))
@@ -217,7 +198,7 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     }
     val supportedAbis: List<String> = SUPPORTED_ABIS
     val isDeviceAbi: String get() = deviceAbi
-    val sourceAbis: List<String> get() = _source.value?.abis ?: emptyList()
+    val sourceAbis: List<String> get() = sourceManager.source.value?.abis ?: emptyList()
     val loadedBundleAbi: String? get() = bundleManager.loadedBundle?.manifest?.abi?.ifBlank { null }
     private fun resolveAbi(sourceAbis: List<String>): String? = when {
         sourceAbis.isEmpty() -> null
@@ -232,14 +213,13 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
             bundleManager.clearLoadedBundle()
         }
         viewModelScope.launch(Dispatchers.IO) {
-            applyGamedataAbiPolicy(File(_installPath.value), abi)
+            applyGamedataAbiPolicy(File(addonsManager.installPathValue()), abi)
             if (bundleManager.loadedBundle == null) useCachedBundle()
             refreshAbiStatus()
         }
         scanLibs(autoLoad = true)
     }
-    private val _addons = MutableStateFlow<AddonsState>(AddonsState.None)
-    val addons: StateFlow<AddonsState> = _addons.asStateFlow()
+    val addons: StateFlow<AddonsState> get() = addonsManager.addons
     data class AbiStatus(
         val abi: String,
         val inSource: Boolean,
@@ -302,7 +282,7 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     val abiStatus: StateFlow<List<AbiStatus>> = _abiStatus.asStateFlow()
     private val downloadingAbi: String? get() = bundleManager.downloadingAbi
     fun refreshAbiStatus() {
-        val sourceAbis = _source.value?.abis ?: emptyList()
+        val sourceAbis = sourceManager.source.value?.abis ?: emptyList()
         val selected = _abi.value
         _abiStatus.value = supportedAbis.map { a ->
             val dir = File(libsDir, a)
@@ -322,7 +302,20 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
     }
-    private val bundleManager by lazy {
+    private val sourceManager: SourceManager by lazy {
+        SourceManager(
+            app = app,
+            scope = viewModelScope,
+            externalRoot = externalRoot,
+            deviceAbi = deviceAbi,
+            abiProvider = { _abi.value },
+            setAbi = { abi -> setAbi(abi) },
+            runAutoDetectAbi = { runAutoDetectAbi() },
+            refreshAbiStatus = { refreshAbiStatus() },
+            failPatch = { msg -> patchManager.failPatch(msg) },
+        )
+    }
+    private val bundleManager: BundleManager by lazy {
         BundleManager(
             app = app,
             bundleProvider = bundleProvider,
@@ -341,22 +334,36 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     val customLibs: StateFlow<List<CustomLib>> get() = bundleManager.customLibs
     val libsChecking: StateFlow<Boolean> get() = bundleManager.libsChecking
     fun refreshLibStatus() = bundleManager.refreshLibStatus()
-    private val updateManager by lazy {
+    private val updateManager: UpdateManager by lazy {
         UpdateManager(
             app = app,
             scope = viewModelScope,
             workFile = { name -> workFile(name) },
         )
     }
-    private val patchManager by lazy {
+    private val addonsManager: AddonsManager by lazy {
+        AddonsManager(
+            app = app,
+            scope = viewModelScope,
+            bundleManager = bundleManager,
+            bundleProvider = bundleProvider,
+            repo = repo,
+            abiProvider = { _abi.value },
+            runAutoDetectAbi = { runAutoDetectAbi() },
+            unzipInto = { zip, target -> patchManager.unzipInto(zip, target) },
+            patchMetamodConfig = { gameDir, abi -> patchManager.patchMetamodConfig(gameDir, abi) },
+            applyGamedataAbiPolicy = { gameDir, abi -> patchManager.applyGamedataAbiPolicy(gameDir, abi) },
+        )
+    }
+    private val patchManager: PatchManager by lazy {
         PatchManager(
             app = app,
             scope = viewModelScope,
             bundleManager = bundleManager,
             bundleProvider = bundleProvider,
             repo = repo,
-            sourceProvider = { _receivedSource.value },
-            installPathProvider = { _installPath.value },
+            sourceProvider = { sourceManager.receivedFile() },
+            installPathProvider = { addonsManager.installPathValue() },
             abiProvider = { _abi.value },
             loadSigningKeystore = { loadSigningKeystore() },
             workFile = { name -> workFile(name) },
@@ -376,7 +383,7 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
         scope = viewModelScope,
         abiProvider = { _abi.value },
         loadedBundleProvider = { bundleManager.loadedBundle },
-        installPathProvider = { _installPath.value },
+        installPathProvider = { addonsManager.installPathValue() },
     )
     val scripts: StateFlow<List<SmaSource>> get() = compilerManager.scripts
     val scriptRoot: StateFlow<String?> get() = compilerManager.scriptRoot
@@ -412,8 +419,6 @@ private fun externalRoot(app: Application): File {
         }
     }
     private val workDir = File(externalRoot, "patcher")
-    private val sourceCacheDir = File(externalRoot, "apk-source")
-    private val legacySourceDir = File(getApplication<Application>().filesDir, "apk-source")
     private fun workFile(name: String): File {
         workDir.mkdirs()
         return File(workDir, name)
@@ -441,209 +446,10 @@ private fun externalRoot(app: Application): File {
             SigningKeystore.loadBytes(p12)
         }
     }
-    private fun cachedClientApk(): File? {
-        val candidates = listOfNotNull(sourceCacheDir, legacySourceDir).flatMap { dir ->
-            dir.listFiles { f -> f.isFile && f.extension.equals("apk", ignoreCase = true) }
-                ?.toList()
-                ?: emptyList()
-        }
-        if (candidates.isEmpty()) return null
-        return candidates.firstOrNull { it.name == CLIENT_APK_ASSET }
-            ?: candidates.maxByOrNull { it.lastModified() }
-    }
-    private fun apkProblem(file: File): String? = try {
-        val info = ZipAnalyzer.analyze(file)
-        if (info.abis.isNotEmpty() && info.abis.none { it in SUPPORTED_ABIS }) {
-            "no supported native ABI (" + info.abis.joinToString(", ") + ")"
-        } else {
-            null
-        }
-    } catch (t: Throwable) {
-        t.message?.takeIf { it.isNotBlank() } ?: "unreadable archive"
-    }
-    private fun useSourceFile(file: File, label: String) {
-        val info = ZipAnalyzer.analyze(file)
-        val supported = info.abis.filter { it in SUPPORTED_ABIS }
-        if (info.abis.isNotEmpty() && supported.isEmpty()) {
-            patchManager.failPatch(
-                "This APK has no supported native ABIs (found: " +
-                    "${info.abis.joinToString(", ")}). " +
-                    "Supported: ${SUPPORTED_ABIS.joinToString(", ")}."
-            )
-            _receivedSource.value = null
-            return
-        }
-        if (supported.isNotEmpty()) {
-            if (supported.size == 1) {
-                setAbi(supported.first())
-            } else if (_abi.value !in supported) {
-                resolveAbi(supported)?.let { setAbi(it) }
-            }
-        } else {
-            runAutoDetectAbi()
-        }
-        _source.value = SourceInfo(label, file.length(), info.entryCount, supported)
-        _receivedSource.value = file
-        refreshAbiStatus()
-    }
-    fun refreshSourceApkStatus() {
-        if (_sourceDownload.value is SourceDownloadState.Fetching ||
-            _sourceDownload.value is SourceDownloadState.Downloading
-        ) {
-            return
-        }
-        viewModelScope.launch(Dispatchers.IO) {
-            val cached = cachedClientApk()
-            if (cached == null) {
-                _sourceDownload.value = null
-                return@launch
-            }
-            val tag = "extras"
-            val remote = tag?.let {
-                ReleaseRepository.probe(ReleaseRepository.assetUrl(CLIENT_APK_REPO, it, CLIENT_APK_ASSET))
-            }
-            val recorded = cached?.let { readSourceStamp(it) }
-            val problem = cached?.let { apkProblem(it) }
-            val outdated = if (cached != null && remote != null) {
-                outdatedReasons(cached, remote, recorded)
-            } else {
-                emptyList()
-            }
-            _sourceDownload.value = when {
-                problem != null -> SourceDownloadState.Corrupt(CLIENT_APK_ASSET, problem)
-                outdated.isNotEmpty() && cached != null -> SourceDownloadState.Outdated(
-                    CLIENT_APK_ASSET,
-                    cached.length(),
-                    remote?.size ?: 0L,
-                    outdated.joinToString(", "),
-                )
-                else -> SourceDownloadState.Done(CLIENT_APK_ASSET)
-            }
-            if (_sourceDownload.value is SourceDownloadState.Done &&
-                cached != null &&
-                _receivedSource.value?.absolutePath != cached.absolutePath &&
-                tag != null
-            ) {
-                useSourceFile(cached, "$cached.name ($tag)")
-            }
-        }
-    }
-    private fun outdatedReasons(
-        cached: File,
-        remote: ReleaseRepository.RemoteInfo,
-        recorded: SourceStamp?,
-    ): List<String> {
-        val reasons = mutableListOf<String>()
-        val localSize = cached.length()
-        if (recorded != null) {
-            if (recorded.size != localSize) reasons += "size changed since download"
-            if (remote.etag.isNotEmpty() && recorded.etag.isNotEmpty() &&
-                remote.etag != recorded.etag
-            ) {
-                reasons += "newer build on GitHub"
-            }
-            if (remote.lastModifiedMillis > 0L && recorded.lastModifiedMillis > 0L &&
-                remote.lastModifiedMillis != recorded.lastModifiedMillis
-            ) {
-                reasons += "rebuilt since download"
-            }
-        } else {
-            if (remote.size > 0L && localSize != remote.size) {
-                reasons += "size differs from GitHub"
-            }
-            if (remote.lastModifiedMillis > 0L &&
-                cached.lastModified() + ASSET_DATE_SLOP < remote.lastModifiedMillis
-            ) {
-                reasons += "older than the GitHub build"
-            }
-        }
-        return reasons
-    }
-    private data class SourceStamp(val size: Long, val etag: String, val lastModifiedMillis: Long)
-    private fun readSourceStamp(cached: File): SourceStamp? {
-        val file = File(cached.parentFile ?: return null, "${cached.name}.stamp")
-        if (!file.isFile) return null
-        return try {
-            val parts = file.readText().trim().split(' ')
-            if (parts.size < 3) {
-                null
-            } else {
-                SourceStamp(parts[0].toLong(), parts[1], parts[2].toLong())
-            }
-        } catch (_: Throwable) {
-            null
-        }
-    }
-    private fun writeSourceStamp(cached: File, remote: ReleaseRepository.RemoteInfo?) {
-        try {
-            cached.parentFile?.mkdirs()
-            File(cached.parentFile, "${cached.name}.stamp").writeText(
-                "${cached.length()} ${remote?.etag.orEmpty()} ${remote?.lastModifiedMillis ?: 0L}"
-            )
-        } catch (_: Throwable) {
-        }
-    }
-    fun downloadSourceApk() {
-        if (_sourceDownload.value is SourceDownloadState.Fetching ||
-            _sourceDownload.value is SourceDownloadState.Downloading
-        ) {
-            return
-        }
-        viewModelScope.launch(Dispatchers.IO) {
-            _sourceDownload.value = SourceDownloadState.Fetching
-            JobProgress.begin(app, JOB_CLIENT_APK, "Client APK", "Finding the release…")
-            var partial: File? = null
-            try {
-                val repo = CLIENT_APK_REPO
-                val tag = "extras"
-                val name = CLIENT_APK_ASSET
-                val url = ReleaseRepository.assetUrl(repo, tag, name)
-                val remote = ReleaseRepository.probe(url)
-                val total = remote?.size ?: 0L
-                val dir = sourceCacheDir.apply { mkdirs() }
-                val dest = File(dir, name)
-                val part = File(dir, "$name.part").also { it.delete() }
-                partial = part
-                ReleaseRepository.downloadUrl(url, part, total) { done, size ->
-                    _sourceDownload.value = SourceDownloadState.Downloading(done, size)
-                    JobProgress.progress(app, JOB_CLIENT_APK, done, size, "Downloading…")
-                }
-                if (total > 0 && part.length() != total) {
-                    part.delete()
-                    throw IOException(
-                        "Download stopped at %.1f MB of %.1f MB".format(java.util.Locale.US,
-                            part.length() / 1048576.0,
-                            total / 1048576.0,
-                        )
-                    )
-                }
-                if (!part.renameTo(dest)) {
-                    part.copyTo(dest, overwrite = true)
-                    part.delete()
-                }
-                apkProblem(dest)?.let {
-                    dest.delete()
-                    throw IOException("The downloaded APK is broken: $it")
-                }
-                writeSourceStamp(dest, remote)
-                useSourceFile(dest, "$name ($tag)")
-                _sourceDownload.value = SourceDownloadState.Done(name)
-                JobProgress.finish(app, JOB_CLIENT_APK, "Client APK ready", apkPath = dest.path)
-            } catch (t: Throwable) {
-                partial?.delete()
-                _sourceDownload.value = SourceDownloadState.Failed(t.message ?: "Download failed")
-                JobProgress.finish(
-                    app,
-                    JOB_CLIENT_APK,
-                    t.message ?: "Download failed",
-                    ok = false,
-                )
-            }
-        }
-    }
-    fun clearSourceDownloadState() {
-        _sourceDownload.value = null
-    }
+    private fun cachedClientApk(): File? = sourceManager.cachedClientApk()
+    fun refreshSourceApkStatus() = sourceManager.refreshSourceApkStatus()
+    fun downloadSourceApk() = sourceManager.downloadSourceApk()
+    fun clearSourceDownloadState() = sourceManager.clearSourceDownloadState()
     fun useCachedBundle() = bundleManager.useCachedBundle()
     fun useLoadedBundle() = bundleManager.useLoadedBundle()
     fun scanLibs(autoLoad: Boolean = false, checkRemote: Boolean = false) = bundleManager.scanLibs(autoLoad, checkRemote)
@@ -675,49 +481,8 @@ private fun externalRoot(app: Application): File {
     fun customLibEntries(bundle: Bundle, selected: Set<String>) = bundleManager.customLibEntries(bundle, selected)
     fun staleCustomLibs() = bundleManager.staleCustomLibs()
     fun patchComponents() = bundleManager.patchComponents()
-    fun fetchAndInstallAddons() {
-        viewModelScope.launch(Dispatchers.IO) {
-            _addons.value = AddonsState.Downloading(0f, "Resolving latest release…")
-            JobProgress.begin(app, JOB_ADDONS, "Addons", "Resolving the release…")
-            try {
-                val tag = "extras"
-                val zip = File(bundleProvider.cacheDir(), "amxx-addons.zip")
-                _addons.value = AddonsState.Downloading(0f, "Downloading addons…")
-                ReleaseRepository.downloadUrl(
-                    ReleaseRepository.assetUrl(repo, tag, "amxx-addons.zip"),
-                    zip,
-                ) { done, total ->
-                    _addons.value = AddonsState.Downloading(
-                        if (total > 0) (done.toDouble() / total).toFloat().coerceIn(0f, 1f) else 0f,
-                        "Downloading addons…"
-                    )
-                    JobProgress.progress(app, JOB_ADDONS, done, total, "Downloading…")
-                }
-                _addons.value = AddonsState.Downloading(1f, "Extracting into ${_installPath.value.substringAfterLast("/")}…")
-                val target = File(_installPath.value)
-                val count = unzipInto(zip, target)
-                patchMetamodConfig(target, _abi.value)
-                val gamedataToggled = applyGamedataAbiPolicy(target, _abi.value)
-                JobProgress.finish(app, JOB_ADDONS, "Addons installed")
-                _addons.value = AddonsState.Done(
-                    buildString {
-                        append("Installed $count addons files into ${target.path}")
-                        if (gamedataToggled) {
-                            val variant = if (_abi.value == "arm64-v8a") "arm64" else "arm32"
-                            append("\n$variant gamedata override selected for ${_abi.value}")
-                        }
-                    }
-                )
-                scanAddonsStatus()
-            } catch (t: Throwable) {
-                _addons.value = AddonsState.Error(t.message ?: "Unknown error")
-                JobProgress.finish(app, JOB_ADDONS, t.message ?: "Install failed", ok = false)
-            }
-        }
-    }
-    fun installAddonsFromBundle() {
-        fetchAndInstallAddons()
-    }
+    fun fetchAndInstallAddons() = addonsManager.fetchAndInstallAddons()
+    fun installAddonsFromBundle() = addonsManager.installAddonsFromBundle()
     private fun unzipInto(zip: File, target: File): Int = patchManager.unzipInto(zip, target)
     private fun patchMetamodConfig(gameDir: File, abi: String) = patchManager.patchMetamodConfig(gameDir, abi)
     private fun applyGamedataAbiPolicy(gameDir: File, abi: String): Boolean = patchManager.applyGamedataAbiPolicy(gameDir, abi)
@@ -750,7 +515,7 @@ private fun externalRoot(app: Application): File {
     private val pluginIniManager = PluginIniManager(
         app = app,
         scope = viewModelScope,
-        installPathProvider = { _installPath.value },
+        installPathProvider = { addonsManager.installPathValue() },
     )
     val pluginInis: StateFlow<List<PluginIniFile>> get() = pluginIniManager.pluginInis
     val iniText: StateFlow<String> get() = pluginIniManager.iniText
@@ -776,7 +541,7 @@ private fun externalRoot(app: Application): File {
             "unknown"
         }
         sb.append("Nexora ").append(ver).append("\n")
-        sb.append("Game dir: ").append(_installPath.value).append("\n\n")
+        sb.append("Game dir: ").append(addonsManager.installPathValue()).append("\n\n")
         fun tail(f: File, max: Int = 60): List<String> = try {
             if (!f.exists()) return listOf("(missing: ${f.path})")
             val lines = f.readLines()
@@ -784,7 +549,7 @@ private fun externalRoot(app: Application): File {
         } catch (t: Throwable) {
             listOf("(unreadable: ${t.message})")
         }
-        val base = File(_installPath.value)
+        val base = File(addonsManager.installPathValue())
         sb.append("=== crash.log ===\n")
         tail(File(base, "crash.log"), 40).forEach { sb.append(it).append("\n") }
         sb.append("\n=== engine.log (tail) ===\n")
@@ -828,118 +593,16 @@ private fun externalRoot(app: Application): File {
             "addons/amxmodx/configs/users.ini",
         )
     }
-    fun autoInstallAddons() {
-        viewModelScope.launch(Dispatchers.IO) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
-                return@launch
-            }
-            val gameDir = File(_installPath.value)
-            if (!gameDir.exists()) return@launch
-            val bundle = bundleManager.loadedBundle ?: bundleProvider.loadCachedBundle(_abi.value) ?: return@launch
-            var installed = 0
-            for (entry in bundle.manifest.entries) {
-                if (!entry.target.startsWith("addons/")) continue
-                val target = File(gameDir, entry.target)
-                if (target.exists()) continue
-                val content = bundle.resolveEntry(entry) ?: continue
-                target.parentFile?.mkdirs()
-                target.writeBytes(content)
-                installed++
-            }
-            if (installed > 0) {
-                _addons.value = AddonsState.Done("Auto-installed $installed addon files")
-            }
-            applyGamedataAbiPolicy(gameDir, _abi.value)
-            scanAddonsStatus()
-        }
-    }
+    fun autoInstallAddons() = addonsManager.autoInstallAddons()
     data class AddonFileStatus(
         val path: String,
         val expected: Boolean,
         val installed: Boolean,
         val outdated: Boolean = false,
     )
-    private val _addonFiles = MutableStateFlow<List<AddonFileStatus>>(emptyList())
-    val addonFiles: StateFlow<List<AddonFileStatus>> = _addonFiles.asStateFlow()
-    private val gamePrefs by lazy {
-        getApplication<Application>().getSharedPreferences("game_prefs", Context.MODE_PRIVATE)
-    }
-    private fun savedGameId(): String =
-        gamePrefs.getString("game_id", GAME_CSTRIKE)?.takeIf {
-            it == GAME_CSTRIKE || it == GAME_CZERO
-        } ?: GAME_CSTRIKE
-    private val gameRootCandidates = listOf(
-        "/storage/emulated/0/.xash",
-        "/storage/emulated/0/xash",
-        "/sdcard/.xash",
-        "/sdcard/xash",
-    )
-    private fun isGameDirInstalled(dir: File): Boolean =
-        dir.isDirectory && (
-            File(dir, "config.cfg").isFile ||
-                File(dir, "dlls").isDirectory ||
-                File(dir, "cl_dlls").isDirectory ||
-                File(dir, "maps").isDirectory ||
-                File(dir, "valve.rc").isFile
-        )
-    private fun resolveGameRoot(): String {
-        val preferred = savedGameId()
-        for (root in gameRootCandidates) {
-            if (isGameDirInstalled(File(root, preferred))) return root
-        }
-        for (root in gameRootCandidates) {
-            for (game in listOf(GAME_CSTRIKE, GAME_CZERO)) {
-                if (isGameDirInstalled(File(root, game))) return root
-            }
-        }
-        return "/storage/emulated/0/.xash"
-    }
-    private fun gameDirFor(gameId: String): String = "${resolveGameRoot()}/$gameId"
-    private val _installPath = MutableStateFlow(gameDirFor(savedGameId()))
-    val installPath: StateFlow<String> = _installPath.asStateFlow()
-    val gameId: StateFlow<String> = _installPath
-        .map { path -> if (path.endsWith("/czero")) GAME_CZERO else GAME_CSTRIKE }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, GAME_CSTRIKE)
-    fun setGame(gameId: String) {
-        if (gameId != GAME_CSTRIKE && gameId != GAME_CZERO) return
-        gamePrefs.edit().putString("game_id", gameId).apply()
-        _installPath.value = gameDirFor(gameId)
-        runAutoDetectAbi()
-        scanAddonsStatus()
-    }
-    fun scanAddonsStatus() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val gameDir = File(_installPath.value)
-            val addonsDir = File(gameDir, "addons")
-            val bundle = bundleManager.loadedBundle ?: bundleProvider.loadCachedBundle(_abi.value)
-            val expected = mutableSetOf<String>()
-            if (bundle != null) {
-                for (entry in bundle.manifest.entries) {
-                    if (!entry.target.startsWith("addons/")) continue
-                    expected.add(entry.target)
-                }
-            }
-            val result = mutableListOf<AddonFileStatus>()
-            for (target in expected.sorted()) {
-                val file = File(gameDir, target)
-                if (!file.exists()) {
-                    result.add(AddonFileStatus(target, expected = true, installed = false))
-                    continue
-                }
-                var outdated = false
-                try {
-                    val entry = bundle?.manifest?.entries?.firstOrNull { it.target == target }
-                    val content = entry?.let { bundle?.resolveEntry(it) }
-                    if (content != null) {
-                        outdated = content.size.toLong() != file.length() ||
-                            !content.contentEquals(file.readBytes())
-                    }
-                } catch (_: Throwable) {
-                    outdated = false
-                }
-                result.add(AddonFileStatus(target, expected = true, installed = true, outdated = outdated))
-            }
-            _addonFiles.value = result
-        }
-    }
+    val addonFiles: StateFlow<List<AddonFileStatus>> get() = addonsManager.addonFiles
+    val installPath: StateFlow<String> get() = addonsManager.installPath
+    val gameId: StateFlow<String> get() = addonsManager.gameId
+    fun setGame(gameId: String) = addonsManager.setGame(gameId)
+    fun scanAddonsStatus() = addonsManager.scanAddonsStatus()
 }
