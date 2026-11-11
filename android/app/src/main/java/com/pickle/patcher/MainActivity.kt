@@ -129,6 +129,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.pickle.patcher.data.StoreApi
+import com.pickle.patcher.patcher.AppUpdate
 import com.pickle.patcher.patcher.PatcherViewModel
 import com.pickle.patcher.ui.screens.AddonsScreen
 import com.pickle.patcher.ui.screens.AdminScreen
@@ -256,7 +257,7 @@ fun PatcherApp(vm: PatcherViewModel) {
     }
     LaunchedEffect(update) {
         val u = update
-        if (u is PatcherViewModel.AppUpdate.Downloaded) {
+        if (u is AppUpdate.Downloaded) {
             vm.installIntentFor(u.file)?.let { context.startActivity(it) }
             vm.consumeDownloaded()
         }
@@ -643,10 +644,10 @@ fun PatcherApp(vm: PatcherViewModel) {
     if (showAbout) {
         AboutDialog(version = appVersion(context), onDismiss = { showAbout = false })
     }
-    val showUpdateDialog = update is PatcherViewModel.AppUpdate.Available ||
-        update is PatcherViewModel.AppUpdate.Downloading ||
-        update is PatcherViewModel.AppUpdate.UpToDate ||
-        update is PatcherViewModel.AppUpdate.Failed
+    val showUpdateDialog = update is AppUpdate.Available ||
+        update is AppUpdate.Downloading ||
+        update is AppUpdate.UpToDate ||
+        update is AppUpdate.Failed
     if (showUpdateDialog) {
         UpdateDialog(vm, update)
     }
@@ -1008,18 +1009,18 @@ private fun formatBytes(bytes: Long): String {
 }
 private fun formatSpeed(bps: Long): String = "${formatBytes(bps)}/s"
 @Composable
-private fun UpdateDialog(vm: PatcherViewModel, state: PatcherViewModel.AppUpdate) {
+private fun UpdateDialog(vm: PatcherViewModel, state: AppUpdate) {
     AlertDialog(
         onDismissRequest = {
-            if (state !is PatcherViewModel.AppUpdate.Downloading) vm.dismissUpdate()
+            if (state !is AppUpdate.Downloading) vm.dismissUpdate()
         },
         title = {
             Text(
                 when (state) {
-                    is PatcherViewModel.AppUpdate.Available -> "New update available ${state.tag}"
-                    is PatcherViewModel.AppUpdate.Downloading -> "Downloading ${state.tag}…"
-                    is PatcherViewModel.AppUpdate.UpToDate -> "Up to date"
-                    is PatcherViewModel.AppUpdate.Failed -> "Update failed"
+                    is AppUpdate.Available -> "New update available ${state.tag}"
+                    is AppUpdate.Downloading -> "Downloading ${state.tag}…"
+                    is AppUpdate.UpToDate -> "Up to date"
+                    is AppUpdate.Failed -> "Update failed"
                     else -> "Update"
                 },
                 style = MaterialTheme.typography.titleLarge,
@@ -1027,7 +1028,7 @@ private fun UpdateDialog(vm: PatcherViewModel, state: PatcherViewModel.AppUpdate
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
-                if (state is PatcherViewModel.AppUpdate.Available) {
+                if (state is AppUpdate.Available) {
                     if (state.commits.isNotEmpty() || state.notes.isNotBlank()) {
                         Column(
                             modifier = Modifier
@@ -1078,7 +1079,7 @@ private fun UpdateDialog(vm: PatcherViewModel, state: PatcherViewModel.AppUpdate
                         color = Gray40,
                     )
                 }
-                if (state is PatcherViewModel.AppUpdate.Downloading) {
+                if (state is AppUpdate.Downloading) {
                     val frac = if (state.total > 0) {
                         (state.downloaded.toDouble() / state.total).toFloat().coerceIn(0f, 1f)
                     } else 0f
@@ -1099,14 +1100,14 @@ private fun UpdateDialog(vm: PatcherViewModel, state: PatcherViewModel.AppUpdate
                         color = Gray40,
                     )
                 }
-                if (state is PatcherViewModel.AppUpdate.UpToDate) {
+                if (state is AppUpdate.UpToDate) {
                     Text(
                         "You have the latest version (${state.tag}).",
                         style = MaterialTheme.typography.bodySmall,
                         color = Gray40,
                     )
                 }
-                if (state is PatcherViewModel.AppUpdate.Failed) {
+                if (state is AppUpdate.Failed) {
                     Text(
                         state.message,
                         style = MaterialTheme.typography.bodySmall,
@@ -1117,12 +1118,12 @@ private fun UpdateDialog(vm: PatcherViewModel, state: PatcherViewModel.AppUpdate
         },
         confirmButton = {
             when (state) {
-                is PatcherViewModel.AppUpdate.Available -> {
+                is AppUpdate.Available -> {
                     TextButton(onClick = { vm.downloadAppUpdate() }) {
                         Text("Download")
                     }
                 }
-                is PatcherViewModel.AppUpdate.Failed -> {
+                is AppUpdate.Failed -> {
                     TextButton(onClick = { vm.checkAppUpdate() }) {
                         Text("Retry")
                     }
@@ -1131,7 +1132,7 @@ private fun UpdateDialog(vm: PatcherViewModel, state: PatcherViewModel.AppUpdate
             }
         },
         dismissButton = {
-            if (state !is PatcherViewModel.AppUpdate.Downloading) {
+            if (state !is AppUpdate.Downloading) {
                 TextButton(onClick = { vm.dismissUpdate() }) {
                     Text("Later")
                 }
