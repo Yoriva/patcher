@@ -54,6 +54,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
+import org.json.JSONArray
 import kotlin.math.PI
 import kotlin.math.sin
 fun getGroupedItemShape(
@@ -463,6 +465,42 @@ fun WavyProgressBar(
     }
 }
 
+
+@Composable
+fun BadgeIcons(
+    badges: JSONArray?,
+    modifier: Modifier = Modifier,
+    maxCount: Int = 4,
+    iconSize: Dp = 18.dp,
+) {
+    if (badges == null || badges.length() == 0) return
+    val count = minOf(maxCount, badges.length())
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+        repeat(count) { index ->
+            val badge = badges.optJSONObject(index)
+            if (badge == null) return@repeat
+            Box(
+                modifier = Modifier
+                    .size(iconSize)
+                    .clip(RoundedCornerShape(iconSize / 3)),
+                contentAlignment = Alignment.Center,
+            ) {
+                AsyncImage(
+                    model = badge.optString("imageUrl"),
+                    contentDescription = badge.optString("name", "Badge"),
+                    modifier = Modifier.fillMaxWidth().height(iconSize),
+                )
+            }
+        }
+        if (badges.length() > maxCount) {
+            Text(
+                "+${badges.length() - maxCount}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
 
 @Composable
 fun SaveChangesDialog(

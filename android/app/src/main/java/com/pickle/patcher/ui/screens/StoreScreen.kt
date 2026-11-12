@@ -583,12 +583,16 @@ fun StoreScreen(
                                         }
                                         Spacer(Modifier.width(10.dp))
                                         Column(Modifier.weight(1f)) {
-                                            Text(
-                                                uname,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.primary,
-                                            )
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    uname,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                )
+                                                Spacer(Modifier.width(4.dp))
+                                                BadgeIcons(u?.optJSONArray("badges"), maxCount = 3, iconSize = 14.dp)
+                                            }
                                             Spacer(Modifier.height(2.dp))
                                             Text(
                                                 c.optString("content"),
@@ -720,6 +724,8 @@ private fun StoreItemCard(obj: JSONObject, onUserClick: (String) -> Unit, onOpen
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    Spacer(Modifier.width(4.dp))
+                    BadgeIcons(userObj?.optJSONArray("badges"), maxCount = 4, iconSize = 14.dp)
                 }
                 if (desc.isNotBlank()) {
                     Spacer(Modifier.height(4.dp))
