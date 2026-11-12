@@ -15,9 +15,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
@@ -81,61 +80,66 @@ fun LibraryScreen(vm: PatcherViewModel) {
         }
     }
     LaunchedEffect(Unit) { vm.scanLibs() }
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
-        LibrarySummary(
-            installed = libs,
-            customCount = customLibs.size,
-        )
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            LibrarySectionHeader(
-                title = "Installed Libraries",
-                action = { CheckUpdatesButton(checking = checking) { vm.refreshLibStatus() } },
+        item {
+            LibrarySummary(
+                installed = libs,
+                customCount = customLibs.size,
             )
-            if (libs.isEmpty()) {
-                EmptyLibraryCard(
-                    title = "No libraries yet",
-                    subtitle = "Download the bundle from the Patch screen to see the files it will inject.",
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                LibrarySectionHeader(
+                    title = "Installed Libraries",
+                    action = { CheckUpdatesButton(checking = checking) { vm.refreshLibStatus() } },
                 )
-            } else {
-                libs.forEachIndexed { index, lib ->
-                    LibraryEntry(
-                        lib = lib,
-                        index = index,
-                        total = libs.size,
-                        onUpdate = { vm.refreshSingleLib(lib.name) },
+                if (libs.isEmpty()) {
+                    EmptyLibraryCard(
+                        title = "No libraries yet",
+                        subtitle = "Download the bundle from the Patch screen to see the files it will inject.",
                     )
+                } else {
+                    libs.forEachIndexed { index, lib ->
+                        LibraryEntry(
+                            lib = lib,
+                            index = index,
+                            total = libs.size,
+                            onUpdate = { vm.refreshSingleLib(lib.name) },
+                        )
+                    }
                 }
             }
         }
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            LibrarySectionHeader(
-                title = "Custom Libraries",
-                action = { AddLibrariesButton { addLibs.launch(arrayOf("*/*")) } },
-            )
-            if (customLibs.isEmpty()) {
-                EmptyLibraryCard(
-                    title = "No custom libraries",
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                LibrarySectionHeader(
+                    title = "Custom Libraries",
+                    action = { AddLibrariesButton { addLibs.launch(arrayOf("*/*")) } },
                 )
-            } else {
-                customLibs.forEachIndexed { index, lib ->
-                    CustomLibraryEntry(
-                        lib = lib,
-                        index = index,
-                        total = customLibs.size,
-                        abi = abi,
-                        stale = staleNames.contains(lib.name),
-                        onRemove = { pendingRemove = lib },
+                if (customLibs.isEmpty()) {
+                    EmptyLibraryCard(
+                        title = "No custom libraries",
                     )
+                } else {
+                    customLibs.forEachIndexed { index, lib ->
+                        CustomLibraryEntry(
+                            lib = lib,
+                            index = index,
+                            total = customLibs.size,
+                            abi = abi,
+                            stale = staleNames.contains(lib.name),
+                            onRemove = { pendingRemove = lib },
+                        )
+                    }
                 }
             }
         }
-        Spacer(Modifier.height(16.dp))
+        item { Spacer(Modifier.height(16.dp)) }
     }
     pendingRemove?.let { lib ->
         AlertDialog(

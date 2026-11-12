@@ -105,13 +105,13 @@ fun ToolsScreen(
         val available = scripts.mapTo(HashSet()) { it.path }
         selected = selected.intersect(available)
     }
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        item {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             GroupedItem(
                 title = "Re-download Mod Bundle",
@@ -153,16 +153,18 @@ fun ToolsScreen(
                 },
             )
         }
-        Spacer(Modifier.height(10.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        }
+        item { Spacer(Modifier.height(10.dp)) }
+        item {
             GroupedItem(
                 title = if (scriptRoot != null) "Plugins folder found" else "Plugins folder",
                 subtitle = scriptRoot ?: "Searching for the game folder…",
                 index = 0,
                 total = 1,
             )
-            Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                PluginsSection(
+        }
+        item {
+            PluginsSection(
             scriptRoot = scriptRoot,
             scripts = scripts,
             selected = selected,
@@ -181,16 +183,17 @@ fun ToolsScreen(
             onRetry = { vm.refreshScripts() },
             onAddPlugin = { pickPlugin() },
         )
-        BuildSection(
-            compile = compile,
-            scriptRoot = scriptRoot,
-            scriptCount = scripts.size,
-            selectedSources = selectedSources,
-            onCompile = { vm.compileAll(selectedSources) },
-        )
-            }
         }
-        Spacer(Modifier.height(16.dp))
+        item {
+            BuildSection(
+                compile = compile,
+                scriptRoot = scriptRoot,
+                scriptCount = scripts.size,
+                selectedSources = selectedSources,
+                onCompile = { vm.compileAll(selectedSources) },
+            )
+        }
+        item { Spacer(Modifier.height(16.dp)) }
     }
     stampError?.let { (name, message) ->
         ErrorDialog(

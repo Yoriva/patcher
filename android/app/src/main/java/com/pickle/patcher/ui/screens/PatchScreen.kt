@@ -24,13 +24,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.CheckCircle
@@ -87,26 +86,27 @@ internal fun displayAbi(abi: String): String = when (abi) {
 }
 @Composable
 fun PatchScreen(vm: PatcherViewModel, onOpenLibraries: () -> Unit) {
-    val scroll = rememberScrollState()
+
     LaunchedEffect(Unit) {
         vm.runAutoDetectAbi()
         vm.refreshSourceApkStatus()
     }
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(scroll)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        ArchitectureSection(vm)
-        GameStatusCard(vm)
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            ClientRow(vm, index = 0, total = 3)
-            LibrariesRow(vm, index = 1, total = 3, onOpenLibraries = onOpenLibraries)
-            BuildRow(vm, index = 2, total = 3)
+        item { ArchitectureSection(vm) }
+        item { GameStatusCard(vm) }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                ClientRow(vm, index = 0, total = 3)
+                LibrariesRow(vm, index = 1, total = 3, onOpenLibraries = onOpenLibraries)
+                BuildRow(vm, index = 2, total = 3)
+            }
         }
-        Spacer(Modifier.height(16.dp))
+        item { Spacer(Modifier.height(16.dp)) }
     }
 }
 @Composable
