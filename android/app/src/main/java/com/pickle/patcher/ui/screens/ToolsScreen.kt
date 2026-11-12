@@ -37,6 +37,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -225,43 +226,46 @@ private fun PluginsSection(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.weight(1f),
             )
-            Surface(
+            FilledTonalButton(
+                onClick = onAddPlugin,
+                modifier = Modifier.height(38.dp),
                 shape = RoundedCornerShape(percent = 50),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier.clickable(onClick = onAddPlugin),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                ),
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         imageVector = Icons.Filled.Add,
                         contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp),
                     )
-                    Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.width(6.dp))
                     Text(
                         text = "Add",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
             if (scripts.isNotEmpty()) {
                 Spacer(Modifier.width(6.dp))
-                Surface(
+                FilledTonalButton(
+                    onClick = onSelectAll,
+                    modifier = Modifier.height(38.dp),
                     shape = RoundedCornerShape(percent = 50),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.clickable(onClick = onSelectAll),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    ),
                 ) {
                     Text(
                         text = if (selected.size == scripts.size) "Clear" else "Select all",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                     )
                 }
             }
