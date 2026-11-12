@@ -17,6 +17,9 @@ object EngineProbe {
     private val defaultRoots = listOf(
         "/storage/emulated/0/.xash",
         "/storage/emulated/0/xash",
+        "/storage/emulated/0/Android/data/$ENGINE_TEST/files",
+        "/storage/emulated/0/Android/data/$ENGINE_RELEASE/files",
+        "/storage/emulated/0/Android/data/$ENGINE_PLAY/files",
         "/sdcard/.xash",
         "/sdcard/xash",
     )
