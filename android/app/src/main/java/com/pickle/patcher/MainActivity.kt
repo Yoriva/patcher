@@ -296,9 +296,17 @@ fun PatcherApp(vm: PatcherViewModel) {
     var showTheme by remember { mutableStateOf(false) }
     var showPluginConfig by remember { mutableStateOf(false) }
     BackHandler(
-        enabled = isMainTab && pagerState.currentPage != 0 && !showSettings && !showTheme && !showSetup,
+        enabled = showPluginConfig ||
+            showTheme ||
+            showSettings ||
+            (isMainTab && pagerState.currentPage != 0 && !showSetup),
     ) {
-        tabScope.launch { pagerState.animateScrollToPage(0) }
+        when {
+            showPluginConfig -> showPluginConfig = false
+            showTheme -> showTheme = false
+            showSettings -> showSettings = false
+            else -> tabScope.launch { pagerState.animateScrollToPage(0) }
+        }
     }
     val settingsRotation by animateFloatAsState(
         targetValue = if (showSettings) 90f else 0f,
