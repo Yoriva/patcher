@@ -7,6 +7,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -224,33 +225,43 @@ private fun PluginsSection(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(
-                onClick = onAddPlugin,
-                contentPadding = PaddingValues(horizontal = 8.dp),
+            Surface(
+                shape = RoundedCornerShape(percent = 50),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.clickable(onClick = onAddPlugin),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Icon(
                         imageVector = Icons.Filled.Add,
                         contentDescription = null,
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.width(4.dp))
                     Text(
                         text = "Add",
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
             if (scripts.isNotEmpty()) {
-                TextButton(
-                    onClick = onSelectAll,
-                    contentPadding = PaddingValues(horizontal = 8.dp),
+                Spacer(Modifier.width(6.dp))
+                Surface(
+                    shape = RoundedCornerShape(percent = 50),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.clickable(onClick = onSelectAll),
                 ) {
                     Text(
                         text = if (selected.size == scripts.size) "Clear" else "Select all",
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                     )
                 }
             }
