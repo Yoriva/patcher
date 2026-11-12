@@ -4,6 +4,8 @@ import android.content.ClipboardManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -149,15 +151,16 @@ fun ToolsScreen(
                 },
             )
         }
-        Spacer(Modifier.height(10.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Spacer(Modifier.height(20.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
             GroupedItem(
                 title = if (scriptRoot != null) "Plugins folder found" else "Plugins folder",
                 subtitle = scriptRoot ?: "Searching for the game folder…",
                 index = 0,
-                total = 2,
+                total = 1,
             )
-        PluginsSection(
+            Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                PluginsSection(
             scriptRoot = scriptRoot,
             scripts = scripts,
             selected = selected,
@@ -183,6 +186,7 @@ fun ToolsScreen(
             selectedSources = selectedSources,
             onCompile = { vm.compileAll(selectedSources) },
         )
+            }
         }
         Spacer(Modifier.height(16.dp))
     }
@@ -260,17 +264,28 @@ private fun PluginsSection(
                 text = "No .sma plugin sources found in the detected folder.",
                 onRetry = onRetry,
             )
-            else -> Column {
-                scripts.forEachIndexed { index, source ->
-                    ScriptRow(
-                        source = source,
-                        selected = source.path in selected,
-                        error = failures[source.path],
-                        index = index,
-                        total = scripts.size,
-                        onClick = { onToggle(source.path) },
-                        onErrorClick = { message -> onErrorClick(source.path, message) },
-                    )
+            else -> Card(
+                shape = CardShape,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 340.dp),
+                ) {
+                    items(scripts, key = { it.path }) { source ->
+                        val index = scripts.indexOf(source)
+                        ScriptRow(
+                            source = source,
+                            selected = source.path in selected,
+                            error = failures[source.path],
+                            index = index,
+                            total = scripts.size,
+                            onClick = { onToggle(source.path) },
+                            onErrorClick = { message -> onErrorClick(source.path, message) },
+                        )
+                    }
                 }
             }
         }
