@@ -266,14 +266,14 @@ private fun PluginsSection(
             )
             else -> Card(
                 shape = CardShape,
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 138.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalArrangement = Arrangement.spacedBy(0.dp),
                 ) {
                     items(scripts, key = { it.path }) { source ->
                         val index = scripts.indexOf(source)
@@ -315,7 +315,7 @@ private fun ScriptRow(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 1.dp)
+            .padding(vertical = 0.dp)
             .clickable(onClick = onClick),
         shape = getGroupedItemShape(index, total),
         colors = CardDefaults.cardColors(containerColor = container),
