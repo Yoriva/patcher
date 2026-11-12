@@ -110,12 +110,12 @@ fun ToolsScreen(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             GroupedItem(
                 title = "Re-download Mod Bundle",
                 subtitle = "Fetch latest libraries and configuration assets",
                 index = 0,
-                total = 3,
+                total = 1,
                 trailing = {
                     SmallButton(
                         text = "Fetch",
@@ -127,8 +127,8 @@ fun ToolsScreen(
             GroupedItem(
                 title = "Reinstall Addons",
                 subtitle = "Re-fetch AMXX addon scripts and configs",
-                index = 1,
-                total = 3,
+                index = 0,
+                total = 1,
                 trailing = {
                     SmallButton(
                         text = "Reinstall",
@@ -140,8 +140,8 @@ fun ToolsScreen(
             GroupedItem(
                 title = "Plugin Config",
                 subtitle = "Edit plugins.ini order and toggles",
-                index = 2,
-                total = 3,
+                index = 0,
+                total = 1,
                 trailing = {
                     SmallButton(
                         text = "Edit",
@@ -151,7 +151,7 @@ fun ToolsScreen(
                 },
             )
         }
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(10.dp))
         Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
             GroupedItem(
                 title = if (scriptRoot != null) "Plugins folder found" else "Plugins folder",
@@ -264,29 +264,23 @@ private fun PluginsSection(
                 text = "No .sma plugin sources found in the detected folder.",
                 onRetry = onRetry,
             )
-            else -> Card(
-                shape = CardShape,
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
-                modifier = Modifier.fillMaxWidth(),
+            else -> LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 138.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 138.dp),
-                    verticalArrangement = Arrangement.spacedBy(0.dp),
-                ) {
-                    items(scripts, key = { it.path }) { source ->
-                        val index = scripts.indexOf(source)
-                        ScriptRow(
-                            source = source,
-                            selected = source.path in selected,
-                            error = failures[source.path],
-                            index = index,
-                            total = scripts.size,
-                            onClick = { onToggle(source.path) },
-                            onErrorClick = { message -> onErrorClick(source.path, message) },
-                        )
-                    }
+                items(scripts, key = { it.path }) { source ->
+                    val index = scripts.indexOf(source)
+                    ScriptRow(
+                        source = source,
+                        selected = source.path in selected,
+                        error = failures[source.path],
+                        index = index,
+                        total = scripts.size,
+                        onClick = { onToggle(source.path) },
+                        onErrorClick = { message -> onErrorClick(source.path, message) },
+                    )
                 }
             }
         }
