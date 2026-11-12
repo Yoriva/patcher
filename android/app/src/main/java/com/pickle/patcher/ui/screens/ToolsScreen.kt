@@ -264,23 +264,29 @@ private fun PluginsSection(
                 text = "No .sma plugin sources found in the detected folder.",
                 onRetry = onRetry,
             )
-            else -> LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 138.dp),
-                verticalArrangement = Arrangement.spacedBy(0.dp),
+            else -> Card(
+                shape = CardShape,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                items(scripts, key = { it.path }) { source ->
-                    val index = scripts.indexOf(source)
-                    ScriptRow(
-                        source = source,
-                        selected = source.path in selected,
-                        error = failures[source.path],
-                        index = index,
-                        total = scripts.size,
-                        onClick = { onToggle(source.path) },
-                        onErrorClick = { message -> onErrorClick(source.path, message) },
-                    )
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 138.dp),
+                    verticalArrangement = Arrangement.spacedBy(0.dp),
+                ) {
+                    items(scripts, key = { it.path }) { source ->
+                        val index = scripts.indexOf(source)
+                        ScriptRow(
+                            source = source,
+                            selected = source.path in selected,
+                            error = failures[source.path],
+                            index = index,
+                            total = scripts.size,
+                            onClick = { onToggle(source.path) },
+                            onErrorClick = { message -> onErrorClick(source.path, message) },
+                        )
+                    }
                 }
             }
         }
