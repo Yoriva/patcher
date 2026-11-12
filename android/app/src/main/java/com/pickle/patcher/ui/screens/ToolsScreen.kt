@@ -264,29 +264,23 @@ private fun PluginsSection(
                 text = "No .sma plugin sources found in the detected folder.",
                 onRetry = onRetry,
             )
-            else -> Card(
-                shape = CardShape,
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
-                modifier = Modifier.fillMaxWidth(),
+            else -> LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 176.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 138.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    items(scripts, key = { it.path }) { source ->
-                        val index = scripts.indexOf(source)
-                        ScriptRow(
-                            source = source,
-                            selected = source.path in selected,
-                            error = failures[source.path],
-                            index = index,
-                            total = scripts.size,
-                            onClick = { onToggle(source.path) },
-                            onErrorClick = { message -> onErrorClick(source.path, message) },
-                        )
-                    }
+                items(scripts, key = { it.path }) { source ->
+                    val index = scripts.indexOf(source)
+                    ScriptRow(
+                        source = source,
+                        selected = source.path in selected,
+                        error = failures[source.path],
+                        index = index,
+                        total = scripts.size,
+                        onClick = { onToggle(source.path) },
+                        onErrorClick = { message -> onErrorClick(source.path, message) },
+                    )
                 }
             }
         }
