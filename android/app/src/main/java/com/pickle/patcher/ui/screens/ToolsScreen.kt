@@ -266,14 +266,14 @@ private fun PluginsSection(
             )
             else -> Card(
                 shape = CardShape,
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 172.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                        .heightIn(max = 138.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     items(scripts, key = { it.path }) { source ->
                         val index = scripts.indexOf(source)
