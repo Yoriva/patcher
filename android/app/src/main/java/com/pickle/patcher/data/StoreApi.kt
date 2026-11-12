@@ -347,7 +347,7 @@ class StoreApi(private val baseUrl: String = StoreApiDefaults.BASE_URL, private 
                     val friendly = when (resp.code) {
                         413 -> "File too large (max ~4.5MB per request)"
                         429 -> serverMsg ?: "Too many requests, try later"
-                        401 -> "Not authorized, please log in"
+                        401 -> serverMsg ?: "Not authorized, please log in"
                         404 -> "Not found"
                         else -> serverMsg ?: "HTTP ${resp.code}"
                     }

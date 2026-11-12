@@ -143,6 +143,9 @@ import com.pickle.patcher.ui.screens.SettingsScreen
 import com.pickle.patcher.ui.screens.StoreManageScreen
 import com.pickle.patcher.ui.screens.StoreProfileScreen
 import com.pickle.patcher.ui.screens.StoreScreen
+import com.pickle.patcher.ui.screens.StoreUploadScreen
+import com.pickle.patcher.ui.screens.PluginEditorScreen
+import com.pickle.patcher.ui.screens.SaveChangesDialog
 import com.pickle.patcher.ui.screens.TopBarBackButton
 import com.pickle.patcher.ui.screens.getGroupedItemShape
 import com.pickle.patcher.ui.screens.toDisplayVersion
@@ -179,11 +182,9 @@ class MainActivity : ComponentActivity() {
 }
 private enum class Dest(val route: String) {
     Tabs("tabs"),
-    Libraries("libraries"),
     StoreLogin("store/login"),
     StoreRegister("store/register"),
     StoreVerifyEmail("store/verify-email"),
-    StoreUpload("store/upload"),
     StoreProfile("store/profile/{username}"),
     StoreManage("store/manage"),
     StoreAdmin("store/admin"),
@@ -295,15 +296,31 @@ fun PatcherApp(vm: PatcherViewModel) {
     var showSettings by remember { mutableStateOf(false) }
     var showTheme by remember { mutableStateOf(false) }
     var showPluginConfig by remember { mutableStateOf(false) }
+    var showPluginEditor by remember { mutableStateOf(false) }
+    var pluginFile by remember { mutableStateOf<com.pickle.patcher.patcher.ConfigFileInfo?>(null) }
+    var showPluginSaveDialog by remember { mutableStateOf(false) }
+    val iniDirty by vm.iniDirty.collectAsState()
+    var showLibraries by remember { mutableStateOf(false) }
+    var showUpload by remember { mutableStateOf(false) }
     BackHandler(
-        enabled = showPluginConfig ||
+        enabled = showPluginSaveDialog ||
+            showPluginEditor ||
+            showPluginConfig ||
             showTheme ||
+            showUpload ||
+            showLibraries ||
             showSettings ||
             (isMainTab && pagerState.currentPage != 0 && !showSetup),
     ) {
         when {
+            showPluginSaveDialog -> showPluginSaveDialog = false
+            showPluginEditor -> {
+                if (iniDirty) showPluginSaveDialog = true else showPluginEditor = false
+            }
             showPluginConfig -> showPluginConfig = false
             showTheme -> showTheme = false
+            showUpload -> showUpload = false
+            showLibraries -> showLibraries = false
             showSettings -> showSettings = false
             else -> tabScope.launch { pagerState.animateScrollToPage(0) }
         }
@@ -356,10 +373,8 @@ fun PatcherApp(vm: PatcherViewModel) {
                                 }
                             } else {
                                 val title = when (currentRoute) {
-                                    Dest.Libraries.route -> "Libraries"
                                     Dest.StoreLogin.route -> "Sign In"
                                     Dest.StoreRegister.route -> "Register"
-                                    Dest.StoreUpload.route -> "Upload Package"
                                     Dest.StoreManage.route -> "Manage Posts"
                                     else -> "Nexora"
                                 }
@@ -470,14 +485,16 @@ fun PatcherApp(vm: PatcherViewModel) {
                     },
                 ) {
                     composable(Dest.Tabs.route) {
+                        val storeApi = remember { StoreApi(context = context) }
                         HorizontalPager(
                             state = pagerState,
                             modifier = Modifier.fillMaxSize(),
+                            beyondViewportPageCount = 1,
                         ) { page ->
                             when (page) {
                                 0 -> PatchScreen(
                                     vm = vm,
-                                    onOpenLibraries = { nav.navigate(Dest.Libraries.route) },
+                                    onOpenLibraries = { showLibraries = true },
                                 )
                                 1 -> ToolsScreen(
                                     vm = vm,
@@ -486,16 +503,15 @@ fun PatcherApp(vm: PatcherViewModel) {
                                     onOpenPluginConfig = { showPluginConfig = true },
                                 )
                                 else -> {
-                                    val api = StoreApi(context = context)
                                     StoreScreen(
-                                        api = api,
+                                        api = storeApi,
                                         onUserClick = { username -> nav.navigate("store/profile/$username") },
+                                        onUploadClick = { showUpload = true },
                                     )
                                 }
                             }
                         }
                     }
-                    composable(Dest.Libraries.route) { LibraryScreen(vm) }
                     composable(Dest.StoreLogin.route) {
                         val api = StoreApi(context = context)
                         com.pickle.patcher.ui.screens.StoreLoginScreen(
@@ -522,13 +538,6 @@ fun PatcherApp(vm: PatcherViewModel) {
                             email = email,
                             onBack = { nav.popBackStack() },
                             onVerified = { nav.popBackStack() },
-                        )
-                    }
-                    composable(Dest.StoreUpload.route) {
-                        val api = StoreApi(context = context)
-                        com.pickle.patcher.ui.screens.StoreUploadScreen(
-                            api = api,
-                            onUploadSuccess = { nav.popBackStack() },
                         )
                     }
                     composable(Dest.StoreManage.route) {
@@ -611,6 +620,95 @@ fun PatcherApp(vm: PatcherViewModel) {
             }
         }
         AnimatedVisibility(
+            visible = showLibraries,
+            enter = slideInHorizontally(
+                initialOffsetX = { fullWidth -> fullWidth },
+                animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+            ) + fadeIn(animationSpec = tween(durationMillis = 250)),
+            exit = slideOutHorizontally(
+                targetOffsetX = { fullWidth -> fullWidth },
+                animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+            ) + fadeOut(animationSpec = tween(durationMillis = 250)),
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background,
+            ) {
+                Scaffold(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    topBar = {
+                        TopAppBar(
+                            title = {
+                                Text(
+                                    text = "Libraries",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                )
+                            },
+                            navigationIcon = {
+                                TopBarBackButton(onClick = { showLibraries = false })
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = MaterialTheme.colorScheme.background,
+                                titleContentColor = MaterialTheme.colorScheme.onBackground,
+                            ),
+                        )
+                    },
+                ) { padding ->
+                    Column(Modifier.fillMaxSize().padding(padding)) {
+                        LibraryScreen(vm)
+                    }
+                }
+            }
+        }
+        AnimatedVisibility(
+            visible = showUpload,
+            enter = slideInHorizontally(
+                initialOffsetX = { fullWidth -> fullWidth },
+                animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+            ) + fadeIn(animationSpec = tween(durationMillis = 250)),
+            exit = slideOutHorizontally(
+                targetOffsetX = { fullWidth -> fullWidth },
+                animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+            ) + fadeOut(animationSpec = tween(durationMillis = 250)),
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background,
+            ) {
+                Scaffold(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    topBar = {
+                        TopAppBar(
+                            title = {
+                                Text(
+                                    text = "Upload",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                )
+                            },
+                            navigationIcon = {
+                                TopBarBackButton(onClick = { showUpload = false })
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = MaterialTheme.colorScheme.background,
+                                titleContentColor = MaterialTheme.colorScheme.onBackground,
+                            ),
+                        )
+                    },
+                ) { padding ->
+                    Column(Modifier.fillMaxSize().padding(padding)) {
+                        StoreUploadScreen(
+                            api = StoreApi(context = context),
+                            onUploadSuccess = { showUpload = false },
+                        )
+                    }
+                }
+            }
+        }
+        AnimatedVisibility(
             visible = showPluginConfig,
             enter = slideInHorizontally(
                 initialOffsetX = { fullWidth -> fullWidth },
@@ -631,7 +729,7 @@ fun PatcherApp(vm: PatcherViewModel) {
                         TopAppBar(
                             title = {
                                 Text(
-                                    text = "Plugin Config",
+                                    text = "Config Editor",
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onBackground,
@@ -648,10 +746,79 @@ fun PatcherApp(vm: PatcherViewModel) {
                     },
                 ) { padding ->
                     Column(Modifier.fillMaxSize().padding(padding)) {
-                        PluginsScreen(vm)
+                        PluginsScreen(
+                            vm = vm,
+                            onSelect = {
+                                pluginFile = it
+                                showPluginEditor = true
+                            },
+                        )
                     }
                 }
             }
+        }
+        AnimatedVisibility(
+            visible = showPluginEditor,
+            enter = slideInHorizontally(
+                initialOffsetX = { fullWidth -> fullWidth },
+                animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+            ) + fadeIn(animationSpec = tween(durationMillis = 250)),
+            exit = slideOutHorizontally(
+                targetOffsetX = { fullWidth -> fullWidth },
+                animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+            ) + fadeOut(animationSpec = tween(durationMillis = 250)),
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background,
+            ) {
+                Scaffold(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    topBar = {
+                        TopAppBar(
+                            title = {
+                                Text(
+                                    text = pluginFile?.name ?: "Config",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                )
+                            },
+                            navigationIcon = {
+                                TopBarBackButton(onClick = {
+                                    if (iniDirty) showPluginSaveDialog = true else showPluginEditor = false
+                                })
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = MaterialTheme.colorScheme.background,
+                                titleContentColor = MaterialTheme.colorScheme.onBackground,
+                            ),
+                        )
+                    },
+                ) { padding ->
+                    val info = pluginFile
+                    if (info != null) {
+                        Column(Modifier.fillMaxSize().padding(padding)) {
+                            PluginEditorScreen(vm = vm, info = info)
+                        }
+                    }
+                }
+            }
+        }
+        if (showPluginSaveDialog && pluginFile != null) {
+            SaveChangesDialog(
+                fileName = pluginFile!!.name,
+                onSave = {
+                    vm.savePluginIni(pluginFile!!.file)
+                    showPluginEditor = false
+                    showPluginSaveDialog = false
+                },
+                onDiscard = {
+                    showPluginEditor = false
+                    showPluginSaveDialog = false
+                },
+                onCancel = { showPluginSaveDialog = false },
+            )
         }
         if (showSetup) {
             SetupScreen(

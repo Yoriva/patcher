@@ -1,21 +1,31 @@
 package com.pickle.patcher.data
 import android.content.Context
-import android.os.Build
 import android.os.Environment
 import com.pickle.patcher.lib.Bundle
 import java.io.File
 const val NEXORA_ROOT = "nexora"
+internal fun migrateLegacyNexoraRoot(legacyRoot: File, newRoot: File) {
+    if (!legacyRoot.isDirectory || legacyRoot.absolutePath == newRoot.absolutePath) return
+    for (sub in listOf("apk-source", "downloads", "libs", "patcher")) {
+        val legacyDir = File(legacyRoot, sub)
+        if (!legacyDir.isDirectory) continue
+        val targetDir = File(newRoot, sub)
+        targetDir.mkdirs()
+        val children = legacyDir.listFiles() ?: continue
+        for (child in children) {
+            val dest = File(targetDir, child.name)
+            if (dest.exists()) continue
+            child.renameTo(dest)
+        }
+        runCatching { legacyDir.delete() }
+    }
+    runCatching { legacyRoot.delete() }
+}
 class BundleProvider(private val context: Context) {
     fun cacheDir(): File {
-        val sd = File(Environment.getExternalStorageDirectory(), NEXORA_ROOT)
-        val root = if (
-            Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||
-            Environment.isExternalStorageManager()
-        ) {
-            sd
-        } else {
-            File(context.getExternalFilesDir(null) ?: context.cacheDir, NEXORA_ROOT)
-        }
+        val base = context.getExternalFilesDir(null) ?: context.cacheDir
+        val root = File(base, NEXORA_ROOT)
+        migrateLegacyNexoraRoot(File(Environment.getExternalStorageDirectory(), NEXORA_ROOT), root)
         val dir = File(root, "downloads")
         dir.mkdirs()
         return dir

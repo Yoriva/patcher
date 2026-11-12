@@ -140,8 +140,8 @@ fun ToolsScreen(
                 },
             )
             GroupedItem(
-                title = "Plugin Config",
-                subtitle = "Edit plugins.ini order and toggles",
+                title = "Config Editor",
+                subtitle = "Edit AMX Mod X and YapB config files",
                 index = 2,
                 total = 3,
                 trailing = {

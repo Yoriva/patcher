@@ -32,7 +32,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -462,3 +464,31 @@ fun WavyProgressBar(
 }
 
 
+@Composable
+fun SaveChangesDialog(
+    fileName: String,
+    onSave: () -> Unit,
+    onDiscard: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Save changes?", color = MaterialTheme.colorScheme.onSurface) },
+        text = { Text("You have unsaved changes to $fileName.", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+        confirmButton = {
+            TextButton(onClick = onSave) {
+                Text("Save", color = MaterialTheme.colorScheme.primary)
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onCancel) {
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                TextButton(onClick = onDiscard) {
+                    Text("Discard", color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+    )
+}

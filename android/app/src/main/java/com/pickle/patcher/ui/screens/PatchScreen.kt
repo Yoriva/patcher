@@ -13,6 +13,8 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -63,6 +65,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -438,12 +441,51 @@ private fun BuildRow(vm: PatcherViewModel, index: Int, total: Int) {
     ) {
         val failedState = patchState as? PatchUiState.Failed
         if (failedState != null) {
+            var showLog by remember { mutableStateOf(false) }
+            val patchLog by vm.patchLog.collectAsState()
             Text(
                 text = failedState.message,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 14.dp),
+                modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 10.dp),
             )
+            if (patchLog.isNotEmpty()) {
+                TextButton(
+                    onClick = { showLog = !showLog },
+                    modifier = Modifier.padding(start = 10.dp, bottom = 2.dp),
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.List,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = if (showLog) "Hide log" else "View log",
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                if (showLog) {
+                    Surface(
+                        shape = MaterialTheme.shapes.medium,
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 18.dp, end = 18.dp, bottom = 12.dp)
+                            .heightIn(max = 220.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        Text(
+                            text = patchLog.takeLast(80).joinToString("\n"),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(12.dp),
+                        )
+                    }
+                }
+            }
         }
         if (running != null) {
             ProgressFooter(

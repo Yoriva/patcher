@@ -352,6 +352,7 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     fun effectivePatchWorkers(): Int = patchManager.effectivePatchWorkers()
     fun setPatchWorkers(count: Int) = patchManager.setPatchWorkers(count)
     val patch: StateFlow<PatchUiState> get() = patchManager.patch
+    val patchLog: StateFlow<List<String>> get() = patchManager.patchLog
         private val compilerManager = CompilerManager(
         app = app,
         bundleProvider = bundleProvider,
@@ -424,16 +425,12 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     val repo = "berkchy/nexora"
 private val externalRoot: File = externalRoot(app)
 private fun externalRoot(app: Application): File {
-        val sd = File(Environment.getExternalStorageDirectory(), NEXORA_ROOT)
-        return if (
-            Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||
-            Environment.isExternalStorageManager()
-        ) {
-            sd
-        } else {
-            app.getExternalFilesDir(null) ?: app.cacheDir
-        }
-    }
+        val base = app.getExternalFilesDir(null) ?: app.cacheDir
+        val newRoot = File(base, NEXORA_ROOT)
+        com.pickle.patcher.data.migrateLegacyNexoraRoot(File(Environment.getExternalStorageDirectory(), NEXORA_ROOT), newRoot)
+        newRoot.mkdirs()
+        return newRoot
+}
     private val workDir = File(externalRoot, "patcher")
     private fun workFile(name: String): File {
         workDir.mkdirs()
@@ -520,7 +517,7 @@ private fun externalRoot(app: Application): File {
         scope = viewModelScope,
         installPathProvider = { addonsManager.installPathValue() },
     )
-    val pluginInis: StateFlow<List<PluginIniFile>> get() = pluginIniManager.pluginInis
+    val pluginInis: StateFlow<List<ConfigFileInfo>> get() = pluginIniManager.pluginInis
     val iniText: StateFlow<String> get() = pluginIniManager.iniText
     val iniDirty: StateFlow<Boolean> get() = pluginIniManager.iniDirty
     val iniSavedAt: StateFlow<Long> get() = pluginIniManager.iniSavedAt
@@ -529,7 +526,6 @@ private fun externalRoot(app: Application): File {
     fun savePluginIni(file: File) = pluginIniManager.savePluginIni(file)
     fun revertPluginIni(file: File) = pluginIniManager.revertPluginIni(file)
     fun loadPluginInis() = pluginIniManager.loadPluginInis()
-    fun togglePluginLine(iniName: String, index: Int) = pluginIniManager.togglePluginLine(iniName, index)
     suspend fun buildLogShareText(): String = kotlinx.coroutines.withContext(Dispatchers.IO) {
         val sb = StringBuilder()
         val pm = getApplication<Application>().packageManager

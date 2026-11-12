@@ -9,18 +9,21 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 
-data class PluginLine(
-    val text: String,
-    val enabled: Boolean,
-    val editable: Boolean,
-    val isPlugin: Boolean,
-)
-
-data class PluginIniFile(
+data class ConfigFileInfo(
     val name: String,
     val file: File,
-    val lines: List<PluginLine>,
+    val group: String,
+    val relPath: String,
 )
+
+private data class ScanGroup(val label: String, val path: String, val recursive: Boolean = false)
+
+private val SCAN_GROUPS = listOf(
+    ScanGroup("AMX Mod X", "addons/amxmodx/configs"),
+    ScanGroup("YapB", "addons/yapb/conf"),
+)
+
+private val CONFIG_EXTENSIONS = setOf("ini", "cfg", "txt")
 
 class PluginIniManager(
     private val app: Application,
@@ -28,8 +31,8 @@ class PluginIniManager(
     private val installPathProvider: () -> String,
 ) {
 
-    private val _pluginInis = MutableStateFlow<List<PluginIniFile>>(emptyList())
-    val pluginInis: StateFlow<List<PluginIniFile>> = _pluginInis.asStateFlow()
+    private val _pluginInis = MutableStateFlow<List<ConfigFileInfo>>(emptyList())
+    val pluginInis: StateFlow<List<ConfigFileInfo>> = _pluginInis.asStateFlow()
 
     private val _iniText = MutableStateFlow("")
     val iniText: StateFlow<String> = _iniText.asStateFlow()
@@ -40,20 +43,24 @@ class PluginIniManager(
     private val _iniSavedAt = MutableStateFlow(0L)
     val iniSavedAt: StateFlow<Long> = _iniSavedAt.asStateFlow()
 
+    private var originalText = ""
+
     fun openPluginIni(file: File) {
         scope.launch(Dispatchers.IO) {
-            _iniText.value = try {
+            val content = try {
                 if (file.exists()) file.readText() else ""
             } catch (t: Throwable) {
                 "# could not read ${file.name}\n"
             }
+            originalText = content
+            _iniText.value = content
             _iniDirty.value = false
         }
     }
 
     fun editIniText(text: String) {
         _iniText.value = text
-        _iniDirty.value = true
+        _iniDirty.value = text != originalText
     }
 
     fun savePluginIni(file: File) {
@@ -67,6 +74,7 @@ class PluginIniManager(
                 false
             }
             if (ok) {
+                originalText = text
                 _iniDirty.value = false
                 _iniSavedAt.value = System.currentTimeMillis()
                 loadPluginInis()
@@ -78,50 +86,20 @@ class PluginIniManager(
 
     fun loadPluginInis() {
         scope.launch(Dispatchers.IO) {
-            val configs = File(File(installPathProvider()), "addons/amxmodx/configs")
-            val files = configs.listFiles { f ->
-                f.isFile && f.name.startsWith("plugins") && f.name.endsWith(".ini")
-            }?.sortedBy { it.name } ?: emptyList()
-            _pluginInis.value = files.map { f ->
-                PluginIniFile(
-                    name = f.name,
-                    file = f,
-                    lines = f.readLines().map { line ->
-                        val t = line.trim()
-                        val stripped = t.removePrefix(";").trim()
-                        val first = stripped.split(Regex("\\s+")).firstOrNull().orEmpty()
-                        if (first.endsWith(".amxx", ignoreCase = true)) {
-                            PluginLine(line, enabled = !t.startsWith(";"), editable = true, isPlugin = true)
-                        } else {
-                            PluginLine(line, enabled = true, editable = false, isPlugin = false)
-                        }
-                    }
-                )
+            val gameDir = File(installPathProvider())
+            val scanned = mutableListOf<ConfigFileInfo>()
+            for (group in SCAN_GROUPS) {
+                val dir = if (group.path.isEmpty()) gameDir else File(gameDir, group.path)
+                val files = dir.listFiles() ?: continue
+                for (f in files) {
+                    if (!f.isFile) continue
+                    val ext = f.extension.lowercase()
+                    if (ext !in CONFIG_EXTENSIONS) continue
+                    val rel = f.relativeTo(gameDir).path.replace('\\', '/')
+                    scanned.add(ConfigFileInfo(f.name, f, group.label, rel))
+                }
             }
-        }
-    }
-
-    fun togglePluginLine(iniName: String, index: Int) {
-        scope.launch(Dispatchers.IO) {
-            val current = _pluginInis.value
-            val ini = current.firstOrNull { it.name == iniName } ?: return@launch
-            if (index !in ini.lines.indices) return@launch
-            val line = ini.lines[index]
-            if (!line.editable) return@launch
-            val updated = ini.lines.toMutableList()
-            updated[index] = if (line.enabled) {
-                line.copy(text = ";" + line.text, enabled = false)
-            } else {
-                line.copy(text = line.text.replaceFirst(Regex("^\\s*;"), ""), enabled = true)
-            }
-            try {
-                ini.file.writeText(updated.joinToString("\n") { it.text })
-            } catch (_: Throwable) {
-                return@launch
-            }
-            _pluginInis.value = current.map {
-                if (it.name == iniName) it.copy(lines = updated) else it
-            }
+            _pluginInis.value = scanned
         }
     }
 }
