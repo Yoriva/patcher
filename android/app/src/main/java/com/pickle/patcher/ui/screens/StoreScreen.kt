@@ -13,7 +13,9 @@ import androidx.compose.material.icons.filled.Comment
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -24,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -40,6 +43,23 @@ fun StoreScreen(
     onUserClick: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
+    var signedIn by remember { mutableStateOf(com.pickle.patcher.data.StoreSession.token(context) != null) }
+    var authMode by remember { mutableStateOf("login") }
+    if (!signedIn) {
+        when (authMode) {
+            "register" -> StoreRegisterScreen(
+                api = api,
+                onRegisterSuccess = { email -> authMode = "login" },
+                onBack = { authMode = "login" },
+            )
+            else -> StoreLoginScreen(
+                api = api,
+                onLoginSuccess = { signedIn = true },
+                onRegister = { authMode = "register" },
+            )
+        }
+        return
+    }
     val scope = rememberCoroutineScope()
     var items by remember { mutableStateOf<JSONArray?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -69,17 +89,36 @@ fun StoreScreen(
     }
     LaunchedEffect(Unit) { load() }
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader(
-            icon = Icons.Filled.ShoppingCart,
-            title = "Store",
-            subtitle = "Community mods, packages, and posts.",
-            status = "Market",
-            statusTone = Tone.Secondary,
-            stats = listOf(
-                Stat("Posts", "${items?.length() ?: 0}", Tone.Primary),
-            ),
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, end = 8.dp, top = 10.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Store",
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                Text(
+                    "Community mods and game assets",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(
+                onClick = { load(true) },
+                modifier = Modifier.size(42.dp),
+            ) {
+                Icon(
+                    Icons.Filled.Refresh,
+                    contentDescription = "Refresh",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         PullToRefreshBox(
             isRefreshing = refreshing,
             onRefresh = { load(true) },
@@ -410,31 +449,48 @@ fun StoreScreen(
 }
 @Composable
 private fun StoreItemCard(obj: JSONObject, onUserClick: (String) -> Unit, onOpenDetail: () -> Unit) {
-    Card(
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp, pressedElevation = 4.dp),
-        modifier = Modifier.fillMaxWidth().clickable { onOpenDetail() },
+    val title = obj.optString("title", "Untitled")
+    val desc = obj.optString("description", "").trim()
+    val version = obj.optString("version", "1.0.0")
+    val status = obj.optString("status", "approved")
+    val libs = obj.optJSONArray("libs")?.length() ?: 0
+    val liked = obj.optBoolean("liked", false)
+    val likes = obj.optInt("likesCount", 0)
+    val comments = obj.optInt("commentsCount", 0)
+    val userObj = obj.optJSONObject("user")
+    val username = userObj?.optString("username", "anon") ?: "anon"
+    val avatarUrl = userObj?.optString("avatarUrl").takeUnless { it.isNullOrBlank() }
+
+    Surface(
+        shape = getGroupedItemShape(0, 1),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onOpenDetail() },
     ) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Card(
+        Row(
+            Modifier.fillMaxWidth().padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val logoUrl = obj.optString("logoUrl", "").takeIf { it.isNotBlank() }
+            Surface(
                 shape = MaterialTheme.shapes.large,
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
-                modifier = Modifier.size(64.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                modifier = Modifier.size(64.dp).clip(MaterialTheme.shapes.large),
             ) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    val logoUrl = obj.optString("logoUrl", "").takeIf { it.isNotBlank() }
-                    if (logoUrl != null) {
-                        AsyncImage(
-                            model = logoUrl,
-                            contentDescription = null,
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    } else {
+                if (logoUrl != null) {
+                    AsyncImage(
+                        model = logoUrl,
+                        contentDescription = null,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                         Text(
-                            obj.optString("title", "?").take(1).uppercase(),
-                            style = MaterialTheme.typography.titleLarge,
+                            title.take(1).uppercase(),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.ExtraBold,
                             color = MaterialTheme.colorScheme.primary,
                         )
                     }
@@ -443,90 +499,87 @@ private fun StoreItemCard(obj: JSONObject, onUserClick: (String) -> Unit, onOpen
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    obj.optString("title", "Untitled"),
+                    title,
                     style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                val desc = obj.optString("description", "")
-                if (desc.isNotBlank()) {
-                    MarkdownText(
-                        desc,
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        version,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "by ",
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.fillMaxWidth(),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (status != "approved") {
+                        Spacer(Modifier.width(6.dp))
+                        StatusPill(
+                            status.replaceFirstChar { it.titlecase() },
+                            tone = Tone.Tertiary,
+                        )
+                    }
+                }
+                if (desc.isNotBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        desc,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    val user = obj.optJSONObject("user")
-                    val username = user?.optString("username") ?: "?"
-                    val avatarUrl = user?.optString("avatarUrl")
-                    if (!avatarUrl.isNullOrBlank()) {
-                        AsyncImage(
-                            model = avatarUrl,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp).clip(CircleShape),
-                        )
-                    } else {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            modifier = Modifier.size(20.dp),
-                        ) {
-                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                Text(
-                                    username.take(1).uppercase(),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                )
-                            }
-                        }
-                        Spacer(Modifier.width(6.dp))
-                    }
-                    TextButton(onClick = { onUserClick(username) }, contentPadding = PaddingValues(0.dp)) {
-                        Text(
-                            "by $username",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                    Spacer(Modifier.weight(1f))
                     Icon(
-                        Icons.Filled.Favorite,
+                        if (liked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
                         contentDescription = null,
                         modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = if (liked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Spacer(Modifier.width(3.dp))
+                    Spacer(Modifier.width(4.dp))
                     Text(
-                        "${obj.optInt("likesCount", 0)}",
+                        "",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(10.dp))
                     Icon(
                         Icons.Filled.Comment,
                         contentDescription = null,
                         modifier = Modifier.size(14.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Spacer(Modifier.width(3.dp))
+                    Spacer(Modifier.width(4.dp))
                     Text(
-                        "${obj.optInt("commentsCount", 0)}",
+                        "",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                }
-                Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    StatusPill(
-                        "v${obj.optString("version", "1.0.0")}",
-                        tone = Tone.Primary,
-                    )
-                    val st = obj.optString("status", "approved")
-                    if (st != "approved") {
-                        StatusPill(st.replaceFirstChar { it.titlecase() }, tone = Tone.Tertiary)
+                    if (libs > 0) {
+                        Spacer(Modifier.width(10.dp))
+                        Icon(
+                            Icons.Filled.Download,
+                            contentDescription = null,
+                            modifier = Modifier.size(13.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
