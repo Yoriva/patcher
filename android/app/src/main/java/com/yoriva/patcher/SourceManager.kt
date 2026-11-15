@@ -205,6 +205,15 @@ class SourceManager(
         }
     }
 
+    fun clearSourceCache() {
+        listOfNotNull(sourceCacheDir, legacySourceDir).forEach { dir ->
+            dir.listFiles()?.forEach { it.deleteRecursively() }
+        }
+        _source.value = null
+        _receivedSource.value = null
+        _sourceDownload.value = null
+    }
+
     fun downloadSourceApk() {
         scope.launch(Dispatchers.IO) { downloadSourceApkNow() }
     }

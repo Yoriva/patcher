@@ -124,6 +124,13 @@ class UpdateManager(
     fun markBundleTagKnown(tag: String) {
         updatePrefs.edit().putString("known_bundle_tag", tag).apply()
     }
+    fun clearLibraryState() {
+        updatePrefs.edit()
+            .remove("known_bundle_tag")
+            .remove("applied_builds_arm64-v8a")
+            .remove("applied_builds_armeabi-v7a")
+            .apply()
+    }
 
     internal fun appliedBuilds(abi: String): Map<String, String> {
         val raw = updatePrefs.getString("applied_builds_$abi", null) ?: return emptyMap()

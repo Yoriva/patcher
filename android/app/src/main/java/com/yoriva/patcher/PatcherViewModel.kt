@@ -1,4 +1,4 @@
-﻿package com.yoriva.patcher
+package com.yoriva.patcher
 import android.app.Application
 import android.content.Intent
 import android.os.Build
@@ -472,18 +472,11 @@ private fun externalRoot(app: Application): File {
         _downloadAll.value = true
         downloadAllJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                val sourceState = sourceManager.sourceDownload.value
-                val needsSource = sourceManager.source.value == null ||
-                    sourceState is SourceDownloadState.Outdated ||
-                    sourceState is SourceDownloadState.Corrupt ||
-                    sourceState is SourceDownloadState.Failed
-                if (needsSource && !sourceManager.downloadSourceApkNow()) return@launch
-                val installed = abiStatus.value.firstOrNull { it.selected }?.installed == true
-                val bundleState = bundleManager.bundle.value
-                val bundleReady = installed ||
-                    bundleState is BundleState.Ready ||
-                    bundleState is BundleState.Loaded
-                if (!bundleReady) bundleManager.fetchAndDownloadBundleNow()
+                sourceManager.clearSourceCache()
+                bundleManager.clearLocalLibraryCache()
+                updateManager.clearLibraryState()
+                sourceManager.downloadSourceApkNow()
+                bundleManager.fetchAndDownloadBundleNow()
             } finally {
                 _downloadAll.value = false
             }

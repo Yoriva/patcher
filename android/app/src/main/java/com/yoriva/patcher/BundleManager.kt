@@ -1,4 +1,4 @@
-﻿package com.yoriva.patcher
+package com.yoriva.patcher
 
 import android.app.Application
 import com.yoriva.data.BundleProvider
@@ -87,6 +87,13 @@ class BundleManager(
     internal fun clearLoadedBundle() {
         loadedBundle = null
         _bundle.value = BundleState.None
+    }
+
+    fun clearLocalLibraryCache() {
+        listOf("arm64-v8a", "armeabi-v7a").forEach { abi ->
+            File(libsDir, abi).listFiles()?.forEach { it.deleteRecursively() }
+        }
+        resetAll()
     }
 
     internal fun resetAll() {
