@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 SBIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -760,4 +760,4 @@ cp "$PC_DEV/amxxpc" "$PC_DEV/amxxpc32.so" "$OUT/compiler/$ABI/"
 echo "   amxxpc -> $(ls -l "$OUT/compiler/$ABI/amxxpc" | awk '{print $5}') bytes"
 
 echo "ALL_BUILT"
-ls -l "$OUT/lib/$ABI/" "$OUT/plugins" "$OUT/compiler/$ABI"
+ls -l "$OUT/lib/$ABI/" "$OUT/plugins" "$OUT/compiler/$ABI"
