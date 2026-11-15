@@ -483,7 +483,7 @@ else:
 fi
 
 rm -f "$REAPI/version/reapi_version.inc" "$REAPI/version/appversion.h"
-bash "$REAPI/version/appversion.sh" "$REAPI" reapi
+bash "$REAPI/version/appversion.sh" "$SRC/reapi" reapi
 REAPI_PATCHED="$REAPI/.reapi-abi-patched"
 if [ ! -f "$REAPI_PATCHED" ]; then
 python3 -c "
