@@ -1,0 +1,26 @@
+* text=auto
+
+*.sh text eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.gradle.kts text eol=lf
+*.kt text eol=lf
+*.xml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.so binary
+*.a binary
+*.p12 binary
+*.pem binary
+*.jks binary
+*.keystore binary
+*.zip binary
+*.gz binary
+*.bsp binary
+*.wav binary
+*.dat binary
