@@ -104,7 +104,7 @@ build-release:
         UP_YAPB=$(git -C 3rdparty/yapb rev-parse HEAD 2>/dev/null)
         UP_YAPB_UPSTREAM=$(git ls-remote https://github.com/yapb/yapb.git HEAD 2>/dev/null | cut -f1)
         UP_RGDLL=$(git ls-remote https://github.com/Yoriva/ReGameDLL_CS.git fix/first-spawn-equip 2>/dev/null | cut -f1)
-        UP_JSON=$(python3 -c "import json; print(json.dumps({'amxmodx':'$UP_AMXX','metamod':'$UP_MM','reapi':'$UP_REAPI','yapb':'$UP_YAPB','yapb_upstream':'$UP_YAPB_UPSTREAM','regamedll':'$UP_RGDLL'}))")
+        UP_JSON=$(python3 -c "import json; print(json.dumps({'amxmodx':'$UP_AMXX','metadroid':'$UP_MM','reapi':'$UP_REAPI','yapb':'$UP_YAPB','yapb_upstream':'$UP_YAPB_UPSTREAM','regamedll':'$UP_RGDLL'}))")
       else
         UP_JSON="{}"
       fi
@@ -198,15 +198,15 @@ build-release:
           "$WS/build-out/plugins"
         cd /tmp/prevso
         gh release download libs --repo "$GH_REPO" \
-          --pattern 'arm64-v8a__*' --pattern 'armeabi-v7a__*' --pattern 'compiler-*' \
+          --pattern 'arm64-v8a_*' --pattern 'armeabi-v7a_*' --pattern 'compiler-*' \
           --clobber
         shopt -s nullglob
         for f in *; do
           case "$f" in
-            compiler-arm64-v8a__*) cp "$f" "$WS/build-out/compiler/arm64-v8a/${f#compiler-arm64-v8a__}" ;;
-            compiler-armeabi-v7a__*) cp "$f" "$WS/build-out/compiler/armeabi-v7a/${f#compiler-armeabi-v7a__}" ;;
-            arm64-v8a__*) cp "$f" "$WS/build-out/lib/arm64-v8a/${f#arm64-v8a__}" ;;
-            armeabi-v7a__*) cp "$f" "$WS/build-out/lib/armeabi-v7a/${f#armeabi-v7a__}" ;;
+            compiler-arm64-v8a_*) cp "$f" "$WS/build-out/compiler/arm64-v8a/${f#compiler-arm64-v8a_}" ;;
+            compiler-armeabi-v7a_*) cp "$f" "$WS/build-out/compiler/armeabi-v7a/${f#compiler-armeabi-v7a_}" ;;
+            arm64-v8a_*) cp "$f" "$WS/build-out/lib/arm64-v8a/${f#arm64-v8a_}" ;;
+            armeabi-v7a_*) cp "$f" "$WS/build-out/lib/armeabi-v7a/${f#armeabi-v7a_}" ;;
           esac
         done
         cd "$WS"
@@ -232,8 +232,8 @@ build-release:
         shopt -s nullglob
         for f in *; do
           case "$f" in
-            compiler-arm64-v8a__*) cp "$f" "$WS/build-out/compiler/arm64-v8a/${f#compiler-arm64-v8a__}" ;;
-            compiler-armeabi-v7a__*) cp "$f" "$WS/build-out/compiler/armeabi-v7a/${f#compiler-armeabi-v7a__}" ;;
+            compiler-arm64-v8a_*) cp "$f" "$WS/build-out/compiler/arm64-v8a/${f#compiler-arm64-v8a_}" ;;
+            compiler-armeabi-v7a_*) cp "$f" "$WS/build-out/compiler/armeabi-v7a/${f#compiler-armeabi-v7a_}" ;;
           esac
         done
         cd "$WS"
@@ -353,7 +353,7 @@ PY
         }
         PRODUCER_ARGS+=(--producer "cs16-client=$(dir_sha cs16-client)")
         PRODUCER_ARGS+=(--producer "amxmodx=$(sub_sha 3rdparty/amxmodx)")
-        PRODUCER_ARGS+=(--producer "metamod=$(sub_sha 3rdparty/metadroid)")
+        PRODUCER_ARGS+=(--producer "metadroid=$(sub_sha 3rdparty/metadroid)")
         PRODUCER_ARGS+=(--producer "yapb=$(sub_sha 3rdparty/yapb)")
         if [ -f "$WS/rgdll-sha" ]; then
           PRODUCER_ARGS+=(--producer "regamedll=$(cat "$WS/rgdll-sha")")
@@ -415,11 +415,11 @@ PY
 
         mkdir -p "$WS/compiler-assets"
         cf="$WS/build-out/compiler"
-        [ -f "$cf/arm64-v8a/amxxpc" ] && cp "$cf/arm64-v8a/amxxpc" "$WS/compiler-assets/compiler-arm64-v8a__amxxpc"
-        [ -f "$cf/arm64-v8a/amxxpc32.so" ] && cp "$cf/arm64-v8a/amxxpc32.so" "$WS/compiler-assets/compiler-arm64-v8a__amxxpc32.so"
+        [ -f "$cf/arm64-v8a/amxxpc" ] && cp "$cf/arm64-v8a/amxxpc" "$WS/compiler-assets/compiler-arm64-v8a_amxxpc"
+        [ -f "$cf/arm64-v8a/amxxpc32.so" ] && cp "$cf/arm64-v8a/amxxpc32.so" "$WS/compiler-assets/compiler-arm64-v8a_amxxpc32.so"
         if [ ! -f "$WS/v7a-missing" ]; then
-          [ -f "$cf/armeabi-v7a/amxxpc" ] && cp "$cf/armeabi-v7a/amxxpc" "$WS/compiler-assets/compiler-armeabi-v7a__amxxpc"
-          [ -f "$cf/armeabi-v7a/amxxpc32.so" ] && cp "$cf/armeabi-v7a/amxxpc32.so" "$WS/compiler-assets/compiler-armeabi-v7a__amxxpc32.so"
+          [ -f "$cf/armeabi-v7a/amxxpc" ] && cp "$cf/armeabi-v7a/amxxpc" "$WS/compiler-assets/compiler-armeabi-v7a_amxxpc"
+          [ -f "$cf/armeabi-v7a/amxxpc32.so" ] && cp "$cf/armeabi-v7a/amxxpc32.so" "$WS/compiler-assets/compiler-armeabi-v7a_amxxpc32.so"
         fi
         ls "$WS/compiler-assets" || true
       fi

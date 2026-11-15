@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Generate an incremental-update manifest and stage individual .so files.
 
   gen-manifest.py <abi> <libdir> <outdir> [--plugins-dir <dir>]
@@ -115,7 +115,7 @@ def collect_entries(libdir: str, abi: str, previous: dict) -> list:
         if not os.path.exists(src):
             print(f"WARN: {name} not found, skipping", file=sys.stderr)
             return
-        asset_name = f"{abi}__{name}"
+        asset_name = f"{abi}_{name}"
         sha = sha256_of(src)
         entries.append({
             "name": name,
@@ -133,18 +133,18 @@ def collect_entries(libdir: str, abi: str, previous: dict) -> list:
     add("libamxmodx.so", f"lib/{abi}/libamxmodx.so", True, "AMX Mod X core", producer="amxmodx")
 
     metamod_name = "libyapb_android_" + suffix + ".so"
-    metamod_src = os.path.join(libdir, "libmetamod.so")
+    metamod_src = os.path.join(libdir, "libmetadroid.so")
     if os.path.exists(metamod_src):
-        asset_name = f"{abi}__libmetamod.so"
+        asset_name = f"{abi}_libmetadroid.so"
         metamod_sha = sha256_of(metamod_src)
         entries.append({
-            "name": "libmetamod.so",
+            "name": "libmetadroid.so",
             "asset": asset_name,
-            "path": f"lib/{abi}/libmetamod.so",
+            "path": f"lib/{abi}/libmetadroid.so",
             "target": f"lib/{abi}/{metamod_name}",
             "sha256": metamod_sha,
-            "build": stamp_for("libmetamod.so", metamod_sha, previous, "metamod"),
-            "producer": "metamod",
+            "build": stamp_for("libmetadroid.so", metamod_sha, previous, "metadroid"),
+            "producer": "metadroid",
             "size": os.path.getsize(metamod_src),
             "required": True,
             "description": "Metamod HL1 (as libyapb for -dll @yapb)",

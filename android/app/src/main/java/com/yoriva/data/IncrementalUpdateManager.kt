@@ -97,9 +97,9 @@ object IncrementalUpdateManager {
                 val body = resp.body?.string() ?: return emptyList()
                 val release = json.decodeFromString<ReleaseInfo>(body)
                 release.assets
-                    .filter { it.name.startsWith("${abi}__") && it.name.endsWith(".so") }
+                    .filter { it.name.startsWith("${abi}_") && it.name.endsWith(".so") }
                     .map { asset ->
-                        val cleanName = asset.name.removePrefix("${abi}__")
+                        val cleanName = asset.name.removePrefix("${abi}_")
                         AssetInfo(
                             assetName = asset.name,
                             cleanName = cleanName,
@@ -283,7 +283,7 @@ object IncrementalUpdateManager {
     }
     private fun getTargetPath(name: String, abi: String, suffix: String, modSuffix: String): String? {
         return when {
-            name == "libmetamod.so" -> "lib/$abi/libmetamod_android_$suffix.so"
+            name == "libmetadroid.so" -> "lib/$abi/libmetadroid_android_$suffix.so"
             name.startsWith("lib") && name.endsWith(".so") -> "lib/$abi/$name"
             name.endsWith(".so") -> "lib/$abi/lib$name"
             else -> null

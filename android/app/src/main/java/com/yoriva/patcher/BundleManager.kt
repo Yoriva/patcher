@@ -1,4 +1,4 @@
-package com.yoriva.patcher
+﻿package com.yoriva.patcher
 
 import android.app.Application
 import com.yoriva.data.BundleProvider
@@ -403,7 +403,7 @@ class BundleManager(
                 "cl_dlls/$name"
             name.startsWith("libcs_android_") -> "dlls/$name"
             name == "libamxmodx.so" -> "addons/amxmodx/$name"
-            name == "libmetamod.so" || name.startsWith("libmetamod_android_") ->
+            name == "libmetadroid.so" || name.startsWith("libmetadroid_android_") ->
                 "addons/metamod/$name"
             name == "libyapb.so" -> "addons/yapb/bin/$name"
             name.contains("_amxx_") -> "addons/amxmodx/modules/$name"
@@ -423,7 +423,7 @@ class BundleManager(
             val name = targetPath.substringAfterLast("/")
             val desc = when {
                 name == "libamxmodx.so" -> "AMX Mod X core"
-                name == "libmetamod.so" || name.startsWith("libmetamod_android_") -> "Metamod HL1"
+                name == "libmetadroid.so" || name.startsWith("libmetadroid_android_") -> "Metamod HL1"
                 name == "libyapb.so" -> "YaPB bot plugin"
                 name == "libclient_android_$suffix.so" -> "CS16Client client DLL"
                 name == "libmenu_android_$suffix.so" -> "CS16Client main menu"
@@ -596,7 +596,7 @@ class BundleManager(
         val name = target.substringAfterLast("/")
         return when {
             name == "libamxmodx.so" -> "amxx"
-            name == "libmetamod.so" || name.startsWith("libmetamod_android_") -> "metamod"
+            name == "libmetadroid.so" || name.startsWith("libmetadroid_android_") -> "metamod"
             name == "libyapb.so" -> "yapb"
             name.startsWith("libclient_android_") -> "client"
             name.startsWith("libmenu_android_") -> "menu"

@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 set -euo pipefail
 
 SBIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -350,8 +350,8 @@ if [[ ! -f "$TMP/libpcre.a" ]]; then
 fi
 PCRE_A="$TMP/pcre-inst/lib/libpcre.a"
 
-echo "== building metamod-r ($ABI) =="
-MMBUILD=$TMP/metamod-r-build
+echo "== building metadroid ($ABI) =="
+MMBUILD=$TMP/metadroid-build
 cmake -S "$METAMOD_R" -B "$MMBUILD" \
   -GNinja \
   -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
@@ -361,15 +361,15 @@ cmake -S "$METAMOD_R" -B "$MMBUILD" \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build "$MMBUILD" -j"$(nproc)"
 if [ "$ABI" = "arm64-v8a" ]; then
-  MM_SO=$(find "$MMBUILD" -name "libmetamod_android_arm64.so" | head -1)
+  MM_SO=$(find "$MMBUILD" -name "libmetadroid_android_arm64.so" | head -1)
 else
-  MM_SO=$(find "$MMBUILD" -name "libmetamod_android_armv7l.so" | head -1)
+  MM_SO=$(find "$MMBUILD" -name "libmetadroid_android_armv7l.so" | head -1)
 fi
 if [ -n "$MM_SO" ]; then
-  cp "$MM_SO" "$OUT/lib/$ABI/libmetamod.so"
-  echo "   metamod-r -> $(ls -l "$OUT/lib/$ABI/libmetamod.so" | awk '{print $5}') bytes"
+  cp "$MM_SO" "$OUT/lib/$ABI/libmetadroid.so"
+  echo "   metadroid -> $(ls -l "$OUT/lib/$ABI/libmetadroid.so" | awk '{print $5}') bytes"
 else
-  echo "WARN: metamod-r lib not found, skipping"
+  echo "WARN: metadroid lib not found, skipping"
 fi
 
 build_module() {

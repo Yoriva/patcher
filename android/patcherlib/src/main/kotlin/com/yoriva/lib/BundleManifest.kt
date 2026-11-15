@@ -1,4 +1,4 @@
-package com.yoriva.lib
+﻿package com.yoriva.lib
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 @Serializable
@@ -37,7 +37,7 @@ data class ExcludeRule(
         val DEFAULT = ExcludeRule(
             prefixes = listOf(
                 "lib/arm64-v8a/libamxmodx.so",
-                "lib/arm64-v8a/libmetamod.so",
+                "lib/arm64-v8a/libmetadroid.so",
                 "lib/arm64-v8a/libcstrike_amxx_amd64.so",
                 "lib/arm64-v8a/libcsx_amxx_amd64.so",
                 "lib/arm64-v8a/libengine_amxx_amd64.so",
