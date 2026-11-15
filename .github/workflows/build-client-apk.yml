@@ -93,7 +93,7 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git tag -f extras
             git push origin extras
-            gh release create extras --title "Nexora Extras" --notes "Addons, game assets and client APK (rolling)."
+            gh release create extras --title "Yoriva Extras" --notes "Addons, game assets and client APK (rolling)."
           fi
           gh release upload extras --clobber "$GITHUB_WORKSPACE/CS16Client-Android.apk"
           echo "uploaded CS16Client-Android.apk to extras"

@@ -1,0 +1,436 @@
+package com.yoriva.lib
+import java.io.File
+import java.io.IOException
+import java.io.RandomAccessFile
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+import java.util.zip.CRC32
+import java.util.zip.Deflater
+object ZipRepacker {
+    val LIBCS_ENTRY = "lib/arm64-v8a/libcs_android_arm64.so"
+    private val LIBCS_PATCHES = listOf(
+        0x240be4 to 20,   
+        0x240c74 to 20,   
+        0x240d04 to 20,   
+        0x240d94 to 20,   
+        0x240e24 to 20,   
+        0x240eb4 to 20,   
+        0x240fc8 to 8,    
+        0x247bf8 to 0,    
+        0x247c10 to 0,    
+        0x247c28 to 0,    
+        0x247c40 to 0,    
+        0x247c58 to 0,    
+        0x247c70 to 0,    
+        0x247d20 to 0,    
+        0x236a84 to 8,    
+        0x238500 to 8,    
+        0x236eb0 to 8,    
+        0x23c240 to 8,    
+        0x23d2d0 to 8,    
+        0x23d75c to 9,    
+        0x241354 to 8,    
+    )
+    data class Result(
+        val output: File,
+        val kept: List<String>,
+        val removed: List<String>,
+        val added: List<String>,
+        val addedAssets: List<String> = emptyList(),
+        val entriesTotal: Int,
+        val alignedStored: Int,
+        val padBytes: Long,
+        var bytesWritten: Long = 0,
+        var patchedLibs: List<String> = emptyList(),
+    )
+    fun repack(
+        source: File,
+        output: File,
+        bundle: Bundle,
+        exclude: ExcludeRule = ExcludeRule.DEFAULT,
+        pruneAbiExcept: String? = null,
+        extraAssetsZip: File? = null,
+        progress: ((Long, Long) -> Unit)? = null,
+        onEntry: ((index: Int, total: Int, name: String, kind: String) -> Unit)? = null,
+        workers: Int = 1,
+    ): Result {
+        val src = ZipRaw.open(source) ?: throw IOException("Source APK could not be parsed")
+        val srcLen = source.length()
+        try {
+            val removed = ArrayList<String>()
+            val keptEntries = ArrayList<ZipRaw.ZipEntryInfo>()
+            for ((name, entry) in src.entries) {
+                val excluded = excludable(name, exclude) || prunedByAbi(name, pruneAbiExcept)
+                if (excluded) removed.add(name) else keptEntries.add(entry)
+            }
+            val bundleTargets = bundle.manifest.entries.map { it.target }.toHashSet()
+            val iterator = keptEntries.iterator()
+            while (iterator.hasNext()) {
+                val e = iterator.next()
+                if (e.name in bundleTargets) {
+                    removed.add(e.name)
+                    iterator.remove()
+                }
+            }
+            output.parentFile?.mkdirs()
+            val raf = RandomAccessFile(output, "rw")
+            val cdEntries = ArrayList<CdRecord>()
+            var alignPadBytes = 0L
+            var alignedStored = 0
+            var bytesWritten = 0L
+            try {
+                raf.setLength(0)
+                fun writeLocalHeader(
+                    name: String,
+                    method: Int,
+                    compressedSize: Long,
+                    uncompressedSize: Long,
+                    crc: Long,
+                    data: ByteArray,
+                ) {
+                    var localOffset = raf.filePointer
+                    var extraLen = 0
+                    if (method == 0) {
+                        val unit = if (name.startsWith("lib/") && name.endsWith(".so")) 16384 else 4
+                        val base = localOffset + 30 + name.length
+                        val rem = (base % unit).toInt()
+                        extraLen = if (rem == 0) 0 else (unit - rem)
+                        alignPadBytes += extraLen
+                        alignedStored++
+                    }
+                    val hdr = ByteArray(30)
+                    val b = ByteBuffer.wrap(hdr).order(ByteOrder.LITTLE_ENDIAN)
+                    b.putInt(0x04034b50)
+                    b.putShort(20)                                   
+                    b.putShort(0)                                    
+                    b.putShort(method.toShort())
+                    b.putShort(0)                                    
+                    b.putShort(0x0821)                               
+                    b.putInt(crc.toInt())
+                    b.putInt(compressedSize.toInt())
+                    b.putInt(uncompressedSize.toInt())
+                    b.putShort(name.length.toShort())
+                    b.putShort(extraLen.toShort())
+                    raf.write(hdr)
+                    raf.write(name.toByteArray(Charsets.UTF_8))
+                    if (extraLen > 0) raf.write(ByteArray(extraLen))
+                    val dataOffset = raf.filePointer
+                    raf.write(data)
+                    cdEntries.add(
+                        CdRecord(
+                            name = name,
+                            method = method,
+                            compressedSize = compressedSize,
+                            uncompressedSize = uncompressedSize,
+                            crc = crc,
+                            localOffset = localOffset,
+                            dataOffset = dataOffset,
+                        )
+                    )
+                    bytesWritten += 30 + name.length + extraLen + data.size
+                }
+                val existingDirs = HashSet<String>()
+                for (name in src.entries.keys) {
+                    if (name.endsWith("/")) existingDirs.add(name)
+                }
+                fun parentsOf(path: String): List<String> {
+                    val out = ArrayList<String>()
+                    var acc = ""
+                    for (p in path.split('/').dropLast(1)) {
+                        acc += "$p/"
+                        out.add(acc)
+                    }
+                    return out
+                }
+                val wantedDirs = LinkedHashSet<String>()
+                for (be in bundle.manifest.entries) {
+                    wantedDirs.addAll(parentsOf(be.target))
+                }
+                if (extraAssetsZip != null && extraAssetsZip.isFile) wantedDirs.add("assets/")
+                for (dir in wantedDirs) {
+                    if (dir in existingDirs || dir in bundleTargets) continue
+                    existingDirs.add(dir)
+                    writeLocalHeader(
+                        name = dir,
+                        method = 0,
+                        compressedSize = 0L,
+                        uncompressedSize = 0L,
+                        crc = 0L,
+                        data = ByteArray(0),
+                    )
+                }
+                val total = keptEntries.size + bundle.manifest.entries.size
+                var done = 0
+                val patchedLibs = ArrayList<String>()
+                for (entry in keptEntries) {
+                    onEntry?.invoke(done, total, entry.name, "keep")
+                    if (entry.name == LIBCS_ENTRY) {
+                        val content = src.readContent(entry)
+                        val patched = patchLibCs(content)
+                        if (patched != null) {
+                            val out = java.io.ByteArrayOutputStream()
+                            val def = Deflater(9, true)
+                            def.setInput(patched)
+                            def.finish()
+                            val chunk = ByteArray(8192)
+                            while (!def.finished()) {
+                                val n = def.deflate(chunk)
+                                out.write(chunk, 0, n)
+                            }
+                            def.end()
+                            val compressed = out.toByteArray()
+                            writeLocalHeader(
+                                name = entry.name,
+                                method = 8,
+                                compressedSize = compressed.size.toLong(),
+                                uncompressedSize = patched.size.toLong(),
+                                crc = crc32(patched),
+                                data = compressed,
+                            )
+                            patchedLibs.add(entry.name)
+                            done++
+                            progress?.invoke(bytesWritten, srcLen)
+                            continue
+                        }
+                    }
+                    val raw = ByteArray(entry.compressedSize.toInt())
+                    src.file.seek(entry.dataOffset)
+                    src.file.readFully(raw)
+                    writeLocalHeader(
+                        name = entry.name,
+                        method = entry.method,
+                        compressedSize = entry.compressedSize,
+                        uncompressedSize = entry.uncompressedSize,
+                        crc = entry.crc32,
+                        data = raw,
+                    )
+                    done++
+                    progress?.invoke(bytesWritten, srcLen)
+                }
+                val added = ArrayList<String>()
+                val bundleItems = bundle.manifest.entries.mapNotNull { be ->
+                    bundle.resolveEntry(be)?.let { be to it }
+                }
+                val preparedBundle = parallelMap(bundleItems, workers) { (be, raw) ->
+                    var content = raw
+                    var patched = false
+                    if (be.target == LIBCS_ENTRY) {
+                        val guarded = patchLibCs(content)
+                        if (guarded != null) {
+                            content = guarded
+                            patched = true
+                        }
+                    }
+                    val stored = be.method == BundleManifest.Compression.STORED
+                    PreparedBundleEntry(
+                        target = be.target,
+                        content = content,
+                        compressed = if (stored) null else deflate(content),
+                        stored = stored,
+                        patched = patched,
+                    )
+                }
+                for (entry in preparedBundle) {
+                    onEntry?.invoke(done, total, entry.target, "add")
+                    added.add(entry.target)
+                    if (entry.patched)
+                        patchedLibs.add(entry.target)
+                    if (entry.stored) {
+                        val crc = crc32(entry.content)
+                        writeLocalHeader(entry.target, 0, entry.content.size.toLong(), entry.content.size.toLong(), crc, entry.content)
+                    } else {
+                        val compressed = entry.compressed ?: deflate(entry.content)
+                        writeLocalHeader(entry.target, 8, compressed.size.toLong(), entry.content.size.toLong(), crc32(entry.content), compressed)
+                    }
+                    done++
+                    progress?.invoke(bytesWritten, srcLen)
+                }
+                val addedAssets = ArrayList<String>()
+                if (extraAssetsZip != null && extraAssetsZip.isFile) {
+                    val assetNames = java.util.zip.ZipFile(extraAssetsZip).use { zf ->
+                        zf.entries().asSequence()
+                            .filter { !it.isDirectory && it.name.isNotBlank() }
+                            .filter { !it.name.contains("..") && !it.name.startsWith("/") }
+                            .map { it.name }
+                            .filter { "assets/${it}" !in bundleTargets }
+                            .toList()
+                    }
+                    val chunkSize = workers.coerceAtLeast(1)
+                    var assetIndex = 0
+                    while (assetIndex < assetNames.size) {
+                        val chunkEnd = minOf(assetIndex + chunkSize, assetNames.size)
+                        val names = assetNames.subList(assetIndex, chunkEnd)
+                        val contents = java.util.zip.ZipFile(extraAssetsZip).use { zf ->
+                            names.mapNotNull { name ->
+                                val ze = zf.getEntry(name) ?: return@mapNotNull null
+                                if (ze.isDirectory) return@mapNotNull null
+                                name to zf.getInputStream(ze).use { it.readBytes() }
+                            }
+                        }
+                        val preparedAssets = parallelMap(contents, workers) { (name, content) ->
+                            PreparedAssetEntry(
+                                target = "assets/$name",
+                                content = content,
+                                compressed = deflate(content),
+                            )
+                        }
+                        for (asset in preparedAssets) {
+                            onEntry?.invoke(done, done + assetNames.size, asset.target, "asset")
+                            writeLocalHeader(
+                                name = asset.target,
+                                method = 8,
+                                compressedSize = asset.compressed.size.toLong(),
+                                uncompressedSize = asset.content.size.toLong(),
+                                crc = crc32(asset.content),
+                                data = asset.compressed,
+                            )
+                            addedAssets.add(asset.target)
+                            done++
+                            progress?.invoke(bytesWritten, srcLen)
+                        }
+                        assetIndex = chunkEnd
+                    }
+                }
+                val cdOffset = raf.filePointer
+                run {
+                    val cb = java.io.ByteArrayOutputStream()
+                    for (rec in cdEntries) {
+                        val b = ByteBuffer.allocate(46).order(ByteOrder.LITTLE_ENDIAN)
+                        b.putInt(0x02014b50)
+                        b.putShort(20)                     
+                        b.putShort(20)                     
+                        b.putShort(0)                      
+                        b.putShort(rec.method.toShort())
+                        b.putShort(0)
+                        b.putShort(0x0821)
+                        b.putInt(rec.crc.toInt())
+                        b.putInt(rec.compressedSize.toInt())
+                        b.putInt(rec.uncompressedSize.toInt())
+                        b.putShort(rec.name.length.toShort())
+                        b.putShort(0)                      
+                        b.putShort(0)                      
+                        b.putShort(0)                      
+                        b.putShort(0)                      
+                        b.putInt(0)                        
+                        b.putInt(rec.localOffset.toInt())
+                        cb.write(b.array())
+                        cb.write(rec.name.toByteArray(Charsets.UTF_8))
+                    }
+                    raf.write(cb.toByteArray())
+                }
+                val cdSize = raf.filePointer - cdOffset
+                run {
+                    val b = ByteBuffer.allocate(22).order(ByteOrder.LITTLE_ENDIAN)
+                    b.putInt(0x06054b50)
+                    b.putShort(0)
+                    b.putShort(0)
+                    b.putShort(cdEntries.size.toShort())
+                    b.putShort(cdEntries.size.toShort())
+                    b.putInt(cdSize.toInt())
+                    b.putInt(cdOffset.toInt())
+                    b.putShort(0)
+                    raf.write(b.array())
+                }
+                raf.fd.sync()
+                return Result(
+                    output = output,
+                    kept = keptEntries.map { it.name },
+                    removed = removed,
+                    added = added,
+                    addedAssets = addedAssets,
+                    entriesTotal = cdEntries.size,
+                    alignedStored = alignedStored,
+                    padBytes = alignPadBytes,
+                    bytesWritten = bytesWritten,
+                    patchedLibs = patchedLibs,
+                )
+            } finally {
+                raf.close()
+            }
+        } finally {
+            src.close()
+        }
+    }
+    private fun patchLibCs(content: ByteArray): ByteArray? {
+        val out = content.copyOf()
+        for ((off, rt) in LIBCS_PATCHES) {
+            if (out.size < off + 4) return null
+            val high = out[off + 3].toInt() and 0xFF
+            val reg = out[off].toInt() and 0x1F
+            if (high != 0xB4 || reg != rt) return null
+            out[off + 3] = 0xB6.toByte()   
+        }
+        return out
+    }
+    private fun excludable(name: String, exclude: ExcludeRule): Boolean {
+        for (p in exclude.exact) if (name == p) return true
+        for (p in exclude.prefixes) {
+            if (name.startsWith(p)) return true
+        }
+        return false
+    }
+    private fun prunedByAbi(name: String, keepAbi: String?): Boolean {
+        if (keepAbi == null) return false
+        if (!name.startsWith("lib/")) return false
+        if (name.startsWith("lib/$keepAbi/")) return false
+        return true
+    }
+    private fun deflate(data: ByteArray): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val def = Deflater(9, true)
+        try {
+            def.setInput(data)
+            def.finish()
+            val chunk = ByteArray(8192)
+            while (!def.finished()) {
+                val n = def.deflate(chunk)
+                out.write(chunk, 0, n)
+            }
+        } finally {
+            def.end()
+        }
+        return out.toByteArray()
+    }
+    private fun <T, R> parallelMap(
+        items: List<T>,
+        workers: Int,
+        transform: (T) -> R,
+    ): List<R> {
+        if (workers <= 1 || items.size <= 1) return items.map(transform)
+        val pool = Executors.newFixedThreadPool(minOf(workers, items.size))
+        try {
+            val futures = items.map { item -> pool.submit(Callable { transform(item) }) }
+            return futures.map { it.get() }
+        } finally {
+            pool.shutdown()
+        }
+    }
+    private fun crc32(data: ByteArray): Long {
+        val c = CRC32()
+        c.update(data)
+        return c.value
+    }
+    private data class PreparedBundleEntry(
+        val target: String,
+        val content: ByteArray,
+        val compressed: ByteArray?,
+        val stored: Boolean,
+        val patched: Boolean,
+    )
+    private data class PreparedAssetEntry(
+        val target: String,
+        val content: ByteArray,
+        val compressed: ByteArray,
+    )
+    private data class CdRecord(
+        val name: String,
+        val method: Int,
+        val compressedSize: Long,
+        val uncompressedSize: Long,
+        val crc: Long,
+        val localOffset: Long,
+        val dataOffset: Long,
+    )
+}

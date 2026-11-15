@@ -85,13 +85,13 @@ build-release:
       if [ "$CONTINUOUS" = true ]; then
         APP_VERSION_NAME="continuous-r${CI_PIPELINE_IID}"
         BUNDLE_VERSION="$APP_VERSION_NAME"
-        APK_NAME="nexora_continuous.apk"
+        APK_NAME="yoriva_continuous.apk"
         NEEDS_ANDROID=true
         NEEDS_LIBS=true
       else
         APP_VERSION_NAME="$CI_COMMIT_TAG"
         BUNDLE_VERSION="$CI_COMMIT_TAG"
-        APK_NAME="nexora_v${CI_COMMIT_TAG#v}.apk"
+        APK_NAME="yoriva_v${CI_COMMIT_TAG#v}.apk"
       fi
       APP_VERSION_CODE=$(date -u +%s)
       export NEEDS_ANDROID NEEDS_LIBS APP_VERSION_NAME APP_VERSION_CODE APK_NAME BUNDLE_VERSION
@@ -450,7 +450,7 @@ PY
 
         (cd android/app/build/outputs/apk/release && \
           APK=$(ls *.apk 2>/dev/null | head -1) && \
-          [ -n "$APK" ] && mv "$APK" "${APK_NAME:-nexora.apk}")
+          [ -n "$APK" ] && mv "$APK" "${APK_NAME:-yoriva.apk}")
         echo "${APP_VERSION_NAME:-unknown}" > "$WS/version.txt"
         cat "$WS/version.txt"
 
@@ -489,8 +489,8 @@ PY
         echo "== Release (rolling continuous) =="
         if ! gh release view continuous >/dev/null 2>&1; then
           gh release create continuous \
-            --title "Nexora Continuous" \
-            --notes "Nexora Continuous build"
+            --title "Yoriva Continuous" \
+            --notes "Yoriva Continuous build"
         fi
         if [ "$NEEDS_ANDROID" = "true" ]; then
           gh release upload continuous --clobber version.txt android/app/build/outputs/apk/release/*.apk 2>/dev/null || true
@@ -498,7 +498,7 @@ PY
 
         if [ "$NEEDS_LIBS" = "true" ]; then
           if ! gh release view libs >/dev/null 2>&1; then
-            gh release create libs --title "Nexora Libs" --notes "Native libs and manifests (rolling)."
+            gh release create libs --title "Yoriva Libs" --notes "Native libs and manifests (rolling)."
           fi
           gh release upload libs --clobber manifest.json manifest-v7a.json build-meta.json \
             incremental/arm64-v8a/*.so incremental-v7a/armeabi-v7a/*.so \
@@ -507,16 +507,16 @@ PY
 
         if [ "$NEEDS_LIBS" = "true" ]; then
           if ! gh release view extras >/dev/null 2>&1; then
-            gh release create extras --title "Nexora Extras" --notes "Addons, game assets and client APK (rolling)."
+            gh release create extras --title "Yoriva Extras" --notes "Addons, game assets and client APK (rolling)."
           fi
           gh release upload extras --clobber amxx-addons.zip game-assets.zip 2>/dev/null || true
         fi
 
-        BODY="Nexora Continuous build ${APP_VERSION_NAME:-}
+        BODY="Yoriva Continuous build ${APP_VERSION_NAME:-}
       Commit: ${MSG}
       Run: ${CI_PIPELINE_URL}
       Built: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        gh release edit continuous --title "Nexora Continuous" --notes "$BODY" 2>/dev/null || true
+        gh release edit continuous --title "Yoriva Continuous" --notes "$BODY" 2>/dev/null || true
       else
         if [ "$NEEDS_ANDROID" = "true" ] && [ -n "$CI_COMMIT_TAG" ]; then
           echo "== Release (app APK) for tag $CI_COMMIT_TAG =="
@@ -540,10 +540,10 @@ PY
 
       if [ -n "${DISCORD_WEBHOOK:-}" ]; then
         VERSION="${CI_COMMIT_TAG:-$APP_VERSION_NAME}"
-        APK_FILE="nexora_v${VERSION#v}.apk"
+        APK_FILE="yoriva_v${VERSION#v}.apk"
         if [ "$CONTINUOUS" = "true" ]; then
           VERSION="$APP_VERSION_NAME"
-          APK_FILE="nexora_continuous.apk"
+          APK_FILE="yoriva_continuous.apk"
         fi
         REPO="$GH_REPO"
         COMMIT_MSG=$(echo "$MSG" | head -c 500)
@@ -559,9 +559,9 @@ PY
           TYPE_FIELD="Bundle (libs & plugins)"
           APK_FIELD=""
         fi
-        TITLE="Nexora v${VERSION}"
+        TITLE="Yoriva v${VERSION}"
         if [ "$CONTINUOUS" = "true" ]; then
-          TITLE="Nexora Continuous build ${VERSION}"
+          TITLE="Yoriva Continuous build ${VERSION}"
         fi
         BODY=$(cat <<EOF
 {

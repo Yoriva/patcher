@@ -5,18 +5,18 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 base {
-    archivesName.set("nexora")
+    archivesName.set("yoriva")
 }
 val signingStoreFile = rootProject.file("debug/patcher-release.p12")
 android {
-    namespace = "com.pickle.patcher"
+    namespace = "com.yoriva"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.nexora"
+        applicationId = "com.yoriva"
         minSdk = 24
         targetSdk = 36
-        versionCode = System.getenv("APP_VERSION_CODE")?.toIntOrNull() ?: 1
-        versionName = System.getenv("APP_VERSION_NAME")?.takeIf { it.isNotBlank() } ?: "0.1.0"
+        versionCode = System.getenv("APP_VERSION_CODE")?.toIntOrNull() ?: 11700
+        versionName = System.getenv("APP_VERSION_NAME")?.takeIf { it.isNotBlank() } ?: "1.17.0"
         vectorDrawables { useSupportLibrary = true }
     }
     signingConfigs {
@@ -41,7 +41,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-        isCoreLibraryDesugaringEnabled = true
     }
     buildFeatures {
         compose = true
@@ -62,14 +61,12 @@ kotlin {
 }
 dependencies {
     implementation(project(":patcherlib"))
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation(platform("androidx.compose:compose-bom:2024.09.02"))
     implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended:1.7.4")
     implementation("androidx.compose.animation:animation")
