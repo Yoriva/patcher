@@ -173,6 +173,8 @@ echo "== building core =="
 NATIVES_FILE="$AMXX/amxmodx/natives-android.c"
 if [ "$ABI" = arm64-v8a ]; then
 cat > "$NATIVES_FILE" << 'NATIVES_EOF'
+#include <stdint.h>
+#include <string.h>
 
 static void *g_gate = 0;
 
@@ -239,6 +241,8 @@ int amxx_CpuSupport(void) {
 NATIVES_EOF
 else
 cat > "$NATIVES_FILE" << 'NATIVES_EOF'
+#include <stdint.h>
+#include <string.h>
 
 static void *g_gate = 0;
 
