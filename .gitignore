@@ -1,11 +1,29 @@
+# Build outputs
+android/.gradle/
+android/**/build/
+android/.kotlin/
+android/local.properties
+android/.idea/
+android/captures/
+*.apk
+*.aab
+
+# Secrets and signing material (CI supplies at build time)
+*.jks
+*.keystore
+android/app/src/main/assets/keystore/
+.env
+.env.*
+!.env.example
+
+# OS / misc
+shots/
+__pycache__/
+*.pyc
+*.log
+.watch/
 watch.out
 ci-watch.log
 ci-watch.seen
 cs16-client/
 signingkey.jks
-*.jks
-*.keystore
-shots/
-__pycache__/
-*.pyc
-
