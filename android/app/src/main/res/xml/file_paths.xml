@@ -1,7 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <cache-path name="patcher" path="patcher/" />
-    <files-path name="files" path="." />
-    <external-files-path name="extfiles" path="." />
-    <external-path name="external_root" path="." />
+    <external-files-path name="patcher" path="nexora/patcher/" />
 </paths>
