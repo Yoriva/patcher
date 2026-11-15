@@ -42,7 +42,7 @@ index c80b503..92dd69b 100644
  
  	execute_process(
 diff --git a/android/app/build.gradle b/android/app/build.gradle
-index 7d38af0..0d791d4 100644
+index 7d38af0..62a41ed 100644
 --- a/android/app/build.gradle
 +++ b/android/app/build.gradle
 @@ -15,7 +15,7 @@ android {
@@ -54,7 +54,7 @@ index 7d38af0..0d791d4 100644
  		targetSdk = 36
  
  		ndk {
-@@ -76,7 +76,10 @@ android {
+@@ -76,8 +76,17 @@ android {
  
  		create("continuous") {
  			initWith(getByName("release"))
@@ -64,9 +64,16 @@ index 7d38af0..0d791d4 100644
 +			// the package is.
 +			applicationIdSuffix = ".nexora"
  			signingConfig = signingConfigs.continuous
++			// R8 strips the Compose Main-dispatcher service, and the launcher
++			// dies at startup with IllegalStateException: Module with the Main
++			// dispatcher is missing. The debug build works because it is not
++			// minified, so make the continuous build behave the same.
++			minifyEnabled = false
++			shrinkResources = false
  
  			externalNativeBuild {
-@@ -99,6 +102,31 @@ android {
+                 cmake {
+@@ -99,6 +108,31 @@ android {
  		create("git") {
  			dimension = "version"
  			buildConfigField("Boolean", "IS_GOOGLE_PLAY_BUILD", "false")
@@ -110,6 +117,35 @@ index d44e314..8c9a24d 100644
 +        android:roundIcon="@mipmap/ic_launcher_round"
          android:theme="@style/LauncherTheme"
          tools:targetApi="r">
+ 
+diff --git a/android/app/src/main/java/su/xash/cs16client/LauncherActivity.kt b/android/app/src/main/java/su/xash/cs16client/LauncherActivity.kt
+index 2cadf3a..43d7818 100644
+--- a/android/app/src/main/java/su/xash/cs16client/LauncherActivity.kt
++++ b/android/app/src/main/java/su/xash/cs16client/LauncherActivity.kt
+@@ -126,7 +126,7 @@ abstract class LauncherActivity : ComponentActivity() {
+         private const val PREFS = "cs16_launcher"
+         private const val KEY_ARGV = "argv"
+         private const val DEFAULT_ARGV = "-dev 2 -log"
+-        private const val DLL_ARG = "-dll @metamod"
++        private const val DLL_ARG = "-dll @metadroid"
+         private const val MOD_ACTION = "su.xash.engine.MOD"
+         private const val ENGINE_TEST = "su.xash.engine.test"
+         private const val ENGINE_STABLE = "su.xash.engine"
+diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
+index bcfe541..644752d 100644
+--- a/android/app/src/main/res/values/strings.xml
++++ b/android/app/src/main/res/values/strings.xml
+@@ -14,9 +14,9 @@
+     <string name="launcher_argv_label">Arguments</string>
+     <string name="launcher_argv_default">-dev 2 -log</string>
+     <string name="launcher_dll_label">GameDLL loader</string>
+-    <string name="launcher_dll_value">-dll @metamod</string>
++    <string name="launcher_dll_value">-dll @metadroid</string>
+     <string name="launcher_locked">Locked</string>
+-    <string name="launcher_dll_warning">The launcher already loads metamod. Remove -dll from the arguments so two loaders do not compete for the same DLL list.</string>
++    <string name="launcher_dll_warning">The launcher already loads metadroid. Remove -dll from the arguments so two loaders do not compete for the same DLL list.</string>
+ 
+     <string name="launcher_status_blocked">Remove -dll from the arguments to continue.</string>
  
 diff --git a/cl_dll/cdll_int.cpp b/cl_dll/cdll_int.cpp
 index 2f7f824..a3adddc 100644
@@ -168,33 +204,3 @@ index 2f7f824..a3adddc 100644
  	}
  
  	g_iMobileAPIVersion = MOBILITY_API_VERSION;
-
-diff --git a/android/app/src/main/java/su/xash/cs16client/LauncherActivity.kt b/android/app/src/main/java/su/xash/cs16client/LauncherActivity.kt
-index 2cadf3a..43d7818 100644
---- a/android/app/src/main/java/su/xash/cs16client/LauncherActivity.kt
-+++ b/android/app/src/main/java/su/xash/cs16client/LauncherActivity.kt
-@@ -126,7 +126,7 @@ abstract class LauncherActivity : ComponentActivity() {
-         private const val PREFS = "cs16_launcher"
-         private const val KEY_ARGV = "argv"
-         private const val DEFAULT_ARGV = "-dev 2 -log"
--        private const val DLL_ARG = "-dll @metamod"
-+        private const val DLL_ARG = "-dll @metadroid"
-         private const val MOD_ACTION = "su.xash.engine.MOD"
-         private const val ENGINE_TEST = "su.xash.engine.test"
-         private const val ENGINE_STABLE = "su.xash.engine"
-diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
-index bcfe541..644752d 100644
---- a/android/app/src/main/res/values/strings.xml
-+++ b/android/app/src/main/res/values/strings.xml
-@@ -14,9 +14,9 @@
-     <string name="launcher_argv_label">Arguments</string>
-     <string name="launcher_argv_default">-dev 2 -log</string>
-     <string name="launcher_dll_label">GameDLL loader</string>
--    <string name="launcher_dll_value">-dll @metamod</string>
-+    <string name="launcher_dll_value">-dll @metadroid</string>
-     <string name="launcher_locked">Locked</string>
--    <string name="launcher_dll_warning">The launcher already loads metamod. Remove -dll from the arguments so two loaders do not compete for the same DLL list.</string>
-+    <string name="launcher_dll_warning">The launcher already loads metadroid. Remove -dll from the arguments so two loaders do not compete for the same DLL list.</string>
- 
-     <string name="launcher_status_blocked">Remove -dll from the arguments to continue.</string>
- 
