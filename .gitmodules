@@ -1,4 +1,4 @@
-﻿[submodule "3rdparty/hlsdk"]
+[submodule "3rdparty/hlsdk"]
 	path = 3rdparty/hlsdk
 	url = https://github.com/Yoriva/hlsdk.git
 	branch = main
