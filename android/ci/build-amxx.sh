@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 set -euo pipefail
 
 SBIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -481,21 +481,9 @@ else:
     print('   mathlib.h already patched or target not found')
 "
 fi
-mkdir -p "$REAPI/version"
-cat > "$REAPI/version/reapi_version.inc" << 'VERINC'
-VERINC
-echo "   created reapi_version.inc"
-cat > "$REAPI/version/appversion.h" << 'APPVER'
 
-// This file is generated automatically.
-// Don't edit it.
-
-// Version defines
-
-
-
-APPVER
-echo "   created appversion.h"
+rm -f "$REAPI/version/reapi_version.inc" "$REAPI/version/appversion.h"
+bash "$REAPI/version/appversion.sh" "$REAPI" reapi
 REAPI_PATCHED="$REAPI/.reapi-abi-patched"
 if [ ! -f "$REAPI_PATCHED" ]; then
 python3 -c "
@@ -772,4 +760,4 @@ cp "$PC_DEV/amxxpc" "$PC_DEV/amxxpc32.so" "$OUT/compiler/$ABI/"
 echo "   amxxpc -> $(ls -l "$OUT/compiler/$ABI/amxxpc" | awk '{print $5}') bytes"
 
 echo "ALL_BUILT"
-ls -l "$OUT/lib/$ABI/" "$OUT/plugins" "$OUT/compiler/$ABI"
+ls -l "$OUT/lib/$ABI/" "$OUT/plugins" "$OUT/compiler/$ABI"
