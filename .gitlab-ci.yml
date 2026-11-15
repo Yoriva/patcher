@@ -1,4 +1,4 @@
-image: ubuntu:22.04
+﻿image: ubuntu:22.04
 
 stages:
   - release
@@ -6,7 +6,7 @@ stages:
 variables:
   GIT_DEPTH: "50"
   CACHE_FALLBACK_KEY: "ccache-ndk-r25c"
-  CS16_CLIENT_URL: "https://github.com/berkchy/cs16-client.git"
+  CS16_CLIENT_URL: "https://github.com/Yoriva/cs16-client.git"
 
 build-release:
   stage: release
@@ -32,7 +32,7 @@ build-release:
       export LC_ALL=C.UTF-8
       export GRADLE_USER_HOME="$CI_PROJECT_DIR/.gradle-home"
       WS="$CI_PROJECT_DIR"
-      export GH_REPO="berkchy/nexora"
+      export GH_REPO="Yoriva/patcher"
 
       if [ -z "${GH_TOKEN:-}" ]; then
         echo "ERROR: GH_TOKEN CI/CD variable is not set - cannot upload release assets."
@@ -99,11 +99,11 @@ build-release:
 
       if [ "$NEEDS_LIBS" = "true" ]; then
         UP_AMXX=$(git ls-remote https://github.com/alliedmodders/amxmodx.git HEAD 2>/dev/null | cut -f1)
-        UP_MM=$(git ls-remote https://github.com/FWGS/metamod-fwgs.git HEAD 2>/dev/null | cut -f1)
+        UP_MM=$(git ls-remote https://github.com/Yoriva/metadroid.git HEAD 2>/dev/null | cut -f1)
         UP_REAPI=$(git ls-remote https://github.com/rehlds/ReAPI.git HEAD 2>/dev/null | cut -f1)
         UP_YAPB=$(git -C 3rdparty/yapb rev-parse HEAD 2>/dev/null)
         UP_YAPB_UPSTREAM=$(git ls-remote https://github.com/yapb/yapb.git HEAD 2>/dev/null | cut -f1)
-        UP_RGDLL=$(git ls-remote https://github.com/berkchy/ReGameDLL_CS.git fix/first-spawn-equip 2>/dev/null | cut -f1)
+        UP_RGDLL=$(git ls-remote https://github.com/Yoriva/ReGameDLL_CS.git fix/first-spawn-equip 2>/dev/null | cut -f1)
         UP_JSON=$(python3 -c "import json; print(json.dumps({'amxmodx':'$UP_AMXX','metamod':'$UP_MM','reapi':'$UP_REAPI','yapb':'$UP_YAPB','yapb_upstream':'$UP_YAPB_UPSTREAM','regamedll':'$UP_RGDLL'}))")
       else
         UP_JSON="{}"
@@ -250,11 +250,11 @@ build-release:
         rm -rf "$RGDLL"
         mkdir -p "$RGDLL"
         RGDLL_BRANCH=fix/first-spawn-equip
-        curl -fsSL "https://api.github.com/repos/berkchy/ReGameDLL_CS/commits/$RGDLL_BRANCH" \
+        curl -fsSL "https://api.github.com/repos/Yoriva/ReGameDLL_CS/commits/$RGDLL_BRANCH" \
           | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"][:12])' \
           > "$WS/rgdll-sha" || echo unknown > "$WS/rgdll-sha"
         echo "regamedll $RGDLL_BRANCH -> $(cat "$WS/rgdll-sha")"
-        curl -fsSL "https://codeload.github.com/berkchy/ReGameDLL_CS/tar.gz/refs/heads/$RGDLL_BRANCH" \
+        curl -fsSL "https://codeload.github.com/Yoriva/ReGameDLL_CS/tar.gz/refs/heads/$RGDLL_BRANCH" \
           | tar -xz -C "$RGDLL" --strip-components=1
         python3 - "$RGDLL" <<'PY'
 import glob, os, sys
@@ -353,7 +353,7 @@ PY
         }
         PRODUCER_ARGS+=(--producer "cs16-client=$(dir_sha cs16-client)")
         PRODUCER_ARGS+=(--producer "amxmodx=$(sub_sha 3rdparty/amxmodx)")
-        PRODUCER_ARGS+=(--producer "metamod=$(sub_sha 3rdparty/metamod-fwgs)")
+        PRODUCER_ARGS+=(--producer "metamod=$(sub_sha 3rdparty/metadroid)")
         PRODUCER_ARGS+=(--producer "yapb=$(sub_sha 3rdparty/yapb)")
         if [ -f "$WS/rgdll-sha" ]; then
           PRODUCER_ARGS+=(--producer "regamedll=$(cat "$WS/rgdll-sha")")

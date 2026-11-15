@@ -1,4 +1,4 @@
-package com.yoriva.patcher
+﻿package com.yoriva.patcher
 import android.app.Application
 import android.content.Intent
 import android.os.Build
@@ -416,7 +416,7 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     val hasCachedBundle: Boolean get() = bundleManager.hasCachedBundle
-    val repo = "berkchy/nexora"
+    val repo = "Yoriva/patcher"
 private val externalRoot: File = externalRoot(app)
 private fun externalRoot(app: Application): File {
         val base = app.getExternalFilesDir(null) ?: app.cacheDir
@@ -595,7 +595,7 @@ private fun externalRoot(app: Application): File {
         const val GAMEDATA_DISABLED_SUFFIX = ".disabled"
         val GAMEDATA_VARIANT = Regex("offsets-cstrike-replugged\\.(arm64|arm32)\\.txt")
         const val LEGACY_GAMEDATA_NAME = "offsets-cstrike-replugged.txt"
-        const val APP_RELEASE_REPO = "berkchy/nexora"
+        const val APP_RELEASE_REPO = "Yoriva/patcher"
         const val CLIENT_APK_REPO = APP_RELEASE_REPO
         const val CLIENT_APK_ASSET = "CS16Client-Android.apk"
         const val GAME_CLIENT_PACKAGE = "su.xash.cs16client.nexora"

@@ -1,4 +1,4 @@
-package com.yoriva.data
+﻿package com.yoriva.data
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -51,7 +51,7 @@ object IncrementalUpdateManager {
         val upToDate: List<AssetInfo>,
         val totalBytes: Long,
     )
-    private const val REPO = "berkchy/nexora"
+    private const val REPO = "Yoriva/patcher"
     suspend fun fetchReleaseAssets(tag: String, abi: String): List<AssetInfo> {
         val manifestName = if (abi == "arm64-v8a") "manifest.json" else "manifest-v7a.json"
         val manifest = try {

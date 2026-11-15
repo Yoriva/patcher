@@ -1,4 +1,4 @@
-package com.yoriva
+﻿package com.yoriva
 import android.app.AlertDialog
 import android.content.Context
 import android.os.Build
@@ -46,7 +46,7 @@ object CrashLog {
                             "Model: ${Build.MODEL}\nSDK: ${Build.VERSION.SDK_INT}\n" +
                             "Thread: ${Thread.currentThread().name}\n\n" +
                             "### Stack trace\n\n```\n$sw\n```"
-                        val url = "https://github.com/berkchy/nexora/issues/new?title=" +
+                        val url = "https://github.com/Yoriva/patcher/issues/new?title=" +
                             java.net.URLEncoder.encode(title, "UTF-8") +
                             "&body=" + java.net.URLEncoder.encode(body, "UTF-8")
                         val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))

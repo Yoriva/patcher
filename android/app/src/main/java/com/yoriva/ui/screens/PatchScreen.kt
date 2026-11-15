@@ -1,4 +1,4 @@
-package com.yoriva.ui.screens
+﻿package com.yoriva.ui.screens
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedContent
@@ -220,7 +220,7 @@ private fun GameStatusCard(vm: PatcherViewModel) {
         else -> Triple(
             "cstrike folder was not found",
             "All game files must be installed before patching. Put the cstrike folder in the game directory and return here.",
-            "https://github.com/berkchy/nexora/releases",
+            "https://github.com/Yoriva/patcher/releases",
         )
     }
     Surface(

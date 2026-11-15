@@ -1,18 +1,15 @@
-[submodule "3rdparty/hlsdk"]
+﻿[submodule "3rdparty/hlsdk"]
 	path = 3rdparty/hlsdk
-	url = https://github.com/berkchy/hlsdk.git
-	branch = main
-[submodule "3rdparty/mm-p"]
-	path = 3rdparty/mm-p
-	url = https://github.com/berkchy/mm-p.git
+	url = https://github.com/Yoriva/hlsdk.git
 	branch = main
 [submodule "3rdparty/yapb"]
 	path = 3rdparty/yapb
-	url = https://github.com/berkchy/yapb.git
-[submodule "3rdparty/metamod-fwgs"]
-	path = 3rdparty/metamod-fwgs
-	url = https://github.com/berkchy/metamod-fwgs.git
+	url = https://github.com/Yoriva/yapb.git
 [submodule "3rdparty/amxmodx"]
 	path = 3rdparty/amxmodx
-	url = https://github.com/berkchy/amxmodx.git
+	url = https://github.com/Yoriva/amxmodx.git
 	branch = nexora
+[submodule "3rdparty/metadroid"]
+	path = 3rdparty/metadroid
+	url = https://github.com/Yoriva/metadroid.git
+	branch = main

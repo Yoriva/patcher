@@ -75,10 +75,8 @@ SYSROOT_LIB=$NDK/toolchains/llvm/prebuilt/$HOST-x86_64/sysroot/usr/lib/$SYSROOT_
 
 AMXX=$REPO_ROOT/3rdparty/amxmodx
 HLSDK=$REPO_ROOT/3rdparty/hlsdk
-METAMOD=$REPO_ROOT/3rdparty/mm-p/metamod
-MMHLSDK=$REPO_ROOT/3rdparty/mm-p/hlsdk
 YAPB=$REPO_ROOT/3rdparty/yapb
-METAMOD_FWGS=$REPO_ROOT/3rdparty/metamod-fwgs
+METAMOD_R=$REPO_ROOT/3rdparty/metadroid
 
 SCRIPT_FOLDER="${SCRIPT_FOLDER:-$AMXX/scripting}"
 LOGS_DIR="$SCRIPT_FOLDER/logs"
@@ -129,7 +127,7 @@ INC=(
   -I"$AMXX/third_party" -I"$AMXX/third_party/hashing" -I"$AMXX/third_party/zlib"
   -I"$AMXX/third_party/sqlite"   -I"$AMXX/third_party/utf8rewind"
   -I"$AMXX/amxmodx"
-  -I"$METAMOD"
+  -I"$METAMOD_R/metamod/src"
   -I"$HLSDK/common" -I"$HLSDK/dlls" -I"$HLSDK/engine"
   -I"$HLSDK/game_shared" -I"$HLSDK/public" -I"$HLSDK/pm_shared"
 )
@@ -348,25 +346,26 @@ if [[ ! -f "$TMP/libpcre.a" ]]; then
 fi
 PCRE_A="$TMP/pcre-inst/lib/libpcre.a"
 
-echo "== building metamod (metamod-fwgs, $ABI) =="
-MMBUILD=$TMP/metamod-fwgs-build
-cmake -S "$METAMOD_FWGS" -B "$MMBUILD" \
+echo "== building metamod-r ($ABI) =="
+MMBUILD=$TMP/metamod-r-build
+cmake -S "$METAMOD_R" -B "$MMBUILD" \
   -GNinja \
-  -DCMAKE_C_COMPILER_LAUNCHER="${CCACHE:-}" \
-  -DCMAKE_CXX_COMPILER_LAUNCHER="${CCACHE:-}" \
   -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI=$ABI \
   -DANDROID_PLATFORM=android-24 \
   -DANDROID_STL=c++_static \
-  -DUSE_STATIC_RUNTIME=ON \
   -DCMAKE_BUILD_TYPE=Release
-cmake --build "$MMBUILD" --target metamod -j"$(nproc)"
-MM_SO=$(find "$MMBUILD" -name "libmetamod_android_*.so" | head -1)
+cmake --build "$MMBUILD" -j"$(nproc)"
+if [ "$ABI" = "arm64-v8a" ]; then
+  MM_SO=$(find "$MMBUILD" -name "libmetamod_android_arm64.so" | head -1)
+else
+  MM_SO=$(find "$MMBUILD" -name "libmetamod_android_armv7l.so" | head -1)
+fi
 if [ -n "$MM_SO" ]; then
   cp "$MM_SO" "$OUT/lib/$ABI/libmetamod.so"
-  echo "   metamod -> $(ls -l "$OUT/lib/$ABI/libmetamod.so" | awk '{print $5}') bytes"
+  echo "   metamod-r -> $(ls -l "$OUT/lib/$ABI/libmetamod.so" | awk '{print $5}') bytes"
 else
-  echo "WARN: metamod lib not found, skipping"
+  echo "WARN: metamod-r lib not found, skipping"
 fi
 
 build_module() {
