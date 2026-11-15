@@ -380,6 +380,7 @@ class BundleManager(
     private fun installIntoGameDir(bundle: Bundle): Int? {
         val gameDir = gameDirProvider()
         if (!gameDir.isDirectory) return null
+        wipeObsoleteGameDlls(gameDir)
         var count = 0
         bundle.manifest.entries.forEach { entry ->
             val relative = gameInstallPathFor(entry.target) ?: return@forEach
@@ -404,17 +405,24 @@ class BundleManager(
 
     private fun gameInstallPathFor(target: String): String? {
         val name = target.substringAfterLast('/')
-        if (!name.endsWith(".so")) return null
-        return when {
-            name.startsWith("libclient_android_") || name.startsWith("libmenu_android_") ->
-                "cl_dlls/$name"
-            name.startsWith("libcs_android_") -> "dlls/$name"
-            name == "libamxmodx.so" -> "addons/amxmodx/$name"
-            name == "libmetadroid.so" || name.startsWith("libmetadroid_android_") ->
-                "addons/metamod/$name"
-            name == "libyapb.so" -> "addons/yapb/bin/$name"
-            name.contains("_amxx_") -> "addons/amxmodx/modules/$name"
-            else -> null
+        if (name.endsWith(".so")) {
+            return null
+        }
+        return null
+    }
+
+    private fun wipeObsoleteGameDlls(gameDir: File) {
+        val targets = listOf(
+            "addons/yapb/bin",
+            "addons/amxmodx/modules",
+            "addons/amxmodx",
+            "addons/metamod",
+            "cl_dlls",
+            "dlls",
+        )
+        for (rel in targets) {
+            File(gameDir, rel).listFiles { f -> f.isFile && f.name.endsWith(".so") }
+                ?.forEach { it.delete() }
         }
     }
 
