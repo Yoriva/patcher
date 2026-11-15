@@ -1,0 +1,18 @@
+[submodule "3rdparty/hlsdk"]
+	path = 3rdparty/hlsdk
+	url = https://github.com/berkchy/hlsdk.git
+	branch = main
+[submodule "3rdparty/mm-p"]
+	path = 3rdparty/mm-p
+	url = https://github.com/berkchy/mm-p.git
+	branch = main
+[submodule "3rdparty/yapb"]
+	path = 3rdparty/yapb
+	url = https://github.com/berkchy/yapb.git
+[submodule "3rdparty/metamod-fwgs"]
+	path = 3rdparty/metamod-fwgs
+	url = https://github.com/berkchy/metamod-fwgs.git
+[submodule "3rdparty/amxmodx"]
+	path = 3rdparty/amxmodx
+	url = https://github.com/berkchy/amxmodx.git
+	branch = nexora

@@ -1,14 +1,11 @@
-# build output
-build/
-
-# archives & logs
-*.tgz
-*.log
-
-# signing material (create your own, never commit)
+watch.out
+ci-watch.log
+ci-watch.seen
+cs16-client/
+signingkey.jks
+*.jks
 *.keystore
-debug.keystore
-
-# misc
-*.pyc
+shots/
 __pycache__/
+*.pyc
+

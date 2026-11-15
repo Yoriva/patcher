@@ -3,4 +3,5 @@
     <cache-path name="patcher" path="patcher/" />
     <files-path name="files" path="." />
     <external-files-path name="extfiles" path="." />
+    <external-path name="external_root" path="." />
 </paths>

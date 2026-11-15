@@ -1,0 +1,475 @@
+#!/usr/bin/env python3
+"""Per-ABI gamedata offset overrides measured from the built libcs.
+
+The ReGameDLL fork's member layout differs from stock CS16Client/ReGameDLL, so
+AMXX's shipped cstrike pdata offsets are wrong and plugins that read/write
+cstrike pdata (admin.amxx auth, Zombie Plague, ...) misbehave or crash the
+gamedll.  The offsets are ABI-specific (pointer size, member ordering), so one
+override file cannot serve both arm64-v8a and armeabi-v7a.
+
+Rather than hand-maintaining a table, this tool reads the member offsets out of
+the DWARF debug info that the very same libcs build emits:  DWARF's
+DW_AT_data_member_location for a class member is exactly what offsetof() would
+return for that build, so the table cannot drift from the shipped binary.
+
+Commands:
+  list   <template.txt>                       - print the measured field list
+  check  <template.txt> <measurements>        - verify measurements vs template
+  emit   <template.txt> <measurements> <out>  - write a per-ABI override file
+
+The template is the committed arm64 override; its class/field/type list is the
+source of truth for what gets measured.
+"""
+
+import argparse
+import os
+import re
+import subprocess
+import sys
+
+
+CLASS_RE = re.compile(r'^\t\t\t"(\w+)"$')
+SECTION_RE = re.compile(r'^\t\t\t\t"(\w+)"$')
+FIELD_RE = re.compile(r'^\t\t\t\t\t"(\w+)"$')
+VALUE_RE = re.compile(r'^\t\t\t\t\t\t"(\w+)"\s+"(.*)"$')
+
+
+def parse_template(path):
+    """-> ordered list of (class, section, field, {key: value}) plus raw head."""
+    fields = []
+    head = []
+    cur_class = cur_section = cur_field = None
+    for line in open(path, encoding="utf-8").read().split("\n"):
+        m = CLASS_RE.match(line)
+        if m:
+            cur_class, cur_section, cur_field = m.group(1), None, None
+            continue
+        m = SECTION_RE.match(line)
+        if m:
+            cur_section, cur_field = m.group(1), None
+            continue
+        m = FIELD_RE.match(line)
+        if m and cur_class and cur_section:
+            cur_field = (cur_class, cur_section, m.group(1))
+            fields.append((cur_field, {}))
+            continue
+        m = VALUE_RE.match(line)
+        if m and cur_field is not None and fields:
+            fields[-1][1][m.group(1)] = m.group(2)
+    return fields
+
+
+def parse_measurements(path):
+    """'CBasePlayer.m_iTeam=576' lines -> {(class, field): offset}."""
+    out = {}
+    for line in open(path, encoding="utf-8"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, _, value = line.partition("=")
+        cls, _, field = key.strip().rpartition(".")
+        out[(cls, field)] = int(value.strip(), 0)
+    return out
+
+
+
+DIE_RE = re.compile(r"^(0x[0-9a-f]+):(\s+)(DW_TAG_\w+|NULL)\s*$")
+ATTR_RE = re.compile(r"^\s+(DW_AT_\w+)\s*(?:\((.*)\))?\s*$")
+QUOTED_RE = re.compile(r'"((?:[^"\\]|\\.)*)"')
+REF_RE = re.compile(r"^0x([0-9a-f]+)")
+TYPE_TAGS = ("DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type")
+KEEP_TAGS = frozenset(
+    ("DW_TAG_compile_unit", "DW_TAG_member", "DW_TAG_inheritance") + TYPE_TAGS
+)
+
+
+class Die(object):
+    __slots__ = ("offset", "tag", "attrs", "children", "indent")
+
+    def __init__(self, offset, tag, indent):
+        self.offset = offset
+        self.tag = tag
+        self.indent = indent
+        self.attrs = {}
+        self.children = []
+
+    def name(self):
+        return self.attrs.get("name", (None,))[0]
+
+    def ref(self, attr):
+        value = self.attrs.get(attr)
+        return int(value[0], 16) if value else None
+
+    def number(self, attr):
+        value = self.attrs.get(attr)
+        if not value:
+            return None
+        text = value[0].strip()
+        try:
+            if text.lower().startswith("0x"):
+                return int(text, 16)
+            return int(text, 10)
+        except ValueError:
+            return None
+
+
+def parse_dwarf(path):
+    """llvm-dwarfdump --debug-info text -> {die_offset: Die} (type graph only)."""
+    dies = {}
+    root = Die(0, "DW_TAG_compile_unit", -1)
+    dies[0] = root
+    stack = [root]
+    for line in open(path, encoding="utf-8", errors="replace"):
+        m = DIE_RE.match(line)
+        if m:
+            if m.group(3) == "NULL":
+                continue
+            indent = len(m.group(2))
+            while len(stack) > 1 and stack[-1].indent >= indent:
+                stack.pop()
+            tag = m.group(3)
+            die = Die(int(m.group(1), 16), tag, indent)
+            keep = tag in KEEP_TAGS
+            if keep:
+                dies[die.offset] = die
+                stack[-1].children.append(die)
+            stack.append(die)
+            continue
+        m = ATTR_RE.match(line)
+        if m and len(stack) > 1 and stack[-1].tag in KEEP_TAGS:
+            attr = m.group(1)[len("DW_AT_"):]
+            raw = m.group(2)
+            if raw is None:
+                continue
+            ref = REF_RE.match(raw.strip())
+            name = QUOTED_RE.search(raw)
+            if attr == "name" and name:
+                stack[-1].attrs[attr] = (name.group(1),)
+            elif ref:
+                stack[-1].attrs[attr] = ("0x" + ref.group(1),)
+            else:
+                stack[-1].attrs[attr] = (raw.strip(),)
+    return dies
+
+
+def build_layout(dies):
+    """{class name: {member: offset}} including inherited members."""
+    by_name = {}
+    for die in dies.values():
+        if die.tag not in TYPE_TAGS or "declaration" in die.attrs:
+            continue
+        name = die.name()
+        if not name:
+            continue
+        best = by_name.get(name)
+        if best is None or (die.number("byte_size") or 0) > (best.number("byte_size") or 0):
+            by_name[name] = die
+
+    def members(die, seen):
+        if die.offset in seen:
+            return {}
+        seen.add(die.offset)
+        out = {}
+        for child in die.children:
+            if child.tag == "DW_TAG_member":
+                name = child.name()
+                loc = child.number("data_member_location")
+                if loc is None:
+                    continue
+                if name:
+                    out[name] = loc
+                    continue
+                nested = child.ref("type")
+                if nested is not None and nested in dies:
+                    for member, offset in members(dies[nested], seen).items():
+                        out.setdefault(member, offset + loc)
+            elif child.tag == "DW_TAG_inheritance":
+                base = child.ref("type")
+                base_loc = child.number("data_member_location") or 0
+                if base is None or base not in dies:
+                    continue
+                for member, offset in members(dies[base], seen).items():
+                    out.setdefault(member, offset + base_loc)
+        return out
+
+    return {name: members(die, set()) for name, die in by_name.items()}
+
+
+def dump_types(dwarfdump, so_path, fields, out_path):
+    """Dump just the layouts we read, following base classes as they show up.
+
+    llvm-dwarfdump prints one DIE subtree per --name match, and a member that
+    a class inherits is only described under the *base* class, so the set of
+    types to dump is discovered while dumping.
+    """
+    pending = []
+    seen = set()
+    for (cls, _section, _field), _values in fields:
+        if cls not in seen:
+            seen.add(cls)
+            pending.append(cls)
+    written = 0
+    with open(out_path, "w", encoding="utf-8") as out:
+        while pending:
+            name = pending.pop(0)
+            result = subprocess.run(
+                [dwarfdump, "--debug-info", "--name=" + name, "--show-children", so_path],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                print("dwarfdump %s: %s" % (name, result.stderr.strip()), file=sys.stderr)
+                continue
+            out.write("## %s\n" % name)
+            out.write(result.stdout)
+            written += len(result.stdout)
+            for base in referenced_types(result.stdout):
+                if base not in seen:
+                    seen.add(base)
+                    pending.append(base)
+    return written
+
+
+def referenced_types(text):
+    """Type names an inheritance entry points at."""
+    names = []
+    die = None
+    for line in text.split("\n"):
+        m = DIE_RE.match(line)
+        if m:
+            die = m.group(3)
+            continue
+        if die == "DW_TAG_inheritance":
+            m = ATTR_RE.match(line)
+            if m and m.group(1) == "DW_AT_type":
+                name = QUOTED_RE.search(m.group(2) or "")
+                if name:
+                    names.append(name.group(1))
+    return names
+
+
+def dwarf_diagnostics(path):
+    """Why did the parse come up short? Cheap enough to always print on failure."""
+    try:
+        size = os.path.getsize(path)
+    except OSError as exc:
+        return "dwarf diagnostics unavailable: %s" % exc
+    tags = {}
+    classes = []
+    total = 0
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            total += 1
+            m = DIE_RE.match(line)
+            if not m or m.group(3) == "NULL":
+                continue
+            tags[m.group(3)] = tags.get(m.group(3), 0) + 1
+            if m.group(3) in TYPE_TAGS and len(classes) < 8:
+                classes.append(line.strip())
+    top = sorted(tags.items(), key=lambda kv: -kv[1])[:8]
+    return "dwarf: %d bytes, %d lines, most common tags: %s\nfirst class/struct DIEs:\n%s" % (
+        size,
+        total,
+        ", ".join("%s=%d" % (tag, count) for tag, count in top),
+        "\n".join("  " + c for c in classes) or "  (none)",
+    )
+
+
+def measure(dwarf_dump, fields):
+    dies = parse_dwarf(dwarf_dump)
+    layout = build_layout(dies)
+    out = []
+    missing = []
+    carried = {}
+    for (cls, _section, field), values in fields:
+        if cls not in layout:
+            template = values.get("linux")
+            if template is None:
+                missing.append("%s (class not in DWARF, no template value)" % cls)
+                continue
+            carried.setdefault(cls, 0)
+            carried[cls] += 1
+            out.append((cls, field, int(template)))
+            continue
+        if field not in layout[cls]:
+            missing.append("%s.%s (member not in DWARF)" % (cls, field))
+            continue
+        out.append((cls, field, layout[cls][field]))
+    return out, missing, carried
+
+
+
+def emit(fields, measurements, out_path, abi, note=""):
+    lines = []
+    lines.append("/**")
+    lines.append(" * %s offset overrides for CS16Client (ReGameDLL_CS fork)." % abi)
+    lines.append(" * Measured with android/ci/gamedata-offsets.py from the DWARF debug")
+    lines.append(" * info of this build's libcs, so the table cannot drift from the")
+    lines.append(" * shipped gamedll. Only the \"linux\" column is overridden; parsed")
+    lines.append(" * after AMXX's own files, so fixed offsets win.")
+    if note:
+        lines.append(" * %s" % note)
+    lines.append(" */")
+    lines.append("")
+    lines.append('"Games"')
+    lines.append("{")
+    lines.append('\t"#default"')
+    lines.append("\t{")
+    lines.append('\t\t"Classes"')
+    lines.append("\t\t{")
+
+    current_class = None
+    for (cls, section, field), values in fields:
+        if cls != current_class:
+            if current_class is not None:
+                lines.append("\t\t\t\t}")
+                lines.append("\t\t\t}")
+                lines.append("")
+            current_class = cls
+            lines.append('\t\t\t"%s"' % cls)
+            lines.append("\t\t\t{")
+            lines.append('\t\t\t\t"%s"' % section)
+            lines.append("\t\t\t\t{")
+        key = (cls, field)
+        if key not in measurements:
+            raise SystemExit("emit: no measurement for %s.%s" % key)
+        lines.append('\t\t\t\t\t"%s"' % field)
+        lines.append("\t\t\t\t\t{")
+        for name, value in values.items():
+            if name == "linux":
+                value = str(measurements[key])
+            pad = " " * max(1, 8 - len(name) - 2)
+            lines.append('\t\t\t\t\t\t"%s"%s"%s"' % (name, pad, value))
+        lines.append("\t\t\t\t\t}")
+        lines.append("")
+    if current_class is not None:
+        lines.append("\t\t\t\t}")
+        lines.append("\t\t\t}")
+        lines.append("")
+    lines.append("\t\t}")
+    lines.append("\t}")
+    lines.append("}")
+    lines.append("")
+
+    with open(out_path, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines))
+    return structure(out_path)
+
+
+def structure(path):
+    """Indentation and key of every meaningful line, values normalized away.
+
+    AMXX parses these files with a brace-matching reader, and a file that is
+    missing a closing brace fails as "Section beginning without a matching
+    ending" for the whole gamedata set — not just for one entry. So the shape
+    is compared, not the numbers.
+    """
+    out = []
+    for line in open(path, encoding="utf-8").read().split("\n"):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("/*") or stripped.startswith("*") \
+                or stripped.startswith("//") or stripped.startswith("#"):
+            continue
+        out.append((len(line) - len(line.lstrip("\t")), stripped.split()[0]))
+    return out
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_list = sub.add_parser("list")
+    p_list.add_argument("template")
+
+    p_check = sub.add_parser("check")
+    p_check.add_argument("template")
+    p_check.add_argument("measurements")
+    p_check.add_argument("--field")
+
+    p_emit = sub.add_parser("emit")
+    p_emit.add_argument("template")
+    p_emit.add_argument("measurements")
+    p_emit.add_argument("out")
+    p_emit.add_argument("--abi", default="unknown")
+    p_emit.add_argument("--note", default="")
+
+    p_dump = sub.add_parser("dump")
+    p_dump.add_argument("template")
+    p_dump.add_argument("--dwarfdump", required=True)
+    p_dump.add_argument("--so", required=True)
+    p_dump.add_argument("--out", required=True)
+
+    p_measure = sub.add_parser("measure")
+    p_measure.add_argument("template")
+    p_measure.add_argument("dwarf")
+    p_measure.add_argument("out")
+
+    args = parser.parse_args()
+    fields = parse_template(args.template)
+
+    if args.cmd == "list":
+        for (cls, section, field), values in fields:
+            print("%s\t%s\t%s\t%s" % (cls, section, field, values.get("type", "")))
+        return 0
+
+    if args.cmd == "dump":
+        written = dump_types(args.dwarfdump, args.so, fields, args.out)
+        print("dumped %d bytes of type info -> %s" % (written, args.out))
+        return 0
+
+    if args.cmd == "measure":
+        rows, missing, carried = measure(args.dwarf, fields)
+        for cls in sorted(carried):
+            print("CARRIED %s: not in this build's debug info, kept %d template value(s)"
+                  % (cls, carried[cls]), file=sys.stderr)
+        if missing:
+            for item in sorted(set(missing)):
+                print("MISSING %s" % item, file=sys.stderr)
+            print(dwarf_diagnostics(args.dwarf), file=sys.stderr)
+            return 1
+        with open(args.out, "w", encoding="utf-8") as handle:
+            for cls, field, offset in rows:
+                handle.write("%s.%s=%d\n" % (cls, field, offset))
+        print("measured %d fields -> %s" % (len(rows), args.out))
+        return 0
+
+    measurements = parse_measurements(args.measurements)
+    if args.cmd == "check":
+        bad = []
+        for (cls, _section, field), values in fields:
+            want = values.get("linux")
+            got = measurements.get((cls, field))
+            if want is None or got is None:
+                continue
+            if args.field and args.field != field:
+                continue
+            if int(want) != got:
+                bad.append("%s.%s template=%s dwarf=%d" % (cls, field, want, got))
+        if bad:
+            for line in bad:
+                print("DRIFT %s" % line, file=sys.stderr)
+            return 1
+        print("template matches DWARF for %d fields" % len(fields))
+        return 0
+
+    if args.cmd == "emit":
+        written = emit(fields, measurements, args.out, args.abi, args.note)
+        expected = structure(args.template)
+        if written != expected:
+            for index, (got, want) in enumerate(zip(written, expected)):
+                if got != want:
+                    raise SystemExit(
+                        "emit: %s has the wrong shape at line %d: %r, template has %r"
+                        % (args.out, index + 1, got, want)
+                    )
+            raise SystemExit(
+                "emit: %s has %d structural lines, template has %d"
+                % (args.out, len(written), len(expected))
+            )
+        print("wrote %s (%d fields, shape matches the template)" % (args.out, len(fields)))
+        return 0
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

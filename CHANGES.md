@@ -1,6 +1,6 @@
 # Changes vs upstream
 
-Every change made to run AMXX as a **64-bit-cell** build inside CS16Client (Xash3D) on
+Every change made to run AMXX as a **64-bit-cell** build inside Nexora (Xash3D) on
 **aarch64 Android**, delivered through a patcher APK.
 
 Upstream baseline: `alliedmodders/amxmodx` **master** (fetched fresh in CI) + the in-order
@@ -60,11 +60,34 @@ a function pointer in a 4-byte cell; the whole toolchain must use 64-bit cells.
 
 ## Patcher APK
 
-- Picks a CS16Client APK, validates ABI (`arm64-v8a` only), prunes the exact 13 AMXX/metamod
+- Picks a Nexora APK, validates ABI (`arm64-v8a` only), prunes the exact 13 AMXX/metamod
   libraries + `META-INF/` (previously a `lib/arm64-v8a/lib` **prefix** match would have deleted
   every native engine library), injects the bundle payload (16 KB-aligned STORED `.so`, DEFLATED
   addons) and re-signs with the bundled keystore.
 - Bundle source: newest GitHub release, embedded asset as offline fallback.
+
+## ReGameDLL / CS game DLL first-spawn fix
+
+- The fix is committed in the ReGameDLL_CS fork (`berkchy/ReGameDLL_CS`,
+  `fix/first-spawn-equip`, `regamedll/dlls/player.cpp`) that produces `libcs.so`.
+
+  Symptom: joining a server, the player's **first** spawn happens unarmed
+  (no ammo HUD, cannot fire); switching team and respawning fixes it.
+
+  Cause: `CBasePlayer::Spawn()` can run while the joining state machine has not
+  reached `GetIntoGame()` yet (round-restart/respawn firing right after
+  `JoinTeam` set `GETINTOGAME`). `m_bJustConnected` is still true, so
+  `PlayerSpawn` skips `OnSpawnEquip`, and `OnSpawnEquip` skips
+  `GiveDefaultItems` while `m_bNotKilled` still holds — the player spawns alive
+  but weapon-less until a team switch runs `GetIntoGame`.
+
+  Fix: in `Spawn()`, promote such a spawn to a regular in-game spawn (clear
+  `m_bJustConnected`/`m_bNotKilled`, set `m_iJoiningState = JOINED`) when the
+  player already has a team. The connect-time no-op spawn
+  (`m_iJoiningState == PICKINGTEAM`) keeps its guarded behaviour.
+
+  Ship: rebuild `libcs.so` from the ReGameDLL_CS fork with this patch applied
+  and publish the game APK release; the patcher picks it up unchanged.
 
 ## Known residual issues
 

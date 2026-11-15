@@ -14,6 +14,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AmxxPatcher"
+rootProject.name = "Yoriva"
 include(":app")
 include(":patcherlib")
