@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Generate an incremental-update manifest and stage individual .so files.
 
   gen-manifest.py <abi> <libdir> <outdir> [--plugins-dir <dir>]
@@ -132,7 +132,7 @@ def collect_entries(libdir: str, abi: str, previous: dict) -> list:
 
     add("libamxmodx.so", f"lib/{abi}/libamxmodx.so", True, "AMX Mod X core", producer="amxmodx")
 
-    metamod_name = "libyapb_android_" + suffix + ".so"
+    metamod_name = "libmetadroid_android_" + suffix + ".so"
     metamod_src = os.path.join(libdir, "libmetadroid.so")
     if os.path.exists(metamod_src):
         asset_name = f"{abi}_libmetadroid.so"
@@ -147,7 +147,7 @@ def collect_entries(libdir: str, abi: str, previous: dict) -> list:
             "producer": "metadroid",
             "size": os.path.getsize(metamod_src),
             "required": True,
-            "description": "Metamod HL1 (as libyapb for -dll @yapb)",
+            "description": "Metadroid (metamod-r for Android, -dll @metadroid)",
         })
 
     add("libyapb.so", f"lib/{abi}/libyapb.so", False, "YaPB bot plugin", producer="yapb")

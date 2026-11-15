@@ -1,4 +1,4 @@
-﻿name: build client APK (extras)
+name: build client APK (extras)
 
 on:
   workflow_dispatch:
@@ -75,9 +75,13 @@ jobs:
             cp app/build/outputs/apk/git/continuous/app-git-continuous.apk \
                "$GITHUB_WORKSPACE/CS16Client-Android.apk"
           else
-            echo "::warning::SIGNING_KEY is empty, building the unsigned debug variant"
-            ./gradlew --no-daemon assembleGitDebug --stacktrace
-            cp app/build/outputs/apk/git/debug/app-git-debug.apk \
+            echo "::warning::SIGNING_KEY is empty, using the committed client-debug keystore for a stable signature"
+            export KEYSTORE_FILE_PATH="$GITHUB_WORKSPACE/android/debug/client-debug.p12"
+            export KEYSTORE_PASSWORD=yoriva-client-debug
+            export KEY_ALIAS=client-debug
+            export KEY_PASSWORD=yoriva-client-debug
+            ./gradlew --no-daemon assembleGitContinuous --stacktrace
+            cp app/build/outputs/apk/git/continuous/app-git-continuous.apk \
                "$GITHUB_WORKSPACE/CS16Client-Android.apk"
           fi
           ls -lh "$GITHUB_WORKSPACE/CS16Client-Android.apk"
