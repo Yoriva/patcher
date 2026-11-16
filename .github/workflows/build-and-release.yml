@@ -583,7 +583,11 @@ jobs:
               git push origin libs
               gh release create libs --title "Yoriva Libs" --notes "Native libs and manifests (rolling)."
             fi
-            gh release upload libs --clobber manifest.json manifest-v7a.json build-meta.json incremental/arm64-v8a/*.so incremental-v7a/armeabi-v7a/*.so compiler-assets/* 2>/dev/null || true
+            ls -la manifest.json manifest-v7a.json build-meta.json
+            gh release upload libs --clobber manifest.json manifest-v7a.json build-meta.json
+            gh release upload libs --clobber incremental/arm64-v8a/*.so
+            gh release upload libs --clobber incremental-v7a/armeabi-v7a/*.so
+            gh release upload libs --clobber compiler-assets/*
           fi
 
           BODY="Yoriva Continuous build ${APP_VERSION_NAME:-}
