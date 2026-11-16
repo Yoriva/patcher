@@ -165,7 +165,7 @@ index 2f7f824..a3adddc 100644
 +
  	Game_HookEvents();
  	CL_LoadParticleMan();
- 	NXPluginLoader_Init();
+ 	YRPluginLoader_Init();
 @@ -466,12 +474,12 @@ int DLLEXPORT HUD_GetRenderInterface( int version, render_api_t *renderfuncs, re
  	// we didn't send callbacks to engine, because we don't use it
  	// *callback = renderInterface;
