@@ -304,10 +304,10 @@ jobs:
           edits = [
               ('regamedll/dlls/cbase.cpp',
                "VectorRef CBaseEntity::__API_HOOK(FireBullets3)(VectorRef vecSrc, VectorRef vecDirShooting, float vecSpread, float flDistance, int iPenetration, int iBulletType, int iDamage, float flRangeModifier, entvars_t *pevAttacker, bool bPistol, int shared_rand)\n{\n",
-               "\tALERT(at_logged, \"[rgd-diag] FireBullets3 in pevAttacker=%p iBulletType=%d iDamage=%d\\n\", pevAttacker, iBulletType, iDamage);\n"),
+               "\tALERT(at_logged, \"[rgd-diag] FireBullets3 in pevAttacker=%p iPenetration=%d iBulletType=%d iDamage=%d\\n\", pevAttacker, iPenetration, iBulletType, iDamage);\n"),
               ('regamedll/dlls/cbase.cpp',
-               "\t\tUTIL_TraceLine(vecSrc, vecEnd, dont_ignore_monsters, ENT(pev), &tr);\n",
-               "\t\tALERT(at_logged, \"[rgd-diag] trace fraction=%.3f\\n\", tr.flFraction);\n"),
+               "\tint iStartPenetration = iPenetration;\n\twhile (iPenetration != 0)\n\t{\n\t\tClearMultiDamage();\n\n#ifdef REGAMEDLL_ADD\n\t\tgpGlobals->trace_flags = FTRACE_BULLET;\n#endif\n\t\tUTIL_TraceLine(vecSrc, vecEnd, dont_ignore_monsters, ENT(pev), &tr);\n",
+               "\tint iStartPenetration = iPenetration;\n\twhile (iPenetration != 0)\n\t{\n\t\tClearMultiDamage();\n\n#ifdef REGAMEDLL_ADD\n\t\tgpGlobals->trace_flags = FTRACE_BULLET;\n#endif\n\t\tUTIL_TraceLine(vecSrc, vecEnd, dont_ignore_monsters, ENT(pev), &tr);\n\t\tALERT(at_logged, \"[rgd-diag] trace fraction=%.3f\\n\", tr.flFraction);\n"),
               ('regamedll/dlls/player.cpp',
                "BOOL EXT_FUNC CBasePlayer::__API_HOOK(TakeDamage)(entvars_t *pevInflictor, entvars_t *pevAttacker, FloatRef flDamage, int bitsDamageType)\n{\n",
                "\tALERT(at_logged, \"[rgd-diag] TakeDamage in flDamage=%.2f bitsDamageType=%d pevAttacker=%p\\n\", flDamage, bitsDamageType, pevAttacker);\n"),
