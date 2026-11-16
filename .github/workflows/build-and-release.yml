@@ -298,6 +298,33 @@ jobs:
           for path in patched:
               print("  " + path)
           PY
+          python3 - "$RGDLL" <<'PY'
+          import os, sys
+          root = sys.argv[1]
+          edits = [
+              ('regamedll/dlls/cbase.cpp',
+               "VectorRef CBaseEntity::__API_HOOK(FireBullets3)(VectorRef vecSrc, VectorRef vecDirShooting, float vecSpread, float flDistance, int iPenetration, int iBulletType, int iDamage, float flRangeModifier, entvars_t *pevAttacker, bool bPistol, int shared_rand)\n{\n",
+               "\tALERT(at_logged, \"[rgd-diag] FireBullets3 in pevAttacker=%p iBulletType=%d iDamage=%d\\n\", pevAttacker, iBulletType, iDamage);\n"),
+              ('regamedll/dlls/cbase.cpp',
+               "\t\tUTIL_TraceLine(vecSrc, vecEnd, dont_ignore_monsters, ENT(pev), &tr);\n",
+               "\t\tALERT(at_logged, \"[rgd-diag] trace fraction=%.3f\\n\", tr.flFraction);\n"),
+              ('regamedll/dlls/player.cpp',
+               "BOOL EXT_FUNC CBasePlayer::__API_HOOK(TakeDamage)(entvars_t *pevInflictor, entvars_t *pevAttacker, FloatRef flDamage, int bitsDamageType)\n{\n",
+               "\tALERT(at_logged, \"[rgd-diag] TakeDamage in flDamage=%.2f bitsDamageType=%d pevAttacker=%p\\n\", flDamage, bitsDamageType, pevAttacker);\n"),
+          ]
+          for rel, anchor, insertion in edits:
+              path = os.path.join(root, rel)
+              text = open(path, encoding='utf-8').read()
+              if insertion.strip() in text:
+                  print("already present:", rel)
+                  continue
+              if anchor not in text:
+                  sys.exit("ERROR: anchor not found in %s" % rel)
+              text = text.replace(anchor, anchor + insertion, 1)
+              with open(path, 'w', encoding='utf-8') as f:
+                  f.write(text)
+              print("patched:", rel)
+          PY
           NDKBIN="$(echo "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin)"
           TPL="$GITHUB_WORKSPACE/addons/amxmodx/data/gamedata/common.games/custom/offsets-cstrike-replugged.arm64.txt"
           for ABI in arm64-v8a armeabi-v7a; do
