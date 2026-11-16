@@ -3,9 +3,8 @@ name: build client APK (extras)
 on:
   workflow_dispatch:
   push:
-    paths:
-      - 'cs16-client.pin'
-      - 'cs16-client-launcher.patch'
+    tags:
+      - 'continuous'
 
 permissions:
   contents: write
@@ -20,7 +19,24 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: Detect build type
+        id: type
+        shell: bash
+        run: |
+          MSG=$(git log -1 --pretty=%s)
+          echo "Commit message: $MSG"
+          LOWER=$(echo "$MSG" | tr '[:upper:]' '[:lower:]')
+          NEEDS_CLIENT=false
+          if echo "$LOWER" | grep -q '\[client\]'; then NEEDS_CLIENT=true; fi
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then NEEDS_CLIENT=true; fi
+          echo "needs_client=$NEEDS_CLIENT" >> "$GITHUB_OUTPUT"
+          echo "Client build: $NEEDS_CLIENT"
+          if [ "$NEEDS_CLIENT" != "true" ]; then
+            echo "::notice::no [client] marker in the commit message - skipping client build"
+          fi
+
       - name: Fetch cs16-client
+        if: steps.type.outputs.needs_client == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -35,12 +51,14 @@ jobs:
           echo "cs16-client -> $GOT"
 
       - name: Set up JDK 17
+        if: steps.type.outputs.needs_client == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Install NDK r25c
+        if: steps.type.outputs.needs_client == 'true'
         shell: bash
         run: |
           SDKMANAGER=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)
@@ -50,11 +68,13 @@ jobs:
           fi
 
       - name: Bundle debug signing keystore
+        if: steps.type.outputs.needs_client == 'true'
         shell: bash
         run: |
           mkdir -p cs16-client/android/app/src/main/assets/keystore 2>/dev/null || true
 
       - name: Apply launcher patch
+        if: steps.type.outputs.needs_client == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -62,6 +82,7 @@ jobs:
           git -C cs16-client apply "$GITHUB_WORKSPACE/cs16-client-launcher.patch"
 
       - name: Build the client APK
+        if: steps.type.outputs.needs_client == 'true'
         working-directory: cs16-client/android
         env:
           KEYSTORE_FILE_PATH: ${{ github.workspace }}/signingkey.jks
@@ -87,6 +108,7 @@ jobs:
           ls -lh "$GITHUB_WORKSPACE/CS16Client-Android.apk"
 
       - name: Upload to extras release
+        if: steps.type.outputs.needs_client == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
