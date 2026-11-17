@@ -23,6 +23,12 @@ sealed interface AppUpdate {
         val commits: List<String>,
         val size: Long,
         val url: String,
+        val releaseNotes: String = "",
+        val commitMessage: String = "",
+        val commitSha: String = "",
+        val authorLogin: String = "",
+        val authorName: String = "",
+        val updatedAtMillis: Long = 0L,
     ) : AppUpdate
     data class Downloading(
         val tag: String,
@@ -84,7 +90,32 @@ class UpdateManager(
                     if (apkSize != null && apkSize > 0) append(" (${mb(apkSize)})")
                 }
                 if (versionDiffers || sizeDiffers) {
-                    _appUpdate.value = AppUpdate.Available(tag, notes, emptyList(), apkSize ?: 0L, apkUrl)
+                    val release = ReleaseRepository.fetchReleaseDetails(
+                        PatcherViewModel.APP_RELEASE_REPO, tag,
+                    )
+                    val commit = ReleaseRepository.fetchCommitDetails(
+                        PatcherViewModel.APP_RELEASE_REPO, tag,
+                    )
+                    val authorLogin = commit?.authorLogin?.takeIf { it.isNotBlank() }
+                        ?: release?.authorLogin?.takeIf { it.isNotBlank() }
+                        ?: ""
+                    val authorName = commit?.authorName?.takeIf { it.isNotBlank() }
+                        ?: authorLogin.ifBlank { "Yoriva" }
+                    _appUpdate.value = AppUpdate.Available(
+                        tag = tag,
+                        notes = notes,
+                        commits = emptyList(),
+                        size = apkSize ?: 0L,
+                        url = apkUrl,
+                        releaseNotes = release?.body.orEmpty(),
+                        commitMessage = commit?.message.orEmpty(),
+                        commitSha = commit?.sha.orEmpty(),
+                        authorLogin = authorLogin,
+                        authorName = authorName,
+                        updatedAtMillis = commit?.authoredAtMillis?.takeIf { it > 0L }
+                            ?: release?.publishedAtMillis
+                            ?: 0L,
+                    )
                 } else {
                     _appUpdate.value = AppUpdate.UpToDate(remoteVersion)
                 }

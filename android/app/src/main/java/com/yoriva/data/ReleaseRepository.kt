@@ -1,8 +1,10 @@
 package com.yoriva.data
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -40,6 +42,55 @@ object ReleaseRepository {
         } catch (_: Throwable) {
             null
         }
+    }
+    data class ReleaseDetails(
+        val body: String,
+        val publishedAtMillis: Long,
+        val authorLogin: String,
+    )
+    data class CommitDetails(
+        val sha: String,
+        val message: String,
+        val authorName: String,
+        val authorLogin: String,
+        val authoredAtMillis: Long,
+    )
+    suspend fun fetchReleaseDetails(repo: String, tag: String): ReleaseDetails? {
+        val encoded = URLEncoder.encode(tag, "UTF-8")
+        val body = fetchText("https://api.github.com/repos/$repo/releases/tags/$encoded") ?: return null
+        return runCatching {
+            val json = JSONObject(body)
+            ReleaseDetails(
+                body = json.optString("body"),
+                publishedAtMillis = parseIsoDate(json.optString("published_at")),
+                authorLogin = json.optJSONObject("author")?.optString("login").orEmpty(),
+            )
+        }.getOrNull()
+    }
+    suspend fun fetchCommitDetails(repo: String, ref: String): CommitDetails? {
+        val encoded = URLEncoder.encode(ref, "UTF-8")
+        val body = fetchText("https://api.github.com/repos/$repo/commits/$encoded") ?: return null
+        return runCatching {
+            val json = JSONObject(body)
+            val commit = json.optJSONObject("commit")
+            val author = commit?.optJSONObject("author")
+            val githubAuthor = json.optJSONObject("author")
+            CommitDetails(
+                sha = json.optString("sha"),
+                message = commit?.optString("message").orEmpty(),
+                authorName = author?.optString("name").orEmpty(),
+                authorLogin = githubAuthor?.optString("login").orEmpty(),
+                authoredAtMillis = parseIsoDate(author?.optString("date").orEmpty()),
+            )
+        }.getOrNull()
+    }
+    private fun parseIsoDate(raw: String): Long = try {
+        val cleaned = raw.replace(Regex("\\.\\d+Z$"), "Z")
+        val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+        fmt.timeZone = TimeZone.getTimeZone("UTC")
+        fmt.parse(cleaned)?.time ?: 0L
+    } catch (_: Throwable) {
+        0L
     }
     fun assetUrl(repo: String, tag: String, name: String): String =
         "https://github.com/$repo/releases/download/$tag/$name"

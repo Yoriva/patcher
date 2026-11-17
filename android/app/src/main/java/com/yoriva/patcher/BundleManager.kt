@@ -55,28 +55,61 @@ class BundleManager(
     private val excludedPrefs by lazy {
         app.getSharedPreferences("nexora_libs", android.content.Context.MODE_PRIVATE)
     }
-    private val _libExcluded = MutableStateFlow(
-        excludedPrefs.getStringSet("excluded", emptySet())?.toSet() ?: emptySet()
-    )
+    private fun loadExcluded(key: String): Set<String> =
+        excludedPrefs.getStringSet(key, emptySet())?.toSet() ?: emptySet()
+
+    private val manualExcluded = MutableStateFlow(loadExcluded("excluded"))
+    private val includedOverrides = MutableStateFlow(loadExcluded("included_overrides"))
+    private var autoExcluded: Set<String> = emptySet()
+    private val _libExcluded = MutableStateFlow(manualExcluded.value - includedOverrides.value)
     val libExcluded: StateFlow<Set<String>> = _libExcluded.asStateFlow()
 
+    private fun applyExclusions() {
+        val next = (manualExcluded.value + autoExcluded) - includedOverrides.value
+        if (next != _libExcluded.value) _libExcluded.value = next
+    }
+
+    private fun clearAutoExcluded(names: Set<String>) {
+        if (names.isEmpty()) return
+        val next = autoExcluded - names
+        if (next == autoExcluded) return
+        autoExcluded = next
+        applyExclusions()
+    }
+
     fun setLibExcluded(name: String, excluded: Boolean) {
-        val next = _libExcluded.value.toMutableSet()
-        if (excluded) next.add(name) else next.remove(name)
-        if (next == _libExcluded.value) return
-        _libExcluded.value = next
-        excludedPrefs.edit().putStringSet("excluded", HashSet(next)).apply()
+        val manual = manualExcluded.value.toMutableSet()
+        val overrides = includedOverrides.value.toMutableSet()
+        if (excluded) {
+            manual.add(name)
+            overrides.remove(name)
+        } else {
+            manual.remove(name)
+            overrides.add(name)
+        }
+        if (manual == manualExcluded.value && overrides == includedOverrides.value) return
+        manualExcluded.value = manual
+        includedOverrides.value = overrides
+        excludedPrefs.edit()
+            .putStringSet("excluded", HashSet(manual))
+            .putStringSet("included_overrides", HashSet(overrides))
+            .apply()
+        applyExclusions()
         rebuildLoadedBundle()
     }
 
     fun toggleLibExcluded(name: String) = setLibExcluded(name, name !in _libExcluded.value)
 
-    private fun rebuildLoadedBundle() {
+    private fun rebuildLoadedBundleFiles() {
         val abi = abiProvider()
         val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, abi, _libExcluded.value)
         loadedBundle = buildBundleFromFileMap(files, abi)
-        scanLibs()
         refreshAbiStatus()
+    }
+
+    private fun rebuildLoadedBundle() {
+        rebuildLoadedBundleFiles()
+        scanLibs()
     }
 
     private val _customLibProblem = MutableStateFlow<String?>(null)
@@ -104,6 +137,8 @@ class BundleManager(
         _libs.value = emptyList()
         _customLibs.value = emptyList()
         _customLibProblem.value = null
+        autoExcluded = emptySet()
+        applyExclusions()
     }
 
     internal fun setBundleVersion(version: String) {
@@ -188,6 +223,29 @@ class BundleManager(
                     source = source,
                 )
             }
+            if (checkRemote) {
+                val coreChecked = coreAssets.isNotEmpty()
+                val pluginChecked = pluginAssets.isNotEmpty()
+                if (coreChecked || pluginChecked) {
+                    val checkedNames = mutableSetOf<String>()
+                    val invalid = mutableSetOf<String>()
+                    _libs.value.forEach { lib ->
+                        val checked = when (lib.source) {
+                            LibSource.CORE -> coreChecked
+                            LibSource.PLUGIN -> pluginChecked
+                        }
+                        if (!checked) return@forEach
+                        checkedNames.add(lib.name)
+                        if (lib.localSize == 0L || !lib.upToDate) invalid.add(lib.name)
+                    }
+                    val nextAuto = (autoExcluded - checkedNames) + invalid
+                    if (nextAuto != autoExcluded) {
+                        autoExcluded = nextAuto
+                        applyExclusions()
+                        if (loadedBundle != null && localFiles.isNotEmpty()) rebuildLoadedBundleFiles()
+                    }
+                }
+            }
             val outdated = _libs.value.filter { !it.upToDate && it.releaseSize > 0 }
             if (autoLoad && outdated.isEmpty() && (coreAssets.isNotEmpty() || pluginAssets.isNotEmpty())) {
                 val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, abi, _libExcluded.value)
@@ -265,6 +323,10 @@ class BundleManager(
             _libs.value = _libs.value.map {
                 if (it.name == libName) it.copy(localSize = newSize, upToDate = upToDate) else it
             }
+            if (upToDate) {
+                clearAutoExcluded(setOf(libName))
+                rebuildLoadedBundleFiles()
+            }
         } catch (t: Throwable) {
             _libs.value = _libs.value.map {
                 if (it.name == libName) it.copy(downloading = false) else it
@@ -298,6 +360,7 @@ class BundleManager(
                 assets, libsDir, abiProvider(), appliedBuilds(abiProvider())
             )
             if (diff.toDownload.isEmpty()) {
+                clearAutoExcluded(assets.map { it.cleanName }.toSet())
                 val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, abiProvider(), _libExcluded.value)
                 if (files.isEmpty()) throw IOException("No .so files found in libs/")
                 val b = buildBundleFromFileMap(files, abiProvider())
@@ -364,6 +427,7 @@ class BundleManager(
                     throw IOException("${asset.cleanName} came out short ($got of ${asset.size} bytes) — try again")
                 }
             }
+            clearAutoExcluded(diff.toDownload.map { it.cleanName }.toSet())
             val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, abiProvider(), _libExcluded.value)
             if (files.isEmpty()) throw IOException("No .so files found after download")
             val b = buildBundleFromFileMap(files, abiProvider())

@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.RocketLaunch
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.outlined.Handyman
 import androidx.compose.material.icons.outlined.RocketLaunch
 import androidx.compose.material.icons.rounded.Settings
@@ -1057,69 +1058,172 @@ private fun formatBytes(bytes: Long): String {
     return "%.2f GB".format(mb / 1024.0)
 }
 private fun formatSpeed(bps: Long): String = "${formatBytes(bps)}/s"
+private fun formatUpdateDate(millis: Long): String {
+    if (millis <= 0L) return ""
+    return java.text.DateFormat.getDateTimeInstance(
+        java.text.DateFormat.MEDIUM,
+        java.text.DateFormat.SHORT,
+    ).format(java.util.Date(millis))
+}
 @Composable
 private fun UpdateDialog(vm: PatcherViewModel, state: AppUpdate) {
+    val uriHandler = LocalUriHandler.current
     AlertDialog(
         onDismissRequest = {
             if (state !is AppUpdate.Downloading) vm.dismissUpdate()
         },
+        icon = {
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.SystemUpdate,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+        },
         title = {
-            Text(
-                when (state) {
-                    is AppUpdate.Available -> "New update available ${state.tag}"
-                    is AppUpdate.Downloading -> "Downloading ${state.tag}…"
-                    is AppUpdate.UpToDate -> "Up to date"
-                    is AppUpdate.Failed -> "Update failed"
-                    else -> "Update"
-                },
-                style = MaterialTheme.typography.titleLarge,
-            )
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    when (state) {
+                        is AppUpdate.Available -> "New update available"
+                        is AppUpdate.Downloading -> "Downloading ${state.tag}…"
+                        is AppUpdate.UpToDate -> "Up to date"
+                        is AppUpdate.Failed -> "Update failed"
+                        else -> "Update"
+                    },
+                    style = MaterialTheme.typography.titleLarge,
+                    textAlign = TextAlign.Center,
+                )
+                if (state is AppUpdate.Available) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        state.tag,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Gray40,
+                    )
+                }
+            }
         },
         text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
                 if (state is AppUpdate.Available) {
-                    if (state.commits.isNotEmpty() || state.notes.isNotBlank()) {
-                        Column(
+                    val profile = state.authorLogin.ifBlank {
+                        state.authorName.ifBlank { "Yoriva" }
+                    }
+                    if (state.authorLogin.isNotBlank() ||
+                        state.authorName.isNotBlank() ||
+                        state.updatedAtMillis > 0L
+                    ) {
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(max = 260.dp)
-                                .verticalScroll(rememberScrollState()),
+                                .clip(RoundedCornerShape(18.dp))
+                                .clickable(enabled = state.authorLogin.isNotBlank()) {
+                                    if (state.authorLogin.isNotBlank()) {
+                                        uriHandler.openUri("https://github.com/${state.authorLogin}")
+                                    }
+                                }
+                                .background(MaterialTheme.colorScheme.surfaceContainer)
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            if (state.commits.isNotEmpty()) {
+                            GithubAvatar(username = profile)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    "Changes:",
+                                    text = state.authorName.ifBlank {
+                                        state.authorLogin.ifBlank { "Yoriva" }
+                                    },
                                     style = MaterialTheme.typography.titleSmall,
-                                    color = Gray30,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                 )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                state.commits.forEach { msg ->
+                                val meta = listOfNotNull(
+                                    state.authorLogin.takeIf { it.isNotBlank() }?.let { "@$it" },
+                                    formatUpdateDate(state.updatedAtMillis)
+                                        .takeIf { it.isNotBlank() }
+                                        ?.let { "Updated $it" },
+                                ).joinToString(" · ")
+                                if (meta.isNotBlank()) {
+                                    Spacer(modifier = Modifier.height(1.dp))
                                     Text(
-                                        "• $msg",
+                                        text = meta,
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = Gray40,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
                             }
-                            if (state.notes.isNotBlank()) {
-                                if (state.commits.isNotEmpty()) {
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    HorizontalDivider(color = Gray60)
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        "Release Notes:",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = Gray30,
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                }
-                                Text(
-                                    state.notes.trim().take(1200),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Gray40,
+                            if (state.authorLogin.isNotBlank()) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(16.dp),
                                 )
                             }
                         }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+                    if (state.commitMessage.isNotBlank()) {
+                        Text(
+                            "Latest commit",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = Gray30,
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            state.commitMessage.trim().take(1200),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Gray40,
+                        )
+                        if (state.commitSha.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                state.commitSha.take(7),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Gray40,
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+                    if (state.releaseNotes.isNotBlank()) {
+                        HorizontalDivider(color = Gray60)
                         Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Release notes",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = Gray30,
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            state.releaseNotes.trim().take(1600),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Gray40,
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+                    if (state.notes.isNotBlank()) {
+                        Text(
+                            state.notes.trim(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Gray40,
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
                     }
                     Text(
                         if (state.size > 0) "Size: ${formatBytes(state.size)}"

@@ -7,6 +7,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 val YorivaShapes = Shapes(
     extraSmall = RoundedCornerShape(10.dp),
@@ -31,13 +33,21 @@ fun YorivaTheme(
         ThemeMode.Dark -> true
     }
     val context = LocalContext.current
+    val baseDensity = LocalDensity.current
+    val screenScale = choice.screenScale.coerceIn(0.25f, 2f)
     val colorScheme = schemeForSeed(
         keyColor = choice.keyColor,
         isDark = dark,
         isAmoled = dark && choice.amoled,
         context = context,
     )
-    CompositionLocalProvider(LocalThemeController provides controller) {
+    CompositionLocalProvider(
+        LocalDensity provides Density(
+            density = baseDensity.density * screenScale,
+            fontScale = baseDensity.fontScale,
+        ),
+        LocalThemeController provides controller,
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = YorivaTypography,

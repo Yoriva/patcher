@@ -351,6 +351,7 @@ private fun LibraryEntry(
     onUpdate: () -> Unit,
 ) {
     val hasUpdate = !lib.upToDate && lib.releaseSize > 0
+    val canInclude = lib.upToDate && lib.localSize > 0L
     val subtitle = when {
         lib.downloading && lib.downloadProgress >= 0 ->
             "Downloading… ${(lib.downloadProgress * 100).toInt()}%"
@@ -394,9 +395,9 @@ private fun LibraryEntry(
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text = if (excluded) "Not included in the patch" else subtitle,
+                        text = if (excluded && canInclude) "Not included in the patch" else subtitle,
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (excluded) {
+                        color = if (excluded && canInclude) {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         } else if (hasUpdate) {
                             MaterialTheme.colorScheme.primary
@@ -419,11 +420,13 @@ private fun LibraryEntry(
                     )
                     else -> Unit
                 }
-                Spacer(Modifier.width(10.dp))
-                Switch(
-                    checked = !excluded,
-                    onCheckedChange = onToggle,
-                )
+                if (canInclude) {
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Switch(
+                        checked = !excluded,
+                        onCheckedChange = onToggle,
+                    )
+                }
             }
             if (lib.downloading) {
                 if (lib.downloadProgress >= 0) {
