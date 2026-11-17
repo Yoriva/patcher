@@ -56,11 +56,14 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.yoriva.patcher.LibInfo
+import com.yoriva.patcher.LibSource
 import com.yoriva.patcher.PatcherViewModel
 import com.yoriva.patcher.PatcherViewModel.CustomLib
 @Composable
 fun LibraryScreen(vm: PatcherViewModel) {
-    val libs by vm.libs.collectAsState()
+    val allLibs by vm.libs.collectAsState()
+    val libs = allLibs.filter { it.source == LibSource.CORE }
+    val plugins = allLibs.filter { it.source == LibSource.PLUGIN }
     val customLibs by vm.customLibs.collectAsState()
     val checking by vm.libsChecking.collectAsState()
     val problem by vm.customLibProblem.collectAsState()
@@ -81,7 +84,7 @@ fun LibraryScreen(vm: PatcherViewModel) {
             }
         }
     }
-    LaunchedEffect(Unit) { vm.scanLibs() }
+    LaunchedEffect(Unit) { vm.scanLibs(checkRemote = true) }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -90,7 +93,7 @@ fun LibraryScreen(vm: PatcherViewModel) {
     ) {
         item {
             LibrarySummary(
-                installed = libs,
+                installed = allLibs,
                 customCount = customLibs.size,
                 excluded = excluded,
                 redownloading = redownloading,
@@ -114,6 +117,31 @@ fun LibraryScreen(vm: PatcherViewModel) {
                             lib = lib,
                             index = index,
                             total = libs.size,
+                            excluded = lib.name in excluded,
+                            onToggle = { include -> vm.setLibExcluded(lib.name, !include) },
+                            onUpdate = { vm.refreshSingleLib(lib.name) },
+                        )
+                    }
+                }
+            }
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                LibrarySectionHeader(
+                    title = "Yoriva Plugins",
+                    action = { CheckUpdatesButton(checking = checking) { vm.refreshLibStatus() } },
+                )
+                if (plugins.isEmpty()) {
+                    EmptyLibraryCard(
+                        title = "No plugins yet",
+                        subtitle = "Check for updates to load plugins from the Yoriva Plugins release.",
+                    )
+                } else {
+                    plugins.forEachIndexed { index, lib ->
+                        LibraryEntry(
+                            lib = lib,
+                            index = index,
+                            total = plugins.size,
                             excluded = lib.name in excluded,
                             onToggle = { include -> vm.setLibExcluded(lib.name, !include) },
                             onUpdate = { vm.refreshSingleLib(lib.name) },

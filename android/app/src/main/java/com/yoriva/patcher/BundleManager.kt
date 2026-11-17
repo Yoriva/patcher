@@ -146,56 +146,64 @@ class BundleManager(
                     ?.toMap()
                     ?: emptyMap()
             } else emptyMap()
-            _libs.value = localFiles.keys.sorted().map { name ->
-                val f = localFiles[name] ?: return@map null
-                LibInfo(
-                    name = name,
-                    localSize = f.length(),
-                    releaseSize = f.length(),
-                    upToDate = true,
-                )
-            }.filterNotNull()
-            var tagName = "live"
-            var assets: List<IncrementalUpdateManager.AssetInfo> = emptyList()
+            var coreAssets: List<IncrementalUpdateManager.AssetInfo> = emptyList()
+            var pluginAssets: List<IncrementalUpdateManager.AssetInfo> = emptyList()
             if (checkRemote) {
                 _libsChecking.value = true
                 try {
-                    tagName = "libs"
-                    assets = IncrementalUpdateManager.fetchReleaseAssets(tagName, abi)
-                } catch (_: Throwable) { } finally {
+                    coreAssets = try {
+                        IncrementalUpdateManager.fetchReleaseAssets("libs", abi)
+                    } catch (_: Throwable) {
+                        emptyList()
+                    }
+                    pluginAssets = try {
+                        IncrementalUpdateManager.fetchPluginAssets(abi)
+                    } catch (_: Throwable) {
+                        emptyList()
+                    }
+                } finally {
                     _libsChecking.value = false
                 }
             }
-            if (assets.isNotEmpty()) {
-                val releaseMap = assets.associateBy { it.cleanName }
-                val allNames = (localFiles.keys + releaseMap.keys).distinct().sorted()
-                val rows = allNames.map { name ->
-                    val f = localFiles[name]
-                    val asset = releaseMap[name]
-                    LibInfo(
-                        name = name,
-                        localSize = f?.length() ?: 0L,
-                        releaseSize = asset?.size ?: (f?.length() ?: 0L),
-                        upToDate = if (asset != null) {
-                            IncrementalUpdateManager.isUpToDate(
-                                File(targetDir, name), asset, appliedBuilds(abi)[name]
-                            )
-                        } else true,
-                    )
+            val coreMap = coreAssets.associateBy { it.cleanName }
+            val pluginMap = pluginAssets.associateBy { it.cleanName }
+            val allNames = (localFiles.keys + coreMap.keys + pluginMap.keys).distinct().sorted()
+            _libs.value = allNames.map { name ->
+                val f = localFiles[name]
+                val asset = coreMap[name] ?: pluginMap[name]
+                val source = if (pluginMap.containsKey(name) || isPluginLibName(name, abi)) {
+                    LibSource.PLUGIN
+                } else {
+                    LibSource.CORE
                 }
-                _libs.value = rows
+                LibInfo(
+                    name = name,
+                    localSize = f?.length() ?: 0L,
+                    releaseSize = asset?.size ?: (f?.length() ?: 0L),
+                    upToDate = if (asset != null) {
+                        IncrementalUpdateManager.isUpToDate(
+                            File(targetDir, name), asset, appliedBuilds(abi)[name]
+                        )
+                    } else true,
+                    source = source,
+                )
             }
             val outdated = _libs.value.filter { !it.upToDate && it.releaseSize > 0 }
-            if (autoLoad && outdated.isEmpty() && assets.isNotEmpty()) {
+            if (autoLoad && outdated.isEmpty() && (coreAssets.isNotEmpty() || pluginAssets.isNotEmpty())) {
                 val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, abi, _libExcluded.value)
                 if (files.isNotEmpty()) {
                     val b = buildBundleFromFileMap(files, abi)
-                    markBundleTagKnown(tagName)
+                    markBundleTagKnown("libs")
                     loadedBundle = b
                     _bundle.value = BundleState.Loaded
                 }
             }
         }
+    }
+
+    private fun isPluginLibName(name: String, abi: String): Boolean {
+        val suffix = if (abi == "arm64-v8a") "arm64" else "arm"
+        return name.endsWith("_yoriva_${suffix}.so")
     }
 
     fun refreshLibStatus() {
@@ -210,13 +218,26 @@ class BundleManager(
         }
     }
 
+    private suspend fun fetchAllAssets(abi: String): List<IncrementalUpdateManager.AssetInfo> {
+        val core: List<IncrementalUpdateManager.AssetInfo> = try {
+            IncrementalUpdateManager.fetchReleaseAssets("libs", abi)
+        } catch (_: Throwable) {
+            emptyList()
+        }
+        val plugins: List<IncrementalUpdateManager.AssetInfo> = try {
+            IncrementalUpdateManager.fetchPluginAssets(abi)
+        } catch (_: Throwable) {
+            emptyList()
+        }
+        return core + plugins
+    }
+
     private suspend fun downloadLib(libName: String) {
         try {
             _libs.value = _libs.value.map {
                 if (it.name == libName) it.copy(downloading = true, downloadProgress = 0f) else it
             }
-            val tagName = "libs"
-            val assets = IncrementalUpdateManager.fetchReleaseAssets(tagName, abiProvider())
+            val assets = fetchAllAssets(abiProvider())
             val asset = assets.find { it.cleanName == libName } ?: run {
                 _libs.value = _libs.value.map {
                     if (it.name == libName) it.copy(downloading = false) else it
@@ -264,8 +285,14 @@ class BundleManager(
         return try {
             val tagName = "libs"
             setReleaseNote(tagName)
-            val assets = IncrementalUpdateManager.fetchReleaseAssets(tagName, abiProvider())
-            if (assets.isEmpty()) throw IOException("No .so assets found for ABI ${abiProvider()}")
+            val coreAssets = IncrementalUpdateManager.fetchReleaseAssets(tagName, abiProvider())
+            if (coreAssets.isEmpty()) throw IOException("No .so assets found for ABI ${abiProvider()}")
+            val pluginAssets: List<IncrementalUpdateManager.AssetInfo> = try {
+                IncrementalUpdateManager.fetchPluginAssets(abiProvider())
+            } catch (_: Throwable) {
+                emptyList()
+            }
+            val assets = coreAssets + pluginAssets
             _bundle.update { BundleState.Downloading(0.1f, tagName) }
             val diff = IncrementalUpdateManager.diff(
                 assets, libsDir, abiProvider(), appliedBuilds(abiProvider())
@@ -596,6 +623,7 @@ class BundleManager(
         "menu" -> "CS16Client main menu"
         "game" -> "ReGameDLL game DLL"
         "modules" -> "AMXX modules"
+        "plugins" -> "Yoriva Plugins"
         else -> "Bundle files"
     }
 
@@ -617,13 +645,14 @@ class BundleManager(
             name.startsWith("libmenu_android_") -> "menu"
             name.startsWith("libcs_android_") -> "game"
             name.contains("_amxx_") -> "modules"
+            name.contains("_yoriva_") -> "plugins"
             else -> "other"
         }
     }
 
     fun patchComponents(): List<PatchComponent> {
         val b = loadedBundle ?: return emptyList()
-        val order = listOf("amxx", "metamod", "yapb", "client", "menu", "modules", "game", "other")
+        val order = listOf("amxx", "metamod", "yapb", "client", "menu", "modules", "plugins", "game", "other")
         return b.manifest.entries
             .groupBy { componentKeyFor(it.target) }
             .mapNotNull { (key, entries) ->

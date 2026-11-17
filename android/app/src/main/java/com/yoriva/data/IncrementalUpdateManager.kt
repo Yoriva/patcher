@@ -17,6 +17,7 @@ object IncrementalUpdateManager {
         val name: String = "",
         val size: Long = 0,
         val browser_download_url: String = "",
+        val digest: String = "",
     )
     @Serializable
     data class ReleaseInfo(
@@ -52,6 +53,8 @@ object IncrementalUpdateManager {
         val totalBytes: Long,
     )
     private const val REPO = "Yoriva/patcher"
+    private const val PLUGIN_REPO = "Yoriva/yoriva-plugins"
+    private const val PLUGIN_TAG = "continuous"
     suspend fun fetchReleaseAssets(tag: String, abi: String): List<AssetInfo> {
         val manifestName = if (abi == "arm64-v8a") "manifest.json" else "manifest-v7a.json"
         val manifest = try {
@@ -61,6 +64,21 @@ object IncrementalUpdateManager {
         }
         if (manifest != null) return manifest
         return fetchReleaseAssetsApi(tag, abi)
+    }
+    suspend fun fetchPluginAssets(abi: String, tag: String = PLUGIN_TAG): List<AssetInfo> {
+        val suffix = if (abi == "arm64-v8a") "arm64" else "arm"
+        val release = fetchRelease(PLUGIN_REPO, tag) ?: return emptyList()
+        return release.assets
+            .filter { it.name.endsWith("_yoriva_${suffix}.so") }
+            .map { asset ->
+                AssetInfo(
+                    assetName = asset.name,
+                    cleanName = asset.name,
+                    size = asset.size,
+                    downloadUrl = asset.browser_download_url,
+                    sha256 = sha256Digest(asset.digest),
+                )
+            }
     }
     private suspend fun fetchManifestAssets(tag: String, manifestName: String): List<AssetInfo>? {
         val url = ReleaseRepository.assetUrl(REPO, tag, manifestName)
@@ -85,7 +103,22 @@ object IncrementalUpdateManager {
         }
     }
     private suspend fun fetchReleaseAssetsApi(tag: String, abi: String): List<AssetInfo> {
-        val url = "https://api.github.com/repos/$REPO/releases/tags/$tag"
+        val release = fetchRelease(REPO, tag) ?: return emptyList()
+        return release.assets
+            .filter { it.name.startsWith("${abi}_") && it.name.endsWith(".so") }
+            .map { asset ->
+                val cleanName = asset.name.removePrefix("${abi}_")
+                AssetInfo(
+                    assetName = asset.name,
+                    cleanName = cleanName,
+                    size = asset.size,
+                    downloadUrl = asset.browser_download_url,
+                    sha256 = sha256Digest(asset.digest),
+                )
+            }
+    }
+    private suspend fun fetchRelease(repo: String, tag: String): ReleaseInfo? {
+        val url = "https://api.github.com/repos/$repo/releases/tags/$tag"
         return try {
             val req = Request.Builder()
                 .url(url)
@@ -93,25 +126,16 @@ object IncrementalUpdateManager {
                 .header("Accept", "application/vnd.github+json")
                 .build()
             client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return emptyList()
-                val body = resp.body?.string() ?: return emptyList()
-                val release = json.decodeFromString<ReleaseInfo>(body)
-                release.assets
-                    .filter { it.name.startsWith("${abi}_") && it.name.endsWith(".so") }
-                    .map { asset ->
-                        val cleanName = asset.name.removePrefix("${abi}_")
-                        AssetInfo(
-                            assetName = asset.name,
-                            cleanName = cleanName,
-                            size = asset.size,
-                            downloadUrl = asset.browser_download_url,
-                        )
-                    }
+                if (!resp.isSuccessful) return null
+                val body = resp.body?.string() ?: return null
+                json.decodeFromString<ReleaseInfo>(body)
             }
         } catch (_: Throwable) {
-            emptyList()
+            null
         }
     }
+    private fun sha256Digest(digest: String): String =
+        if (digest.startsWith("sha256:")) digest.removePrefix("sha256:") else ""
     fun diff(
         releaseAssets: List<AssetInfo>,
         libsDir: File,

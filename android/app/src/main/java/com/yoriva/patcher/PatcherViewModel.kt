@@ -80,6 +80,7 @@ sealed interface CleanupState {
     data class Done(val removed: Int) : CleanupState
     data class Failed(val message: String) : CleanupState
 }
+enum class LibSource { CORE, PLUGIN }
 data class LibInfo(
     val name: String,
     val localSize: Long,
@@ -87,6 +88,7 @@ data class LibInfo(
     val upToDate: Boolean,
     val downloading: Boolean = false,
     val downloadProgress: Float = -1f,
+    val source: LibSource = LibSource.CORE,
 )
 class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     private val bundleProvider = BundleProvider(app)
