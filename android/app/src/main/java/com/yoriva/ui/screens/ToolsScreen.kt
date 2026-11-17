@@ -385,7 +385,7 @@ private fun BuildSection(
         else -> "Build Plugins"
     }
     val subtitle = when {
-        compiling != null -> compiling.source
+        compiling != null -> null
         done != null && failures.isNotEmpty() -> "${done.ok} compiled · ${failures.size} failed"
         done != null -> "${done.ok} plugin${if (done.ok == 1) "" else "s"} compiled"
         selectedSources.isEmpty() -> when {

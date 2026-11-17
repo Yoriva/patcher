@@ -182,23 +182,30 @@ class CompilerManager(
             val scriptFolder = File(sources.first().path).parentFile
             val logDir = if (scriptFolder != null) File(scriptFolder, "logs") else null
             logDir?.mkdirs()
-            val parallelism = effectiveCompileWorkers()
+            val parallelism = effectiveCompileWorkers().coerceAtMost(total)
             val gate = Semaphore(parallelism)
             val finished = AtomicInteger(0)
             val results = arrayOfNulls<Pair<Boolean, String>>(total)
+            _compile.value = CompileState.Compiling("Preparing compiler…")
+            val preparedCompiler = try {
+                prepareCompiler(scriptFolder ?: File("."))
+            } catch (_: Throwable) {
+                null
+            }
+            _compile.value = CompileState.Compiling("0/$total · ${sources.first().name}")
             kotlinx.coroutines.coroutineScope {
                 sources.mapIndexed { index, source ->
                     async(Dispatchers.IO) {
                         gate.withPermit {
                             val outcome = try {
-                                compileOne(source)
+                                compileOne(source, preparedCompiler)
                             } catch (t: Throwable) {
                                 false to (t.message ?: "Compile error")
                             }
                             results[index] = outcome
                             val done = finished.incrementAndGet()
                             _compile.value = CompileState.Compiling(
-                                "$done of $total compiled (${source.name})"
+                                "$done/$total · ${source.name}"
                             )
                         }
                     }
@@ -246,12 +253,15 @@ class CompilerManager(
         }
     }
 
-    private fun compileOne(source: SmaSource): Pair<Boolean, String> {
+    private fun compileOne(
+        source: SmaSource,
+        preparedCompiler: File? = null,
+    ): Pair<Boolean, String> {
         val f = File(source.path)
         if (!f.exists()) error("Source not found: ${source.name}")
         val scriptDir = f.parentFile ?: error("Bad source path")
         val includeDir = File(scriptDir, "include")
-        val amxxpc = prepareCompiler(scriptDir) ?: error(
+        val amxxpc = preparedCompiler ?: prepareCompiler(scriptDir) ?: error(
             "Compiler (amxxpc) is missing from this build.\n" +
                 "Install the latest Yoriva APK from the Releases page — it bundles the on-device compiler — then try again.\n" +
                 "Alternatively, place an amxxpc binary next to your .sma files."
