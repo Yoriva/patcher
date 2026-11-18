@@ -40,13 +40,12 @@ object EngineProbe {
 
     fun installedEngineAbi(app: Application): String? {
         for (pkg in listOf(ENGINE_RELEASE, ENGINE_PLAY, ENGINE_TEST)) {
-            val raw = runCatching {
-                val info = app.packageManager.getApplicationInfo(pkg, 0)
-                info.primaryCpuAbi ?: info.nativeLibraryDir
-            }.getOrNull()?.lowercase() ?: continue
-            when {
-                "arm64" in raw || "aarch64" in raw -> return "arm64-v8a"
-                "armeabi" in raw || "armv7" in raw || raw.endsWith("/arm") -> return "armeabi-v7a"
+            val dir = runCatching {
+                app.packageManager.getApplicationInfo(pkg, 0).nativeLibraryDir
+            }.getOrNull()?.substringAfterLast('/')?.lowercase() ?: continue
+            when (dir) {
+                "arm64" -> return "arm64-v8a"
+                "arm" -> return "armeabi-v7a"
             }
         }
         return null
