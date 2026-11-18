@@ -279,6 +279,19 @@ print("patched ReGameDLL build flags for gamedata measurement:")
 for path in patched:
     print("  " + path)
 PY
+        python3 - "$RGDLL" <<'PY'
+import os, sys
+path = os.path.join(sys.argv[1], 'regamedll/dlls/bot/cs_bot_manager.cpp')
+text = open(path, encoding='utf-8').read()
+start = text.find('#ifdef REGAMEDLL_FIXES\n\t// Try to balance teams')
+end = text.find('\t// add bots if necessary', start)
+if start == -1 or end == -1:
+    sys.exit('ERROR: zbot auto team-balance block not found in ' + path)
+text = text[:start] + text[end:]
+with open(path, 'w', encoding='utf-8') as f:
+    f.write(text)
+print('disabled zbot auto team-balance kicks:', path)
+PY
         NDKBIN="$(echo "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin)"
         TPL="$WS/addons/amxmodx/data/gamedata/common.games/custom/offsets-cstrike-replugged.arm64.txt"
         for ABI in arm64-v8a armeabi-v7a; do
