@@ -96,21 +96,44 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     val source: StateFlow<SourceInfo?> get() = sourceManager.source
     val sourceDownload: StateFlow<SourceDownloadState?> get() = sourceManager.sourceDownload
     val bundle: StateFlow<BundleState> get() = bundleManager.bundle
-    private val deviceAbi: String =
-        Build.SUPPORTED_ABIS.firstOrNull { it in SUPPORTED_ABIS } ?: Build.SUPPORTED_ABIS.first()
+    private val deviceAbi: String = when {
+        "arm64-v8a" in Build.SUPPORTED_64_BIT_ABIS -> "arm64-v8a"
+        "arm64-v8a" in Build.SUPPORTED_ABIS -> "arm64-v8a"
+        Build.SUPPORTED_ABIS.any { it in SUPPORTED_ABIS } ->
+            Build.SUPPORTED_ABIS.first { it in SUPPORTED_ABIS }
+        else -> Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
+    }
     private val _abi = MutableStateFlow(deviceAbi)
     val abi: StateFlow<String> = _abi.asStateFlow()
     private val _autoDetectedAbi = MutableStateFlow(deviceAbi)
     val autoDetectedAbi: StateFlow<String> = _autoDetectedAbi.asStateFlow()
+
+    private fun chooseSupportedAbi(
+        supported: List<String>,
+        fileName: String,
+        engineAbi: String?,
+    ): String? {
+        if (supported.isEmpty()) return null
+        if (supported.size == 1) return supported.first()
+        if (engineAbi != null && engineAbi in supported) return engineAbi
+        if (deviceAbi in supported) return deviceAbi
+        val nameLower = fileName.lowercase()
+        if (nameLower.contains("arm64") || nameLower.contains("aarch64") || nameLower.contains("v8a")) {
+            return "arm64-v8a"
+        }
+        if (nameLower.contains("arm32") || nameLower.contains("v7a") || nameLower.contains("armeabi")) {
+            return "armeabi-v7a"
+        }
+        return supported.first()
+    }
+
     fun autoDetectAbi(): String {
+        val engineAbi = runCatching { EngineProbe.installedEngineAbi(app) }.getOrNull()
         try {
             sourceManager.receivedFile()?.let { file ->
                 val info = ZipAnalyzer.analyze(file)
                 val supported = info.abis.filter { it in SUPPORTED_ABIS }
-                if (supported.size == 1) return supported.first()
-                val nameLower = file.name.lowercase()
-                if (nameLower.contains("arm64") || nameLower.contains("aarch64") || nameLower.contains("v8a")) return "arm64-v8a"
-                if (nameLower.contains("arm32") || nameLower.contains("v7a") || nameLower.contains("armeabi")) return "armeabi-v7a"
+                chooseSupportedAbi(supported, file.name, engineAbi)?.let { return it }
             }
         } catch (_: Throwable) {
         }
@@ -119,37 +142,14 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
             if (cachedSource != null && cachedSource.isFile) {
                 val info = ZipAnalyzer.analyze(cachedSource)
                 val supported = info.abis.filter { it in SUPPORTED_ABIS }
-                if (supported.size == 1) return supported.first()
-                val nameLower = cachedSource.name.lowercase()
-                if (nameLower.contains("arm64") || nameLower.contains("aarch64") || nameLower.contains("v8a")) return "arm64-v8a"
-                if (nameLower.contains("arm32") || nameLower.contains("v7a") || nameLower.contains("armeabi")) return "armeabi-v7a"
+                chooseSupportedAbi(supported, cachedSource.name, engineAbi)?.let { return it }
             }
         } catch (_: Throwable) {
         }
+        if (engineAbi != null) return engineAbi
         val path = try { addonsManager.installPathValue() } catch (_: Throwable) { null }
         val detectedRoot = runCatching { addonsManager.resolveGameRoot() }.getOrNull()
         val gameDir = File(path ?: ((detectedRoot ?: "/storage/emulated/0/.xash") + "/cstrike"))
-        val historyCandidates = buildList {
-            add(File(gameDir, "patch-history.json"))
-            if (detectedRoot != null) {
-                add(File(detectedRoot, "cstrike/patch-history.json"))
-                add(File(detectedRoot, "patch-history.json"))
-            }
-            add(File("/sdcard/xash/cstrike/patch-history.json"))
-            add(File("/sdcard/cstrike/patch-history.json"))
-            add(File("/sdcard/xash/patch-history.json"))
-            add(File("/sdcard/.xash/cstrike/patch-history.json"))
-        }
-        for (historyFile in historyCandidates) {
-            if (historyFile.isFile) {
-                try {
-                    val content = historyFile.readText()
-                    if (content.contains("\"abi\":\"arm64-v8a\"")) return "arm64-v8a"
-                    if (content.contains("\"abi\":\"armeabi-v7a\"")) return "armeabi-v7a"
-                } catch (_: Throwable) {
-                }
-            }
-        }
         val potentialLibFiles = buildList {
             add(File(gameDir, "cl_dlls/client.so"))
             add(File(gameDir, "dlls/cs.so"))
@@ -164,6 +164,8 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
             add(File("/sdcard/.xash/cstrike/cl_dlls/client.so"))
             add(File("/sdcard/.xash/cstrike/dlls/cs.so"))
         }
+        var gameArm64 = false
+        var gameArm32 = false
         for (libFile in potentialLibFiles) {
             if (libFile.isFile && libFile.length() >= 20) {
                 try {
@@ -175,21 +177,23 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
                         ) {
                             val elfClass = header[4].toInt()
                             val machine = (header[18].toInt() and 0xFF) or ((header[19].toInt() and 0xFF) shl 8)
-                            if (elfClass == 2 || machine == 183) return "arm64-v8a"
-                            if (elfClass == 1 || machine == 40) return "armeabi-v7a"
+                            if (elfClass == 2 || machine == 183) gameArm64 = true
+                            if (elfClass == 1 || machine == 40) gameArm32 = true
                         }
                     }
                 } catch (_: Throwable) {
                 }
             }
         }
+        if (gameArm64) return "arm64-v8a"
+        if (gameArm32) return "armeabi-v7a"
         try {
             val root = externalRoot
             val arm64Dir = File(root, "libs/arm64-v8a")
             val arm32Dir = File(root, "libs/armeabi-v7a")
             val arm64Count = arm64Dir.listFiles { f -> f.isFile && f.extension.equals("so", ignoreCase = true) }?.size ?: 0
             val arm32Count = arm32Dir.listFiles { f -> f.isFile && f.extension.equals("so", ignoreCase = true) }?.size ?: 0
-            if (arm64Count > 0 && arm32Count == 0) return "arm64-v8a"
+            if (arm64Count > 0 && (arm32Count == 0 || deviceAbi == "arm64-v8a")) return "arm64-v8a"
             if (arm32Count > 0 && arm64Count == 0) return "armeabi-v7a"
         } catch (_: Throwable) {
         }
