@@ -13,7 +13,7 @@ android {
     compileSdk = 36
     defaultConfig {
         applicationId = "com.yoriva"
-        minSdk = 24
+        minSdk = 28
         targetSdk = 36
         versionCode = System.getenv("APP_VERSION_CODE")?.toIntOrNull() ?: 11700
         versionName = System.getenv("APP_VERSION_NAME")?.takeIf { it.isNotBlank() } ?: "1.17.0"
