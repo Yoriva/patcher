@@ -2,23 +2,15 @@ package com.yoriva.ui.theme
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
@@ -48,15 +40,16 @@ fun YorivaTheme(
     val context = LocalContext.current
     val baseDensity = LocalDensity.current
     val targetScale = choice.screenScale.coerceIn(SCREEN_SCALE_MIN, SCREEN_SCALE_MAX)
-    var densityScale by remember { mutableFloatStateOf(targetScale) }
     val animatedScale = remember { Animatable(targetScale) }
     LaunchedEffect(targetScale) {
-        densityScale = targetScale
         if (animatedScale.value == targetScale) return@LaunchedEffect
         animatedScale.animateTo(
             targetValue = targetScale,
             animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
         )
+    }
+    val animatedDensity = remember(baseDensity, animatedScale) {
+        ScaledDensity(baseDensity) { animatedScale.value }
     }
     val targetColorScheme = remember(choice.keyColor, dark, choice.amoled, context) {
         schemeForSeed(
@@ -68,34 +61,22 @@ fun YorivaTheme(
     }
     val colorScheme = targetColorScheme.animatedColors()
     CompositionLocalProvider(
-        LocalDensity provides Density(
-            density = baseDensity.density * densityScale,
-            fontScale = baseDensity.fontScale,
-        ),
+        LocalDensity provides animatedDensity,
         LocalThemeController provides controller,
     ) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = YorivaTypography,
             shapes = YorivaShapes,
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(colorScheme.background),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            val scale = animatedScale.value / densityScale
-                            scaleX = scale
-                            scaleY = scale
-                        },
-                ) {
-                    content()
-                }
-            }
-        }
+            content = content,
+        )
     }
+}
+
+private class ScaledDensity(
+    private val base: Density,
+    private val scale: () -> Float,
+) : Density {
+    override val density: Float get() = base.density * scale()
+    override val fontScale: Float get() = base.fontScale
 }
