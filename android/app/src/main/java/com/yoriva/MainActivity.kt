@@ -228,8 +228,7 @@ fun PatcherApp(vm: PatcherViewModel) {
     LaunchedEffect(update) {
         val u = update
         if (u is AppUpdate.Downloaded) {
-            vm.installIntentFor(u.file)?.let { context.startActivity(it) }
-            vm.consumeDownloaded()
+            vm.installAppUpdate(u.file)
         }
     }
     val clientInstalled by vm.gameInstalled.collectAsState()
@@ -1248,7 +1247,7 @@ private fun UpdateDialog(vm: PatcherViewModel, state: AppUpdate) {
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        "Install starts automatically when the download finishes.",
+                        "Install starts automatically when the download finishes. The app reopens after updating.",
                         style = MaterialTheme.typography.bodySmall,
                         color = Gray40,
                     )

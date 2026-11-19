@@ -1,10 +1,14 @@
 package com.yoriva.ui.theme
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -34,7 +38,11 @@ fun YorivaTheme(
     }
     val context = LocalContext.current
     val baseDensity = LocalDensity.current
-    val screenScale = choice.screenScale.coerceIn(0.25f, 2f)
+    val screenScale by animateFloatAsState(
+        targetValue = choice.screenScale.coerceIn(SCREEN_SCALE_MIN, SCREEN_SCALE_MAX),
+        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
+        label = "screenScale",
+    )
     val colorScheme = schemeForSeed(
         keyColor = choice.keyColor,
         isDark = dark,

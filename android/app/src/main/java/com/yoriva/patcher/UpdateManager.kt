@@ -1,7 +1,11 @@
 package com.yoriva.patcher
 
 import android.app.Application
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageInstaller
+import android.os.Build
 import android.os.SystemClock
 import com.yoriva.data.IncrementalUpdateManager
 import com.yoriva.data.ReleaseRepository
@@ -47,7 +51,7 @@ class UpdateManager(
     private val workFile: (String) -> File,
 ) {
     private val updatePrefs by lazy {
-        app.getSharedPreferences("updater_prefs", Context.MODE_PRIVATE)
+        app.getSharedPreferences(UPDATER_PREFS, Context.MODE_PRIVATE)
     }
 
     private val _appUpdate = MutableStateFlow<AppUpdate>(AppUpdate.Idle)
@@ -141,6 +145,69 @@ class UpdateManager(
             } catch (t: Throwable) {
                 _appUpdate.value = AppUpdate.Failed(t.message ?: "Download failed")
             }
+        }
+    }
+
+    fun installAppUpdate(file: File) {
+        scope.launch(Dispatchers.IO) {
+            _appUpdate.value = AppUpdate.Idle
+            try {
+                updatePrefs.edit().putBoolean(RELAUNCH_AFTER_UPDATE, true).commit()
+                installPackage(file)
+            } catch (t: Throwable) {
+                updatePrefs.edit().putBoolean(RELAUNCH_AFTER_UPDATE, false).apply()
+                _appUpdate.value = AppUpdate.Failed(t.message ?: "Install failed")
+            }
+        }
+    }
+
+    private fun installPackage(file: File) {
+        if (!file.exists() || file.length() <= 0L) {
+            throw IOException("Update APK is missing")
+        }
+        val installer = app.packageManager.packageInstaller
+        val params = PackageInstaller.SessionParams(
+            PackageInstaller.SessionParams.MODE_FULL_INSTALL,
+        ).apply {
+            setAppPackageName(app.packageName)
+            setSize(file.length())
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                runCatching {
+                    setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+                }
+            }
+        }
+        val sessionId = installer.createSession(params)
+        try {
+            installer.openSession(sessionId).use { session ->
+                file.inputStream().use { input ->
+                    session.openWrite("base.apk", 0, file.length()).use { output ->
+                        input.copyTo(output)
+                        session.fsync(output)
+                    }
+                }
+                val callback = Intent(app, AppInstallReceiver::class.java).apply {
+                    action = AppInstallReceiver.ACTION_INSTALL_STATUS
+                    setPackage(app.packageName)
+                    addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                }
+                val pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT or
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        PendingIntent.FLAG_MUTABLE
+                    } else {
+                        0
+                    }
+                val pending = PendingIntent.getBroadcast(
+                    app,
+                    sessionId,
+                    callback,
+                    pendingFlags,
+                )
+                session.commit(pending.intentSender)
+            }
+        } catch (t: Throwable) {
+            runCatching { installer.abandonSession(sessionId) }
+            throw t
         }
     }
 

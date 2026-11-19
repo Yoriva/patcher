@@ -46,6 +46,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -192,6 +195,9 @@ fun ThemeScreen(
             }
         }
         item {
+            var sliderValue by remember(choice.screenScale) {
+                mutableFloatStateOf(choice.screenScale)
+            }
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -237,29 +243,33 @@ fun ThemeScreen(
                             )
                         }
                         Text(
-                            text = "${(choice.screenScale * 100).roundToInt()}%",
+                            text = "${(sliderValue * 100).roundToInt()}%",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     Spacer(Modifier.height(10.dp))
                     Slider(
-                        value = choice.screenScale,
-                        onValueChange = { controller.setScreenScale(it) },
-                        valueRange = 0.25f..2f,
-                        steps = 6,
+                        value = sliderValue,
+                        onValueChange = { sliderValue = it },
+                        onValueChangeFinished = {
+                            controller.setScreenScale(sliderValue)
+                        },
+                        valueRange = SCREEN_SCALE_MIN..SCREEN_SCALE_MAX,
+                        steps = ((SCREEN_SCALE_MAX - SCREEN_SCALE_MIN) / SCREEN_SCALE_STEP)
+                            .roundToInt() - 1,
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Text(
-                            text = "25%",
+                            text = "75%",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
-                            text = "200%",
+                            text = "125%",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
