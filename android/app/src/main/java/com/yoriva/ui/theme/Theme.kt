@@ -58,12 +58,15 @@ fun YorivaTheme(
             animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
         )
     }
-    val colorScheme = schemeForSeed(
-        keyColor = choice.keyColor,
-        isDark = dark,
-        isAmoled = dark && choice.amoled,
-        context = context,
-    )
+    val targetColorScheme = remember(choice.keyColor, dark, choice.amoled, context) {
+        schemeForSeed(
+            keyColor = choice.keyColor,
+            isDark = dark,
+            isAmoled = dark && choice.amoled,
+            context = context,
+        )
+    }
+    val colorScheme = targetColorScheme.animatedColors()
     CompositionLocalProvider(
         LocalDensity provides Density(
             density = baseDensity.density * densityScale,
