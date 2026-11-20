@@ -1,0 +1,167 @@
+name: build android
+
+on:
+  repository_dispatch:
+    types: [android-build]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Override version name (optional)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.client_payload.sha || github.ref }}
+
+      - name: Set build metadata
+        id: meta
+        shell: bash
+        env:
+          PAYLOAD_VERSION: ${{ github.event.client_payload.version }}
+          PAYLOAD_CODE: ${{ github.event.client_payload.code }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          MSG=$(git log -1 --pretty=%s)
+          VERSION="${PAYLOAD_VERSION:-${INPUT_VERSION:-continuous-r${GITHUB_RUN_NUMBER}}}"
+          CODE="${PAYLOAD_CODE:-$(date -u +%s)}"
+          echo "APP_VERSION_NAME=$VERSION" >> "$GITHUB_ENV"
+          echo "APP_VERSION_CODE=$CODE" >> "$GITHUB_ENV"
+          echo "APK_NAME=yoriva_continuous.apk" >> "$GITHUB_ENV"
+          ESCAPED=$(echo "$MSG" | head -1 | sed 's/"/\\"/g')
+          echo "commit_msg=$ESCAPED" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION ($CODE)"
+          echo "Commit message: $MSG"
+
+      - name: Restore on-device compilers from release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/prevpc \
+            "$GITHUB_WORKSPACE/build-out/compiler/arm64-v8a" \
+            "$GITHUB_WORKSPACE/build-out/compiler/armeabi-v7a"
+          cd /tmp/prevpc
+          gh release download libs --repo "$GITHUB_REPOSITORY" \
+            --pattern 'compiler-*' --clobber
+          shopt -s nullglob
+          for f in *; do
+            case "$f" in
+              compiler-arm64-v8a_*) cp "$f" "$GITHUB_WORKSPACE/build-out/compiler/arm64-v8a/${f#compiler-arm64-v8a_}" ;;
+              compiler-armeabi-v7a_*) cp "$f" "$GITHUB_WORKSPACE/build-out/compiler/armeabi-v7a/${f#compiler-armeabi-v7a_}" ;;
+            esac
+          done
+          PC="$GITHUB_WORKSPACE/build-out/compiler"
+          ls -l "$PC/arm64-v8a" || true
+          if [ ! -f "$PC/arm64-v8a/amxxpc" ] || [ ! -f "$PC/arm64-v8a/amxxpc32.so" ]; then
+            echo "::warning::missing arm64 compilers in restore, trying to continue"
+            [ -f "$PC/arm64-v8a/amxxpc" ] || touch "$GITHUB_WORKSPACE/arm64-compiler-missing"
+            [ -f "$PC/arm64-v8a/amxxpc32.so" ] || touch "$GITHUB_WORKSPACE/arm64-compiler-missing"
+          fi
+          [ -f "$PC/armeabi-v7a/amxxpc" ] || touch "$GITHUB_WORKSPACE/v7a-missing"
+          [ -f "$PC/armeabi-v7a/amxxpc32.so" ] || touch "$GITHUB_WORKSPACE/v7a-missing"
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      - name: Install Android SDK platform & build tools
+        shell: bash
+        run: |
+          CMDT=commandlinetools-linux-11076708_latest.zip
+          mkdir -p "$RUNNER_TEMP/sdkman"
+          curl -fsSL -o "$RUNNER_TEMP/$CMDT" "https://dl.google.com/android/repository/$CMDT"
+          rm -rf "$RUNNER_TEMP/sdkman/cmdline-tools"
+          unzip -qo "$RUNNER_TEMP/$CMDT" -d "$RUNNER_TEMP/sdkman"
+          SDKM="$RUNNER_TEMP/sdkman/cmdline-tools/bin/sdkmanager"
+          yes | "$SDKM" --sdk_root="$ANDROID_HOME" --licenses >/dev/null 2>&1 || true
+          "$SDKM" --sdk_root="$ANDROID_HOME" --install "platforms;android-36" "build-tools;35.0.0"
+          test -d "$ANDROID_HOME/platforms/android-36"
+          test -d "$ANDROID_HOME/build-tools/35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: false
+
+      - name: Bundle debug signing keystore into app assets
+        shell: bash
+        run: |
+          mkdir -p android/app/src/main/assets/keystore
+          cp android/debug/patcher-release.p12 android/app/src/main/assets/keystore/debug.p12
+          cp android/debug/debug_key.pem android/app/src/main/assets/keystore/debug_key.pem
+          cp android/debug/debug_cert.pem android/app/src/main/assets/keystore/debug_cert.pem
+
+      - name: Embed amxxpc compiler as native libs
+        shell: bash
+        run: |
+          mkdir -p android/app/src/main/jniLibs/arm64-v8a
+          cp "$GITHUB_WORKSPACE/build-out/compiler/arm64-v8a/amxxpc" android/app/src/main/jniLibs/arm64-v8a/libamxxpc.so
+          cp "$GITHUB_WORKSPACE/build-out/compiler/arm64-v8a/amxxpc32.so" android/app/src/main/jniLibs/arm64-v8a/libamxxpc32.so
+          chmod +x android/app/src/main/jniLibs/arm64-v8a/libamxxpc.so
+          if [ ! -f "$GITHUB_WORKSPACE/v7a-missing" ] && \
+              [ -f "$GITHUB_WORKSPACE/build-out/compiler/armeabi-v7a/amxxpc" ]; then
+            mkdir -p android/app/src/main/jniLibs/armeabi-v7a
+            cp "$GITHUB_WORKSPACE/build-out/compiler/armeabi-v7a/amxxpc" android/app/src/main/jniLibs/armeabi-v7a/libamxxpc.so
+            cp "$GITHUB_WORKSPACE/build-out/compiler/armeabi-v7a/amxxpc32.so" android/app/src/main/jniLibs/armeabi-v7a/libamxxpc32.so
+            chmod +x android/app/src/main/jniLibs/armeabi-v7a/libamxxpc.so
+          fi
+          ls -lh android/app/src/main/jniLibs/arm64-v8a/
+
+      - name: Build the patcher APK
+        working-directory: android
+        env:
+          APP_VERSION_NAME: ${{ env.APP_VERSION_NAME }}
+          APP_VERSION_CODE: ${{ env.APP_VERSION_CODE }}
+        run: ./gradlew --no-daemon :app:assembleRelease --stacktrace
+
+      - name: Rename APK
+        shell: bash
+        run: |
+          cd android/app/build/outputs/apk/release
+          APK=$(ls *.apk 2>/dev/null | head -1)
+          if [ -n "$APK" ]; then
+            mv "$APK" "${APK_NAME:-yoriva_continuous.apk}"
+            echo "Renamed: ${APK_NAME:-yoriva_continuous.apk}"
+          fi
+          echo "${APP_VERSION_NAME:-unknown}" > "$GITHUB_WORKSPACE/version.txt"
+          cat "$GITHUB_WORKSPACE/version.txt"
+
+      - name: Release (rolling continuous)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view continuous >/dev/null 2>&1; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -f continuous
+            git push origin continuous
+            gh release create continuous \
+              --title "Yoriva Continuous" \
+              --notes "Yoriva Continuous build"
+          fi
+          shopt -s nullglob
+          gh release upload continuous --clobber version.txt android/app/build/outputs/apk/release/*.apk
+          BODY="Yoriva Continuous build ${APP_VERSION_NAME:-}
+          Commit: ${{ steps.meta.outputs.commit_msg }}
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Built: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          gh release edit continuous --title "Yoriva Continuous" --notes "$BODY" 2>/dev/null || true

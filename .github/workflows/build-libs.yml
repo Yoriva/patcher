@@ -1,4 +1,4 @@
-﻿name: build & release
+﻿name: build libs
 
 on:
   push:
@@ -15,11 +15,10 @@ permissions:
 
 env:
   BUNDLE_VERSION: ${{ github.event.inputs.version || github.ref_name || '1.10.0' }}
-  ANDROID_DIR: android
   CS16_CLIENT_URL: https://github.com/Yoriva/cs16-client.git
 
 jobs:
-  build-release:
+  build-libs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
@@ -27,20 +26,8 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Fetch cs16-client
-        shell: bash
-        run: |
-          PIN=$(tr -d '[:space:]' < cs16-client.pin)
-          [ -n "$PIN" ] || { echo "::error::cs16-client.pin is empty"; exit 1; }
-          git clone "$CS16_CLIENT_URL" cs16-client
-          git -C cs16-client fetch origin "$PIN" 2>/dev/null || git -C cs16-client fetch origin
-          git -C cs16-client checkout "$PIN"
-          git -C cs16-client submodule update --init --recursive
-          GOT=$(git -C cs16-client rev-parse HEAD)
-          [ "$GOT" = "$PIN" ] || { echo "::error::cs16-client is $GOT, pin says $PIN"; exit 1; }
-
       - name: Detect build type
-        id: build_type
+        id: detect
         shell: bash
         run: |
           MSG=$(git log -1 --pretty=%s)
@@ -57,24 +44,19 @@ jobs:
             CONTINUOUS=true
           fi
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            if [ "$GITHUB_REF_NAME" = "master" ]; then
+            if [ "$GITHUB_REF_NAME" = "main" ] || [ "$GITHUB_REF_NAME" = "master" ]; then
               CONTINUOUS=true
             fi
           fi
+          echo "APP_VERSION_CODE=$(date -u +%s)" >> "$GITHUB_ENV"
           if [ "$CONTINUOUS" = true ]; then
-            echo "APP_VERSION_NAME=continuous-r${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
-            echo "APP_VERSION_CODE=$(date -u +%s)" >> "$GITHUB_ENV"
-            echo "APK_NAME=yoriva_continuous.apk" >> "$GITHUB_ENV"
             echo "BUNDLE_VERSION=continuous-r${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
-          else
-            echo "APP_VERSION_NAME=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
-            echo "APP_VERSION_CODE=$(date -u +%s)" >> "$GITHUB_ENV"
-            echo "APK_NAME=yoriva_v${GITHUB_REF_NAME#v}.apk" >> "$GITHUB_ENV"
           fi
           ESCAPED=$(echo "$MSG" | head -1 | sed 's/"/\\"/g')
           echo "commit_msg=$ESCAPED" >> "$GITHUB_OUTPUT"
           echo "needs_android=$NEEDS_ANDROID" >> "$GITHUB_OUTPUT"
           echo "needs_libs=$NEEDS_LIBS" >> "$GITHUB_OUTPUT"
+          echo "continuous=$CONTINUOUS" >> "$GITHUB_OUTPUT"
           echo "APK build: $NEEDS_ANDROID | Libs build: $NEEDS_LIBS"
           if [ "$NEEDS_ANDROID" != "true" ] && [ "$NEEDS_LIBS" != "true" ]; then
             echo "::notice::no [android] / [libs] marker in the commit message - nothing to build"
@@ -99,7 +81,7 @@ jobs:
               if [ -n "$NATIVE_SHA" ]; then
                 META_UP=$(echo "$META_JSON" | python3 -c "import json; print(json.dumps(json.load(sys.stdin).get('upstreams',{}),sort_keys=True))" 2>/dev/null || echo "")
                 CUR_UP=$(echo "$UP_JSON" | python3 -c "import json; print(json.dumps(json.load(sys.stdin),sort_keys=True))" 2>/dev/null || echo "")
-                DIFF_OUT=$(git diff --name-only "$NATIVE_SHA" HEAD -- android/ci patches cs16-client.pin cs16-client-launcher.patch 3rdparty .github/workflows 2>/dev/null || echo "DIFF-FAILED")
+                DIFF_OUT=$(git diff --name-only "$NATIVE_SHA" HEAD -- android/ci patches cs16-client.pin cs16-client-launcher.patch 3rdparty .github/workflows/build-libs.yml 2>/dev/null || echo "DIFF-FAILED")
                 if [ "$DIFF_OUT" != "DIFF-FAILED" ] && [ -z "$DIFF_OUT" ] && [ -n "$META_UP" ] && [ "$META_UP" = "$CUR_UP" ]; then
                   SKIP_NATIVE=true
                   NATIVE_SHA_OUT=$NATIVE_SHA
@@ -111,20 +93,26 @@ jobs:
           echo "native_sha_out=$NATIVE_SHA_OUT" >> "$GITHUB_OUTPUT"
           echo "Native skip: $SKIP_NATIVE (native_sha: $NATIVE_SHA_OUT)"
 
-      - name: Set up JDK
-        if: steps.build_type.outputs.needs_android == 'true'
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
+      - name: Fetch cs16-client
+        if: steps.detect.outputs.needs_libs == 'true'
+        shell: bash
+        run: |
+          PIN=$(tr -d '[:space:]' < cs16-client.pin)
+          [ -n "$PIN" ] || { echo "::error::cs16-client.pin is empty"; exit 1; }
+          git clone "$CS16_CLIENT_URL" cs16-client
+          git -C cs16-client fetch origin "$PIN" 2>/dev/null || git -C cs16-client fetch origin
+          git -C cs16-client checkout "$PIN"
+          git -C cs16-client submodule update --init --recursive
+          GOT=$(git -C cs16-client rev-parse HEAD)
+          [ "$GOT" = "$PIN" ] || { echo "::error::cs16-client is $GOT, pin says $PIN"; exit 1; }
 
       - name: Set up Android SDK/NDK tooling
-        if: steps.build_type.outputs.needs_android == 'true' || steps.build_type.outputs.needs_libs == 'true'
+        if: steps.detect.outputs.needs_libs == 'true'
         uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools'
       - name: Install NDK r25c
-        if: steps.build_type.outputs.needs_android == 'true' || steps.build_type.outputs.needs_libs == 'true'
+        if: steps.detect.outputs.needs_libs == 'true'
         shell: bash
         run: |
           echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;25.2.9519653" \
@@ -137,7 +125,7 @@ jobs:
           command -v ninja >/dev/null || sudo apt-get install -y ninja-build
 
       - name: Setup ccache
-        if: steps.build_type.outputs.needs_libs == 'true' && steps.build_type.outputs.skip_native != 'true'
+        if: steps.detect.outputs.needs_libs == 'true' && steps.detect.outputs.skip_native != 'true'
         shell: bash
         run: |
           command -v ccache >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq ccache; } || true
@@ -153,7 +141,7 @@ jobs:
           fi
 
       - name: Restore ccache
-        if: steps.build_type.outputs.needs_libs == 'true' && steps.build_type.outputs.skip_native != 'true'
+        if: steps.detect.outputs.needs_libs == 'true' && steps.detect.outputs.skip_native != 'true'
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.ccache
@@ -161,13 +149,13 @@ jobs:
           restore-keys: ccache-ndk-r25c-
 
       - name: Check the client/engine ABI
-        if: steps.build_type.outputs.needs_libs == 'true'
+        if: steps.detect.outputs.needs_libs == 'true'
         shell: bash
         run: |
           python3 ./android/ci/check-engine-abi.py
 
       - name: Cross-compile core + modules + plugins
-        if: steps.build_type.outputs.needs_libs == 'true' && steps.build_type.outputs.skip_native != 'true'
+        if: steps.detect.outputs.needs_libs == 'true' && steps.detect.outputs.skip_native != 'true'
         shell: bash
         run: |
           for ABI in arm64-v8a armeabi-v7a; do
@@ -188,13 +176,13 @@ jobs:
           done
 
       - name: ccache stats (post native)
-        if: steps.build_type.outputs.needs_libs == 'true' && steps.build_type.outputs.skip_native != 'true'
+        if: steps.detect.outputs.needs_libs == 'true' && steps.detect.outputs.skip_native != 'true'
         shell: bash
         run: |
           if [ -n "${CCACHE:-}" ]; then ccache --show-stats || true; fi
 
       - name: Restore native outputs from release
-        if: steps.build_type.outputs.needs_libs == 'true' && steps.build_type.outputs.skip_native == 'true'
+        if: steps.detect.outputs.needs_libs == 'true' && steps.detect.outputs.skip_native == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -229,38 +217,8 @@ jobs:
           [ -f "$BO/lib/armeabi-v7a/libamxmodx.so" ] || touch "$GITHUB_WORKSPACE/v7a-missing"
           [ -f "$BO/lib/armeabi-v7a/libcs_android_armv7l.so" ] || touch "$GITHUB_WORKSPACE/v7a-missing"
 
-      - name: Restore on-device compilers from release
-        if: steps.build_type.outputs.needs_android == 'true' && steps.build_type.outputs.needs_libs != 'true'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/prevpc \
-            "$GITHUB_WORKSPACE/build-out/compiler/arm64-v8a" \
-            "$GITHUB_WORKSPACE/build-out/compiler/armeabi-v7a"
-          cd /tmp/prevpc
-          gh release download libs --repo "$GITHUB_REPOSITORY" \
-            --pattern 'compiler-*' --clobber
-          shopt -s nullglob
-          for f in *; do
-            case "$f" in
-              compiler-arm64-v8a_*) cp "$f" "$GITHUB_WORKSPACE/build-out/compiler/arm64-v8a/${f#compiler-arm64-v8a_}" ;;
-              compiler-armeabi-v7a_*) cp "$f" "$GITHUB_WORKSPACE/build-out/compiler/armeabi-v7a/${f#compiler-armeabi-v7a_}" ;;
-            esac
-          done
-          PC="$GITHUB_WORKSPACE/build-out/compiler"
-          ls -l "$PC/arm64-v8a" || true
-          if [ ! -f "$PC/arm64-v8a/amxxpc" ] || [ ! -f "$PC/arm64-v8a/amxxpc32.so" ]; then
-            echo "::warning::missing arm64 compilers in restore, trying to continue"
-            [ -f "$PC/arm64-v8a/amxxpc" ] || touch "$GITHUB_WORKSPACE/arm64-compiler-missing"
-            [ -f "$PC/arm64-v8a/amxxpc32.so" ] || touch "$GITHUB_WORKSPACE/arm64-compiler-missing"
-          fi
-          [ -f "$PC/armeabi-v7a/amxxpc" ] || touch "$GITHUB_WORKSPACE/v7a-missing"
-          [ -f "$PC/armeabi-v7a/amxxpc32.so" ] || touch "$GITHUB_WORKSPACE/v7a-missing"
-
       - name: Build ReGameDLL libcs (first-spawn fix)
-        if: steps.build_type.outputs.needs_libs == 'true' && steps.build_type.outputs.skip_native != 'true'
+        if: steps.detect.outputs.needs_libs == 'true' && steps.detect.outputs.skip_native != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -390,7 +348,7 @@ jobs:
           done
 
       - name: Package release bundles
-        if: steps.build_type.outputs.needs_libs == 'true'
+        if: steps.detect.outputs.needs_libs == 'true'
         shell: bash
         run: |
           PREV="$GITHUB_WORKSPACE/prev-manifest"
@@ -482,8 +440,8 @@ jobs:
           done
           ls -la "$GITHUB_WORKSPACE/game-assets.zip"
 
-          UPSTREAMS_JSON='${{ steps.build_type.outputs.upstreams_json }}' \
-          NATIVE_SHA_OUT='${{ steps.build_type.outputs.native_sha_out }}' \
+          UPSTREAMS_JSON='${{ steps.detect.outputs.upstreams_json }}' \
+          NATIVE_SHA_OUT='${{ steps.detect.outputs.native_sha_out }}' \
           python3 - "$GITHUB_WORKSPACE/build-meta.json" <<'PY'
           import json, os, subprocess, sys
           out = sys.argv[1]
@@ -509,148 +467,53 @@ jobs:
           fi
           ls "$GITHUB_WORKSPACE/compiler-assets" || true
 
-      - name: Install Android SDK platform & build tools
-        if: steps.build_type.outputs.needs_android == 'true'
-        shell: bash
-        run: |
-          CMDT=commandlinetools-linux-11076708_latest.zip
-          mkdir -p "$RUNNER_TEMP/sdkman"
-          curl -fsSL -o "$RUNNER_TEMP/$CMDT" "https://dl.google.com/android/repository/$CMDT"
-          rm -rf "$RUNNER_TEMP/sdkman/cmdline-tools"
-          unzip -qo "$RUNNER_TEMP/$CMDT" -d "$RUNNER_TEMP/sdkman"
-          SDKM="$RUNNER_TEMP/sdkman/cmdline-tools/bin/sdkmanager"
-          yes | "$SDKM" --sdk_root="$ANDROID_HOME" --licenses >/dev/null 2>&1 || true
-          "$SDKM" --sdk_root="$ANDROID_HOME" --install "platforms;android-36" "build-tools;35.0.0"
-          test -d "$ANDROID_HOME/platforms/android-36"
-          test -d "$ANDROID_HOME/build-tools/35.0.0"
-
-      - name: Set up Gradle
-        if: steps.build_type.outputs.needs_android == 'true'
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          validate-wrappers: false
-
-      - name: Bundle debug signing keystore into app assets
-        if: steps.build_type.outputs.needs_android == 'true'
-        shell: bash
-        run: |
-          mkdir -p android/app/src/main/assets/keystore
-          cp android/debug/patcher-release.p12 android/app/src/main/assets/keystore/debug.p12
-          cp android/debug/debug_key.pem android/app/src/main/assets/keystore/debug_key.pem
-          cp android/debug/debug_cert.pem android/app/src/main/assets/keystore/debug_cert.pem
-
-      - name: Embed amxxpc compiler as native libs
-        if: steps.build_type.outputs.needs_android == 'true'
-        shell: bash
-        run: |
-          mkdir -p android/app/src/main/jniLibs/arm64-v8a
-          cp "$GITHUB_WORKSPACE/build-out/compiler/arm64-v8a/amxxpc" android/app/src/main/jniLibs/arm64-v8a/libamxxpc.so
-          cp "$GITHUB_WORKSPACE/build-out/compiler/arm64-v8a/amxxpc32.so" android/app/src/main/jniLibs/arm64-v8a/libamxxpc32.so
-          chmod +x android/app/src/main/jniLibs/arm64-v8a/libamxxpc.so
-          if [ ! -f "$GITHUB_WORKSPACE/v7a-missing" ] && \
-              [ -f "$GITHUB_WORKSPACE/build-out/compiler/armeabi-v7a/amxxpc" ]; then
-            mkdir -p android/app/src/main/jniLibs/armeabi-v7a
-            cp "$GITHUB_WORKSPACE/build-out/compiler/armeabi-v7a/amxxpc" android/app/src/main/jniLibs/armeabi-v7a/libamxxpc.so
-            cp "$GITHUB_WORKSPACE/build-out/compiler/armeabi-v7a/amxxpc32.so" android/app/src/main/jniLibs/armeabi-v7a/libamxxpc32.so
-            chmod +x android/app/src/main/jniLibs/armeabi-v7a/libamxxpc.so
-          fi
-          ls -lh android/app/src/main/jniLibs/arm64-v8a/
-
-      - name: Build the patcher APK
-        if: steps.build_type.outputs.needs_android == 'true'
-        working-directory: android
-        env:
-          APP_VERSION_NAME: ${{ env.APP_VERSION_NAME }}
-          APP_VERSION_CODE: ${{ env.APP_VERSION_CODE }}
-        run: ./gradlew --no-daemon :app:assembleRelease --stacktrace
-
-      - name: Rename APK to yoriva_vX.X.X.apk
-        if: steps.build_type.outputs.needs_android == 'true'
-        shell: bash
-        run: |
-          cd android/app/build/outputs/apk/release
-          APK=$(ls *.apk 2>/dev/null | head -1)
-          if [ -n "$APK" ]; then
-            mv "$APK" "${APK_NAME:-yoriva.apk}"
-            echo "Renamed: ${APK_NAME:-yoriva.apk}"
-          fi
-          echo "${APP_VERSION_NAME:-unknown}" > "$GITHUB_WORKSPACE/version.txt"
-          cat "$GITHUB_WORKSPACE/version.txt"
-
-      - name: Release (rolling continuous)
-        if: >-
-          (startsWith(github.ref, 'refs/tags/') && github.ref_name == 'continuous') ||
-          (github.event_name == 'workflow_dispatch' && github.ref_name == 'master') &&
-          (steps.build_type.outputs.needs_android == 'true' ||
-          steps.build_type.outputs.needs_libs == 'true')
+      - name: Release libs (rolling)
+        if: success() && steps.detect.outputs.needs_libs == 'true' && steps.detect.outputs.continuous == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view continuous >/dev/null 2>&1; then
+          if ! gh release view libs >/dev/null 2>&1; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -f continuous
-            git push origin continuous
-            gh release create continuous \
-              --title "Yoriva Continuous" \
-              --notes "Yoriva Continuous build"
+            git tag -f libs
+            git push origin libs
+            gh release create libs --title "Yoriva Libs" --notes "Native libs and manifests (rolling)."
           fi
-          NEEDS_ANDROID="${{ steps.build_type.outputs.needs_android }}"
-          NEEDS_LIBS="${{ steps.build_type.outputs.needs_libs }}"
-
-          NEEDS_ANDROID="${{ steps.build_type.outputs.needs_android }}"
-          NEEDS_LIBS="${{ steps.build_type.outputs.needs_libs }}"
-
           shopt -s nullglob
+          ls -la manifest.json manifest-v7a.json build-meta.json
+          gh release upload libs --clobber manifest.json manifest-v7a.json build-meta.json
+          gh release upload libs --clobber incremental/arm64-v8a/*.so
+          gh release upload libs --clobber incremental-v7a/armeabi-v7a/*.so
+          gh release upload libs --clobber compiler-assets/*
 
-          if [ "$NEEDS_ANDROID" = "true" ]; then
-            if ! gh release view continuous >/dev/null 2>&1; then
-              git config user.name "github-actions[bot]"
-              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-              git tag -f continuous
-              git push origin continuous
-              gh release create continuous --title "Yoriva Continuous" --notes "Yoriva Continuous build"
-            fi
-            gh release upload continuous --clobber version.txt android/app/build/outputs/apk/release/*.apk 2>/dev/null || true
-          fi
-
-          if [ "$NEEDS_LIBS" = "true" ]; then
-            if ! gh release view libs >/dev/null 2>&1; then
-              git config user.name "github-actions[bot]"
-              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-              git tag -f libs
-              git push origin libs
-              gh release create libs --title "Yoriva Libs" --notes "Native libs and manifests (rolling)."
-            fi
-            ls -la manifest.json manifest-v7a.json build-meta.json
-            gh release upload libs --clobber manifest.json manifest-v7a.json build-meta.json
-            gh release upload libs --clobber incremental/arm64-v8a/*.so
-            gh release upload libs --clobber incremental-v7a/armeabi-v7a/*.so
-            gh release upload libs --clobber compiler-assets/*
-          fi
-
-          BODY="Yoriva Continuous build ${APP_VERSION_NAME:-}
-          Commit: ${{ steps.build_type.outputs.commit_msg }}
-          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          Built: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          gh release edit continuous --title "Yoriva Continuous" --notes "$BODY" 2>/dev/null || true
-
-      - name: Release (app APK)
-        if: startsWith(github.ref, 'refs/tags/') && github.ref_name != 'continuous' && steps.build_type.outputs.needs_android == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          body: ${{ steps.build_type.outputs.commit_msg }}
-          files: |
-            version.txt
-            android/app/build/outputs/apk/release/*.apk
-          generate_release_notes: true
-          fail_on_unmatched_files: false
+      - name: Trigger Android build
+        if: >-
+          success() &&
+          steps.detect.outputs.needs_android == 'true' &&
+          steps.detect.outputs.continuous == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ github.sha }}
+          CONTINUOUS: ${{ steps.detect.outputs.continuous }}
+        run: |
+          set -euo pipefail
+          VERSION="${BUNDLE_VERSION:-continuous-r${GITHUB_RUN_NUMBER}}"
+          CODE="${APP_VERSION_CODE:-$(date -u +%s)}"
+          jq -n \
+            --arg sha "$TARGET_SHA" \
+            --arg version "$VERSION" \
+            --arg code "$CODE" \
+            --arg continuous "$CONTINUOUS" \
+            '{event_type:"android-build",client_payload:{sha:$sha,version:$version,code:$code,continuous:$continuous}}' \
+            | gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" --input -
+          echo "dispatched Android build for $TARGET_SHA"
 
       - name: Release extras (addons, game assets)
         if: >-
           success() &&
-          (steps.build_type.outputs.needs_libs == 'true')
+          (steps.detect.outputs.needs_libs == 'true')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -665,4 +528,3 @@ jobs:
           fi
           gh release upload extras --clobber amxx-addons.zip game-assets.zip 2>/dev/null || true
           echo "extras release updated"
-
