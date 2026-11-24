@@ -610,9 +610,12 @@ private fun externalRoot(app: Application): File {
         return false
     }
     val appUpdate: StateFlow<AppUpdate> get() = updateManager.appUpdate
-    fun checkAppUpdate() = updateManager.checkAppUpdate()
+    fun checkAppUpdate(manual: Boolean = true) = updateManager.checkAppUpdate(manual)
+    fun onResumeAppUpdate() = updateManager.onAppResumed()
     fun downloadAppUpdate() = updateManager.downloadAppUpdate()
     fun installAppUpdate(file: File) = updateManager.installAppUpdate(file)
+    fun retryInstallUpdate() = updateManager.retryInstallUpdate()
+    fun redownloadAppUpdate() = updateManager.redownloadAppUpdate()
     fun dismissUpdate() = updateManager.dismissUpdate()
     fun consumeDownloaded() = updateManager.consumeDownloaded()
     fun markBundleTagKnown(tag: String) = updateManager.markBundleTagKnown(tag)

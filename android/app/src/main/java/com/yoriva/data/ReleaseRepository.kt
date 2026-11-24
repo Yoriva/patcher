@@ -1,4 +1,5 @@
 package com.yoriva.data
+import okhttp3.CacheControl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -16,10 +17,12 @@ object ReleaseRepository {
         message: String,
     ) : IOException(message)
     private val client = OkHttpClient.Builder()
+        .cache(null)
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
         .build()
     private val webClient = OkHttpClient.Builder()
+        .cache(null)
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .followRedirects(true)
@@ -27,7 +30,10 @@ object ReleaseRepository {
     suspend fun latestReleaseTag(repo: String): String? {
         return try {
             val req = Request.Builder()
-                .url("https://github.com/$repo/releases.atom")
+                .url("https://github.com/$repo/releases.atom?t=${System.currentTimeMillis()}")
+                .cacheControl(CacheControl.FORCE_NETWORK)
+                .header("Cache-Control", "no-cache, no-store, max-age=0")
+                .header("Pragma", "no-cache")
                 .header("User-Agent", "cs16-amxx-patcher")
                 .get()
                 .build()
@@ -104,6 +110,9 @@ object ReleaseRepository {
         return try {
             val req = Request.Builder()
                 .url(url)
+                .cacheControl(CacheControl.FORCE_NETWORK)
+                .header("Cache-Control", "no-cache, no-store, max-age=0")
+                .header("Pragma", "no-cache")
                 .header("User-Agent", "cs16-amxx-patcher")
                 .head()
                 .build()
@@ -114,8 +123,11 @@ object ReleaseRepository {
                     val stamp = resp.header("Last-Modified")
                         ?.let { parseHttpDate(it) }
                         ?: 0L
+                    val contentLen = resp.header("Content-Length")?.toLongOrNull()
+                        ?: resp.body?.contentLength()?.coerceAtLeast(0L)
+                        ?: 0L
                     RemoteInfo(
-                        size = resp.body?.contentLength()?.coerceAtLeast(0L) ?: 0L,
+                        size = contentLen,
                         lastModifiedMillis = stamp,
                         etag = resp.header("ETag")?.removeSurrounding("\"")?.trim() ?: "",
                     )
@@ -136,6 +148,9 @@ object ReleaseRepository {
         return try {
             val req = Request.Builder()
                 .url(url)
+                .cacheControl(CacheControl.FORCE_NETWORK)
+                .header("Cache-Control", "no-cache, no-store, max-age=0")
+                .header("Pragma", "no-cache")
                 .header("User-Agent", "cs16-amxx-patcher")
                 .get()
                 .build()

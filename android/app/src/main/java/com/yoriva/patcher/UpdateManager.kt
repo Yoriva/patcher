@@ -5,12 +5,15 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.SystemClock
 import com.yoriva.data.IncrementalUpdateManager
 import com.yoriva.data.ReleaseRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,13 +23,17 @@ import java.io.IOException
 
 sealed interface AppUpdate {
     data object Idle : AppUpdate
-    data object Checking : AppUpdate
+    data class Checking(
+        val manual: Boolean = false,
+        val mandatory: Boolean = false,
+    ) : AppUpdate
     data class Available(
         val tag: String,
         val notes: String,
         val commits: List<String>,
         val size: Long,
         val url: String,
+        val remoteVersion: String = tag,
         val releaseNotes: String = "",
         val commitMessage: String = "",
         val commitSha: String = "",
@@ -41,8 +48,18 @@ sealed interface AppUpdate {
         val bytesPerSec: Long,
     ) : AppUpdate
     data class Downloaded(val tag: String, val file: File) : AppUpdate
+    data class Installing(
+        val tag: String,
+        val file: File,
+        val needsInstallPermission: Boolean = false,
+        val errorMessage: String? = null,
+    ) : AppUpdate
     data class UpToDate(val tag: String) : AppUpdate
-    data class Failed(val message: String) : AppUpdate
+    data class Failed(
+        val message: String,
+        val mandatory: Boolean = false,
+        val canRetryDownload: Boolean = false,
+    ) : AppUpdate
 }
 
 class UpdateManager(
@@ -54,14 +71,70 @@ class UpdateManager(
         app.getSharedPreferences(UPDATER_PREFS, Context.MODE_PRIVATE)
     }
 
-    private val _appUpdate = MutableStateFlow<AppUpdate>(AppUpdate.Idle)
+    private val initialMandatory = isMandatoryLockedForCurrentApk()
+    private val _appUpdate = MutableStateFlow<AppUpdate>(
+        if (initialMandatory) AppUpdate.Checking(manual = false, mandatory = true) else AppUpdate.Idle,
+    )
     val appUpdate: StateFlow<AppUpdate> = _appUpdate.asStateFlow()
 
-    fun checkAppUpdate() {
+    @Volatile
+    private var checkJob: Job? = null
+
+    @Volatile
+    private var lastCheckElapsedMs: Long = 0L
+
+    @Volatile
+    private var lastCheckSucceeded: Boolean = false
+
+    @Volatile
+    private var lastAvailable: AppUpdate.Available? = null
+
+    init {
+        scope.launch {
+            installEvents.collect { (status, message) ->
+                val cur = _appUpdate.value
+                if (cur is AppUpdate.Installing) {
+                    if (status == PackageInstaller.STATUS_SUCCESS) return@collect
+                    val detail = message?.takeIf { it.isNotBlank() }
+                        ?: if (status == PackageInstaller.STATUS_FAILURE_ABORTED) {
+                            "Installation was cancelled. You must install the update to continue using Yoriva."
+                        } else {
+                            "Installation failed (code $status). Tap Install Update to try again."
+                        }
+                    _appUpdate.value = cur.copy(
+                        needsInstallPermission = !canRequestPackageInstalls(),
+                        errorMessage = detail,
+                    )
+                }
+            }
+        }
+    }
+
+    fun checkAppUpdate(manual: Boolean = true) {
+        if (checkJob?.isActive == true) {
+            if (manual) {
+                val cur = _appUpdate.value
+                if (cur is AppUpdate.Checking && !cur.manual) {
+                    _appUpdate.value = cur.copy(manual = true)
+                }
+            }
+            return
+        }
         val cur = _appUpdate.value
-        if (cur is AppUpdate.Checking || cur is AppUpdate.Downloading || cur is AppUpdate.Downloaded) return
-        scope.launch(Dispatchers.IO) {
-            _appUpdate.value = AppUpdate.Checking
+        if (cur is AppUpdate.Downloading || cur is AppUpdate.Downloaded || cur is AppUpdate.Installing) {
+            return
+        }
+        if (!manual && cur is AppUpdate.Available) return
+
+        val now = SystemClock.elapsedRealtime()
+        val locked = isMandatoryLockedForCurrentApk() || lastAvailable != null
+        if (!manual && !locked && lastCheckSucceeded && lastCheckElapsedMs > 0L && (now - lastCheckElapsedMs) < AUTO_CHECK_COOLDOWN_MS) {
+            return
+        }
+
+        val mandatoryNow = locked
+        checkJob = scope.launch(Dispatchers.IO) {
+            _appUpdate.value = AppUpdate.Checking(manual = manual, mandatory = mandatoryNow)
             try {
                 val latest = ReleaseRepository.latestReleaseTag(PatcherViewModel.APP_RELEASE_REPO)
                 val (tag, apkName) = if (latest != null) {
@@ -69,31 +142,27 @@ class UpdateManager(
                 } else {
                     PatcherViewModel.CONTINUOUS_TAG to PatcherViewModel.CONTINUOUS_APK
                 }
-                val remoteVersion = ReleaseRepository.fetchText(
-                    ReleaseRepository.assetUrl(PatcherViewModel.APP_RELEASE_REPO, tag, PatcherViewModel.VERSION_FILE)
-                ) ?: throw IOException("Could not reach GitHub releases")
+                val versionUrl = "${ReleaseRepository.assetUrl(PatcherViewModel.APP_RELEASE_REPO, tag, PatcherViewModel.VERSION_FILE)}?t=${System.currentTimeMillis()}"
+                val remoteVersion = ReleaseRepository.fetchText(versionUrl)
+                    ?: throw IOException("Could not reach GitHub releases")
                 val apkUrl = ReleaseRepository.assetUrl(PatcherViewModel.APP_RELEASE_REPO, tag, apkName)
                 val apkSize = ReleaseRepository.probeSize(apkUrl)
-                val ours = try {
-                    app.packageManager.getPackageInfo(app.packageName, 0).versionName
-                } catch (_: Throwable) {
-                    null
-                }
-                val localSize = try {
-                    File(app.applicationInfo.sourceDir).length().takeIf { it > 0 }
-                } catch (_: Throwable) {
-                    null
-                }
-                val versionDiffers = ours == null || remoteVersion != ours
+                val ours = installedVersion()
+                val localSize = installedApkSize()
+                val versionDiffers = ours.isNullOrBlank() || remoteVersion != ours
                 val sizeDiffers = apkSize != null && apkSize > 0 &&
                     localSize != null && apkSize != localSize
                 val notes = buildString {
-                    if (ours != null) append("Installed: $ours")
+                    if (!ours.isNullOrBlank()) append("Installed: $ours")
                     if (localSize != null) append(" (${mb(localSize)})")
-                    append("  →  $remoteVersion")
+                    if (isNotEmpty()) append("  →  ")
+                    append(remoteVersion)
                     if (apkSize != null && apkSize > 0) append(" (${mb(apkSize)})")
                 }
+                lastCheckElapsedMs = SystemClock.elapsedRealtime()
+                lastCheckSucceeded = true
                 if (versionDiffers || sizeDiffers) {
+                    persistMandatoryUpdate(remoteVersion)
                     val release = ReleaseRepository.fetchReleaseDetails(
                         PatcherViewModel.APP_RELEASE_REPO, tag,
                     )
@@ -105,12 +174,13 @@ class UpdateManager(
                         ?: ""
                     val authorName = commit?.authorName?.takeIf { it.isNotBlank() }
                         ?: authorLogin.ifBlank { "Yoriva" }
-                    _appUpdate.value = AppUpdate.Available(
+                    val available = AppUpdate.Available(
                         tag = tag,
                         notes = notes,
                         commits = emptyList(),
                         size = apkSize ?: 0L,
                         url = apkUrl,
+                        remoteVersion = remoteVersion,
                         releaseNotes = release?.body.orEmpty(),
                         commitMessage = commit?.message.orEmpty(),
                         commitSha = commit?.sha.orEmpty(),
@@ -120,45 +190,169 @@ class UpdateManager(
                             ?: release?.publishedAtMillis
                             ?: 0L,
                     )
+                    lastAvailable = available
+                    _appUpdate.value = available
                 } else {
-                    _appUpdate.value = AppUpdate.UpToDate(remoteVersion)
+                    clearMandatoryUpdate()
+                    lastAvailable = null
+                    _appUpdate.value = if (manual) AppUpdate.UpToDate(remoteVersion) else AppUpdate.Idle
                 }
             } catch (t: Throwable) {
-                _appUpdate.value = AppUpdate.Failed(t.message ?: "Update check failed")
+                lastCheckElapsedMs = SystemClock.elapsedRealtime()
+                lastCheckSucceeded = false
+                val stillMandatory = isMandatoryLockedForCurrentApk() || lastAvailable != null
+                _appUpdate.value = if (manual || stillMandatory) {
+                    AppUpdate.Failed(
+                        message = t.message ?: "Update check failed",
+                        mandatory = stillMandatory,
+                        canRetryDownload = false,
+                    )
+                } else {
+                    AppUpdate.Idle
+                }
             }
         }
     }
 
+    fun onAppResumed() {
+        val cur = _appUpdate.value
+        if (cur is AppUpdate.Installing && cur.needsInstallPermission && canRequestPackageInstalls()) {
+            installAppUpdate(cur.file)
+            return
+        }
+        checkAppUpdate(manual = false)
+    }
+
     fun downloadAppUpdate() {
-        val cur = _appUpdate.value as? AppUpdate.Available ?: return
+        val available = (_appUpdate.value as? AppUpdate.Available)
+            ?: lastAvailable
+            ?: run {
+                checkAppUpdate(manual = true)
+                return
+            }
+        lastAvailable = available
         scope.launch(Dispatchers.IO) {
             try {
                 val dest = workFile("update.apk")
                 if (dest.exists()) dest.delete()
                 val t0 = SystemClock.elapsedRealtime()
-                ReleaseRepository.downloadUrl(cur.url, dest, cur.size) { done, total ->
+                val downloadUrl = "${available.url}?t=${System.currentTimeMillis()}"
+                ReleaseRepository.downloadUrl(downloadUrl, dest, available.size) { done, total ->
                     val dt = (SystemClock.elapsedRealtime() - t0).coerceAtLeast(1L)
-                    _appUpdate.value = AppUpdate.Downloading(cur.tag, done, total, done * 1000L / dt)
+                    _appUpdate.value = AppUpdate.Downloading(available.tag, done, total, done * 1000L / dt)
                 }
-                updatePrefs.edit().putString("known_tag", cur.tag).apply()
-                _appUpdate.value = AppUpdate.Downloaded(cur.tag, dest)
+                updatePrefs.edit().putString("known_tag", available.tag).apply()
+                _appUpdate.value = AppUpdate.Downloaded(available.tag, dest)
             } catch (t: Throwable) {
-                _appUpdate.value = AppUpdate.Failed(t.message ?: "Download failed")
+                _appUpdate.value = AppUpdate.Failed(
+                    message = t.message ?: "Download failed",
+                    mandatory = true,
+                    canRetryDownload = true,
+                )
             }
         }
     }
 
     fun installAppUpdate(file: File) {
+        val tag = when (val cur = _appUpdate.value) {
+            is AppUpdate.Downloaded -> cur.tag
+            is AppUpdate.Installing -> cur.tag
+            is AppUpdate.Downloading -> cur.tag
+            else -> lastAvailable?.tag ?: PatcherViewModel.CONTINUOUS_TAG
+        }
         scope.launch(Dispatchers.IO) {
-            _appUpdate.value = AppUpdate.Idle
+            if (!canRequestPackageInstalls()) {
+                _appUpdate.value = AppUpdate.Installing(
+                    tag = tag,
+                    file = file,
+                    needsInstallPermission = true,
+                    errorMessage = null,
+                )
+                return@launch
+            }
+            _appUpdate.value = AppUpdate.Installing(
+                tag = tag,
+                file = file,
+                needsInstallPermission = false,
+                errorMessage = null,
+            )
             try {
                 updatePrefs.edit().putBoolean(RELAUNCH_AFTER_UPDATE, true).commit()
                 installPackage(file)
             } catch (t: Throwable) {
                 updatePrefs.edit().putBoolean(RELAUNCH_AFTER_UPDATE, false).apply()
-                _appUpdate.value = AppUpdate.Failed(t.message ?: "Install failed")
+                _appUpdate.value = AppUpdate.Installing(
+                    tag = tag,
+                    file = file,
+                    needsInstallPermission = !canRequestPackageInstalls(),
+                    errorMessage = t.message ?: "Install failed",
+                )
             }
         }
+    }
+
+    fun retryInstallUpdate() {
+        val cur = _appUpdate.value as? AppUpdate.Installing ?: return
+        if (cur.file.exists() && cur.file.length() > 0L) {
+            installAppUpdate(cur.file)
+        } else {
+            downloadAppUpdate()
+        }
+    }
+
+    fun redownloadAppUpdate() {
+        workFile("update.apk").delete()
+        if (lastAvailable != null) {
+            downloadAppUpdate()
+        } else {
+            checkAppUpdate(manual = true)
+        }
+    }
+
+    private fun canRequestPackageInstalls(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            runCatching { app.packageManager.canRequestPackageInstalls() }.getOrDefault(true)
+        } else {
+            true
+        }
+
+    private fun installedVersion(): String? = runCatching {
+        if (Build.VERSION.SDK_INT >= 33) {
+            app.packageManager.getPackageInfo(app.packageName, PackageManager.PackageInfoFlags.of(0))
+                .versionName?.trim()
+        } else {
+            @Suppress("DEPRECATION")
+            app.packageManager.getPackageInfo(app.packageName, 0).versionName?.trim()
+        }
+    }.getOrNull()
+
+    private fun installedApkSize(): Long? = runCatching {
+        File(app.applicationInfo.sourceDir).length().takeIf { it > 0L }
+    }.getOrNull()
+
+    private fun currentApkFingerprint(): String {
+        val ver = installedVersion() ?: "unknown"
+        val size = installedApkSize() ?: 0L
+        return "$ver:$size"
+    }
+
+    private fun isMandatoryLockedForCurrentApk(): Boolean {
+        val saved = updatePrefs.getString(KEY_REQUIRED_FINGERPRINT, null) ?: return false
+        return saved == currentApkFingerprint()
+    }
+
+    private fun persistMandatoryUpdate(remoteVersion: String) {
+        updatePrefs.edit()
+            .putString(KEY_REQUIRED_FINGERPRINT, currentApkFingerprint())
+            .putString(KEY_REQUIRED_TARGET, remoteVersion)
+            .apply()
+    }
+
+    private fun clearMandatoryUpdate() {
+        updatePrefs.edit()
+            .remove(KEY_REQUIRED_FINGERPRINT)
+            .remove(KEY_REQUIRED_TARGET)
+            .apply()
     }
 
     private fun installPackage(file: File) {
@@ -212,11 +406,24 @@ class UpdateManager(
     }
 
     fun dismissUpdate() {
-        _appUpdate.value = AppUpdate.Idle
+        val cur = _appUpdate.value
+        val locked = isMandatoryLockedForCurrentApk() ||
+            lastAvailable != null ||
+            cur is AppUpdate.Available ||
+            cur is AppUpdate.Downloading ||
+            cur is AppUpdate.Downloaded ||
+            cur is AppUpdate.Installing ||
+            (cur as? AppUpdate.Checking)?.mandatory == true ||
+            (cur as? AppUpdate.Failed)?.mandatory == true
+        if (!locked) {
+            _appUpdate.value = AppUpdate.Idle
+        }
     }
 
     fun consumeDownloaded() {
-        _appUpdate.value = AppUpdate.Idle
+        if (lastAvailable == null && !isMandatoryLockedForCurrentApk()) {
+            _appUpdate.value = AppUpdate.Idle
+        }
     }
 
     fun markBundleTagKnown(tag: String) {
@@ -253,4 +460,15 @@ class UpdateManager(
 
     private fun mb(bytes: Long): String =
         "${(bytes / 1048576.0).let { "%.1f".format(java.util.Locale.US, it) }} MB"
+
+    companion object {
+        private const val AUTO_CHECK_COOLDOWN_MS = 15_000L
+        private const val KEY_REQUIRED_FINGERPRINT = "required_for_fingerprint"
+        private const val KEY_REQUIRED_TARGET = "required_target_version"
+        private val installEvents = MutableSharedFlow<Pair<Int, String?>>(extraBufferCapacity = 8)
+
+        internal fun notifyInstallStatus(status: Int, message: String?) {
+            installEvents.tryEmit(status to message)
+        }
+    }
 }

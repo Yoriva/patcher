@@ -34,10 +34,14 @@ class AppInstallReceiver : BroadcastReceiver() {
                         .onFailure { error -> Log.w(TAG, "Could not open installer", error) }
                 }
             }
-            PackageInstaller.STATUS_SUCCESS -> Unit
+            PackageInstaller.STATUS_SUCCESS -> {
+                UpdateManager.notifyInstallStatus(PackageInstaller.STATUS_SUCCESS, null)
+            }
             else -> {
                 clearRelaunch(context)
+                val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
                 val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
+                UpdateManager.notifyInstallStatus(status, message)
                 Toast.makeText(
                     context,
                     message?.takeIf { it.isNotBlank() } ?: "Update install failed",
