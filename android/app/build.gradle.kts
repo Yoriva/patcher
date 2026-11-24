@@ -8,6 +8,19 @@ base {
     archivesName.set("yoriva")
 }
 val signingStoreFile = rootProject.file("debug/patcher-release.p12")
+val copyDebugKeystores = tasks.register<Copy>("copyDebugKeystores") {
+    from(rootProject.file("debug"))
+    into(file("src/main/assets/keystore"))
+    include("*.pem", "*.p12")
+}
+val copyDebugP12 = tasks.register<Copy>("copyDebugP12") {
+    from(rootProject.file("debug/patcher-release.p12"))
+    into(file("src/main/assets/keystore"))
+    rename { "debug.p12" }
+}
+tasks.named("preBuild") {
+    dependsOn(copyDebugKeystores, copyDebugP12)
+}
 android {
     namespace = "com.yoriva"
     compileSdk = 36

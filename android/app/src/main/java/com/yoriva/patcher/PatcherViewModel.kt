@@ -1,5 +1,6 @@
 package com.yoriva.patcher
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Environment
@@ -11,6 +12,8 @@ import com.yoriva.lib.ApkPatcher
 import com.yoriva.lib.Bundle
 import com.yoriva.lib.SigningKeystore
 import com.yoriva.lib.ZipAnalyzer
+import com.yoriva.server.FastDlServer
+import com.yoriva.server.FastDlState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -280,12 +283,15 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     }
     private val _engineInstalled = MutableStateFlow(EngineProbe.isEngineInstalled(getApplication()))
     val engineInstalled: StateFlow<Boolean> = _engineInstalled.asStateFlow()
+    private val _clientInstalled = MutableStateFlow(EngineProbe.isClientInstalled(getApplication()))
+    val clientInstalled: StateFlow<Boolean> = _clientInstalled.asStateFlow()
     private val _gameInstalled = MutableStateFlow(EngineProbe.isGameInstalled(getApplication()) && EngineProbe.gameDataPresent(getApplication()))
     val gameInstalled: StateFlow<Boolean> = _gameInstalled.asStateFlow()
     private val _cstrikeReady = MutableStateFlow(EngineProbe.cstrikePresent(getApplication()))
     val cstrikeReady: StateFlow<Boolean> = _cstrikeReady.asStateFlow()
     fun refreshGameInstalled() {
         _engineInstalled.value = EngineProbe.isEngineInstalled(getApplication())
+        _clientInstalled.value = EngineProbe.isClientInstalled(getApplication())
         _gameInstalled.value = EngineProbe.isGameInstalled(getApplication()) && EngineProbe.gameDataPresent(getApplication())
         _cstrikeReady.value = EngineProbe.cstrikePresent(getApplication())
         refreshCleanupAvailability()
@@ -422,6 +428,34 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     val hasCachedBundle: Boolean get() = bundleManager.hasCachedBundle
+
+    val fastDlServer by lazy {
+        FastDlServer(
+            context = app,
+            scope = viewModelScope,
+            installPathProvider = { addonsManager.installPathValue() },
+        )
+    }
+    val fastDlState: StateFlow<FastDlState> get() = fastDlServer.state
+    fun toggleFastDlServer(port: Int = 8088) = fastDlServer.toggleServer(port)
+
+    val pluginHubManager by lazy {
+        PluginHubManager(
+            context = app,
+            scope = viewModelScope,
+            compilerManager = compilerManager,
+            installPathProvider = { addonsManager.installPathValue() },
+        )
+    }
+    val hubCatalog: List<HubPlugin> get() = pluginHubManager.catalog
+    val hubInstalledMap: StateFlow<Map<String, Boolean>> get() = pluginHubManager.installedMap
+    val hubInstalling: StateFlow<String?> get() = pluginHubManager.isInstalling
+    fun refreshHub() = pluginHubManager.refreshInstalledStatus()
+    fun installHubPlugin(plugin: HubPlugin, onDone: (Boolean, String) -> Unit) =
+        pluginHubManager.installPlugin(plugin, onDone)
+    fun uninstallHubPlugin(plugin: HubPlugin, onDone: (Boolean) -> Unit) =
+        pluginHubManager.uninstallPlugin(plugin, onDone)
+
     val repo = "Yoriva/patcher"
 private val externalRoot: File = externalRoot(app)
 private fun externalRoot(app: Application): File {
@@ -452,12 +486,19 @@ private fun externalRoot(app: Application): File {
         val certPem = runCatching {
             assets.open("keystore/debug_cert.pem").use { it.readBytes().decodeToString() }
         }.getOrNull()
-        return if (keyPem != null && certPem != null) {
-            SigningKeystore.loadPem(keyPem, certPem)
-        } else {
-            val p12 = assets.open("keystore/debug.p12").use { it.readBytes() }
-            SigningKeystore.loadBytes(p12)
+        if (keyPem != null && certPem != null) {
+            return SigningKeystore.loadPem(keyPem, certPem)
         }
+        val candidates = listOf("keystore/debug.p12", "keystore/client-debug.p12", "keystore/patcher-release.p12")
+        for (candidate in candidates) {
+            val p12 = runCatching {
+                assets.open(candidate).use { it.readBytes() }
+            }.getOrNull()
+            if (p12 != null && p12.isNotEmpty()) {
+                return SigningKeystore.loadBytes(p12)
+            }
+        }
+        throw IllegalStateException("Signing keystore assets (debug_key.pem or debug.p12) could not be loaded")
     }
     private fun cachedClientApk(): File? = sourceManager.cachedClientApk()
     fun refreshSourceApkStatus() = sourceManager.refreshSourceApkStatus()
@@ -527,6 +568,76 @@ private fun externalRoot(app: Application): File {
     fun onUninstallFinished() = patchManager.onUninstallFinished()
     fun installIntentFor(apk: File): Intent? = patchManager.installIntentFor(apk)
     fun reset() = patchManager.reset()
+
+    private val launchPrefs = app.getSharedPreferences("yoriva_launcher", Context.MODE_PRIVATE)
+    private val _launchArgs = MutableStateFlow(
+        launchPrefs.getString("launch_argv", "-dev 2 -log") ?: "-dev 2 -log"
+    )
+    val launchArgs: StateFlow<String> = _launchArgs.asStateFlow()
+
+    fun setLaunchArgs(value: String) {
+        _launchArgs.value = value
+        launchPrefs.edit().putString("launch_argv", value.trim()).apply()
+    }
+
+    fun launchGame(): Boolean {
+        val app = getApplication<Application>()
+        val pm = app.packageManager
+        val clientPkg = EngineProbe.findInstalledClient(app)
+        val enginePkg = EngineProbe.findInstalledEngine(app) ?: "su.xash.engine"
+        val userArgs = _launchArgs.value.trim().ifEmpty { "-dev 2 -log" }
+        val fastDlState = fastDlServer.state.value
+        val fastDlArg = if (fastDlState.isRunning) {
+            " +sv_downloadurl \"${fastDlState.downloadUrl}\" +sv_allowdownload 1"
+        } else ""
+        val fullArgv = if (userArgs.contains("-dll")) "$userArgs$fastDlArg" else "$userArgs -dll @metadroid$fastDlArg"
+
+        if (clientPkg != null) {
+            val clientAppInfo = runCatching { pm.getApplicationInfo(clientPkg, 0) }.getOrNull()
+            if (clientAppInfo != null) {
+                val directIntent = Intent().apply {
+                    component = android.content.ComponentName(enginePkg, "$enginePkg.XashActivity")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                    putExtra("gamedir", "cstrike")
+                    putExtra("gamelibdir", clientAppInfo.nativeLibraryDir)
+                    putExtra("argv", fullArgv)
+                    putExtra("package", clientPkg)
+                }
+                if (directIntent.resolveActivity(pm) != null) {
+                    val launched = runCatching {
+                        app.startActivity(directIntent)
+                        true
+                    }.getOrDefault(false)
+                    if (launched) return true
+                }
+            }
+
+            val clientLaunch = pm.getLaunchIntentForPackage(clientPkg)
+            if (clientLaunch != null) {
+                clientLaunch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                clientLaunch.putExtra("auto_launch", true)
+                clientLaunch.putExtra("argv", fullArgv)
+                val launched = runCatching {
+                    app.startActivity(clientLaunch)
+                    true
+                }.getOrDefault(false)
+                if (launched) return true
+            }
+        }
+
+        val engineLaunch = pm.getLaunchIntentForPackage(enginePkg)
+        if (engineLaunch != null) {
+            engineLaunch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            engineLaunch.putExtra("argv", fullArgv)
+            val launched = runCatching {
+                app.startActivity(engineLaunch)
+                true
+            }.getOrDefault(false)
+            if (launched) return true
+        }
+
+        return false
+    }
     val appUpdate: StateFlow<AppUpdate> get() = updateManager.appUpdate
     fun checkAppUpdate() = updateManager.checkAppUpdate()
     fun downloadAppUpdate() = updateManager.downloadAppUpdate()

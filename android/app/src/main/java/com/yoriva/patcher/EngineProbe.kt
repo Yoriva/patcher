@@ -33,6 +33,12 @@ object EngineProbe {
     fun isGameInstalled(app: Application): Boolean =
         isEngineInstalled(app) && isClientInstalled(app)
 
+    fun findInstalledClient(app: Application): String? =
+        clientPackages.firstOrNull { isInstalled(app, it) }
+
+    fun findInstalledEngine(app: Application): String? =
+        enginePackages.firstOrNull { isInstalled(app, it) }
+
     private fun isInstalled(app: Application, pkg: String): Boolean = runCatching {
         app.packageManager.getPackageInfo(pkg, 0).versionCode
         true
