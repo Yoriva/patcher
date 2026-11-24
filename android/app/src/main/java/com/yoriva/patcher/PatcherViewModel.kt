@@ -12,8 +12,6 @@ import com.yoriva.lib.ApkPatcher
 import com.yoriva.lib.Bundle
 import com.yoriva.lib.SigningKeystore
 import com.yoriva.lib.ZipAnalyzer
-import com.yoriva.server.FastDlServer
-import com.yoriva.server.FastDlState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -428,34 +426,6 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     val hasCachedBundle: Boolean get() = bundleManager.hasCachedBundle
-
-    val fastDlServer by lazy {
-        FastDlServer(
-            context = app,
-            scope = viewModelScope,
-            installPathProvider = { addonsManager.installPathValue() },
-        )
-    }
-    val fastDlState: StateFlow<FastDlState> get() = fastDlServer.state
-    fun toggleFastDlServer(port: Int = 8088) = fastDlServer.toggleServer(port)
-
-    val pluginHubManager by lazy {
-        PluginHubManager(
-            context = app,
-            scope = viewModelScope,
-            compilerManager = compilerManager,
-            installPathProvider = { addonsManager.installPathValue() },
-        )
-    }
-    val hubCatalog: List<HubPlugin> get() = pluginHubManager.catalog
-    val hubInstalledMap: StateFlow<Map<String, Boolean>> get() = pluginHubManager.installedMap
-    val hubInstalling: StateFlow<String?> get() = pluginHubManager.isInstalling
-    fun refreshHub() = pluginHubManager.refreshInstalledStatus()
-    fun installHubPlugin(plugin: HubPlugin, onDone: (Boolean, String) -> Unit) =
-        pluginHubManager.installPlugin(plugin, onDone)
-    fun uninstallHubPlugin(plugin: HubPlugin, onDone: (Boolean) -> Unit) =
-        pluginHubManager.uninstallPlugin(plugin, onDone)
-
     val repo = "Yoriva/patcher"
 private val externalRoot: File = externalRoot(app)
 private fun externalRoot(app: Application): File {
@@ -586,11 +556,7 @@ private fun externalRoot(app: Application): File {
         val clientPkg = EngineProbe.findInstalledClient(app)
         val enginePkg = EngineProbe.findInstalledEngine(app) ?: "su.xash.engine"
         val userArgs = _launchArgs.value.trim().ifEmpty { "-dev 2 -log" }
-        val fastDlState = fastDlServer.state.value
-        val fastDlArg = if (fastDlState.isRunning) {
-            " +sv_downloadurl \"${fastDlState.downloadUrl}\" +sv_allowdownload 1"
-        } else ""
-        val fullArgv = if (userArgs.contains("-dll")) "$userArgs$fastDlArg" else "$userArgs -dll @metadroid$fastDlArg"
+        val fullArgv = if (userArgs.contains("-dll")) userArgs else "$userArgs -dll @metadroid"
 
         if (clientPkg != null) {
             val clientAppInfo = runCatching { pm.getApplicationInfo(clientPkg, 0) }.getOrNull()

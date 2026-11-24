@@ -30,13 +30,9 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Storefront
-import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -48,10 +44,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import com.yoriva.patcher.HubPlugin
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -91,15 +85,10 @@ fun ToolsScreen(
     val scripts by vm.scripts.collectAsState()
     val compile by vm.compile.collectAsState()
     val scriptRoot by vm.scriptRoot.collectAsState()
-    val fastDlState by vm.fastDlState.collectAsState()
-    val hubInstalledMap by vm.hubInstalledMap.collectAsState()
-    val hubInstalling by vm.hubInstalling.collectAsState()
-    var showHubDialog by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(setOf<String>()) }
     var stampError by remember { mutableStateOf<Pair<String, String>?>(null) }
     val selectedSources = scripts.filter { it.path in selected }
     val failures = (compile as? CompileState.Done)?.failures ?: emptyMap()
-    val context = LocalContext.current
     val pluginPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri -> if (uri != null) vm.addPluginSource(uri) }
@@ -124,114 +113,19 @@ fun ToolsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                GroupedItem(
-                    title = "Config Editor",
-                    subtitle = "Edit AMX Mod X and YapB config files",
-                    index = 0,
-                    total = 3,
-                    trailing = {
-                        SmallButton(
-                            text = "Edit",
-                            icon = Icons.Filled.Edit,
-                            onClick = onOpenPluginConfig,
-                        )
-                    },
-                )
-                GroupedItem(
-                    title = "Plugin Hub",
-                    subtitle = "1-Click install curated AMXX mods (Zombie, CSDM, RS...)",
-                    index = 1,
-                    total = 3,
-                    trailing = {
-                        SmallButton(
-                            text = "Browse",
-                            icon = Icons.Filled.Storefront,
-                            onClick = {
-                                vm.refreshHub()
-                                showHubDialog = true
-                            },
-                        )
-                    },
-                )
-                GroupedItem(
-                    title = "FastDL Server",
-                    subtitle = if (fastDlState.isRunning) "${fastDlState.downloadUrl} (${fastDlState.totalDownloads} files sent)"
-                               else "Local HTTP fast-download for LAN/hotspot friends",
-                    index = 2,
-                    total = 3,
-                    trailing = {
-                        Switch(
-                            checked = fastDlState.isRunning,
-                            onCheckedChange = { vm.toggleFastDlServer() },
-                            modifier = Modifier.size(38.dp),
-                        )
-                    },
-                )
-            }
-        }
-        if (fastDlState.isRunning) {
-            item {
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                Icons.Filled.Wifi,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp),
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = "FastDL Active: ${fastDlState.downloadUrl}",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            )
-                        }
-                        Text(
-                            text = "Share this with players on your hotspot so maps & sounds download in seconds.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Text(
-                                text = fastDlState.cvarCommand,
-                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.weight(1f).padding(end = 8.dp),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            FilledTonalButton(
-                                onClick = {
-                                    val clip = context.getSystemService(ClipboardManager::class.java)
-                                    clip?.setPrimaryClip(ClipData.newPlainText("sv_downloadurl", fastDlState.cvarCommand))
-                                },
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                                modifier = Modifier.height(30.dp),
-                            ) {
-                                Icon(Icons.Filled.ContentCopy, null, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Copy Cvar", style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                    }
-                }
-            }
+            GroupedItem(
+                title = "Config Editor",
+                subtitle = "Edit AMX Mod X and YapB config files",
+                index = 0,
+                total = 1,
+                trailing = {
+                    SmallButton(
+                        text = "Edit",
+                        icon = Icons.Filled.Edit,
+                        onClick = onOpenPluginConfig,
+                    )
+                },
+            )
         }
         item { Spacer(Modifier.height(10.dp)) }
         item {
@@ -279,20 +173,6 @@ fun ToolsScreen(
             name = name.substringAfterLast('/'),
             message = message,
             onDismiss = { stampError = null },
-        )
-    }
-    if (showHubDialog) {
-        PluginHubDialog(
-            catalog = vm.hubCatalog,
-            installedMap = hubInstalledMap,
-            installingId = hubInstalling,
-            onInstall = { plugin ->
-                vm.installHubPlugin(plugin) { ok, msg -> }
-            },
-            onUninstall = { plugin ->
-                vm.uninstallHubPlugin(plugin) { }
-            },
-            onDismiss = { showHubDialog = false },
         )
     }
 }
@@ -673,132 +553,4 @@ private fun LogBox(text: String, error: Boolean = false) {
                 .padding(12.dp),
         )
     }
-}
-
-@Composable
-private fun PluginHubDialog(
-    catalog: List<HubPlugin>,
-    installedMap: Map<String, Boolean>,
-    installingId: String?,
-    onInstall: (HubPlugin) -> Unit,
-    onUninstall: (HubPlugin) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Storefront, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(8.dp))
-                Text("AMXX Plugin Hub")
-            }
-        },
-        text = {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 440.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(catalog) { plugin ->
-                    val isInstalled = installedMap[plugin.id] == true
-                    val isInstalling = installingId == plugin.id
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = plugin.name,
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold,
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Surface(
-                                            shape = RoundedCornerShape(4.dp),
-                                            color = MaterialTheme.colorScheme.primaryContainer,
-                                        ) {
-                                            Text(
-                                                text = plugin.category,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
-                                            )
-                                        }
-                                    }
-                                    Text(
-                                        text = "by ${plugin.author} · v${plugin.version}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                if (isInstalling) {
-                                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                                } else if (isInstalled) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            Icons.Filled.Check,
-                                            contentDescription = "Installed",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(20.dp),
-                                        )
-                                        Spacer(Modifier.width(4.dp))
-                                        IconButton(
-                                            onClick = { onUninstall(plugin) },
-                                            modifier = Modifier.size(28.dp),
-                                        ) {
-                                            Icon(
-                                                Icons.Filled.Delete,
-                                                contentDescription = "Uninstall",
-                                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                                                modifier = Modifier.size(16.dp),
-                                            )
-                                        }
-                                    }
-                                } else {
-                                    FilledTonalButton(
-                                        onClick = { onInstall(plugin) },
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
-                                        modifier = Modifier.height(30.dp),
-                                    ) {
-                                        Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(14.dp))
-                                        Spacer(Modifier.width(4.dp))
-                                        Text("Install", style = MaterialTheme.typography.labelSmall)
-                                    }
-                                }
-                            }
-                            Text(
-                                text = plugin.description,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            if (plugin.requiredModules.isNotEmpty()) {
-                                Text(
-                                    text = "Modules: ${plugin.requiredModules.joinToString(", ")}",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                                    color = MaterialTheme.colorScheme.outline,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
-        },
-    )
 }
