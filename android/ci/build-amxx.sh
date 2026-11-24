@@ -164,6 +164,7 @@ relink() {
   local out="$1"; shift
   "$CXX" -fPIC -O2 -shared -nostdlib++ -o "$out" "$@" "$cmd_shim" \
     -Wl,--wrap=__assert2 -Wl,--wrap=__assert_fail \
+    -Wl,-z,max-page-size=16384 \
     -Wl,--whole-archive "$SYSROOT_LIB/libc++_static.a" -Wl,--no-whole-archive \
     "$SYSROOT_LIB/libc++abi.a" -ldl -lm -pthread
 }

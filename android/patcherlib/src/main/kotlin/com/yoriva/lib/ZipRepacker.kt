@@ -131,6 +131,67 @@ object ZipRepacker {
                     )
                     bytesWritten += 30 + name.length + extraLen + data.size
                 }
+
+                fun writeLocalHeaderFromChannel(
+                    name: String,
+                    method: Int,
+                    compressedSize: Long,
+                    uncompressedSize: Long,
+                    crc: Long,
+                    srcChannel: java.nio.channels.FileChannel,
+                    srcDataOffset: Long,
+                ) {
+                    val localOffset = raf.filePointer
+                    var extraLen = 0
+                    if (method == 0) {
+                        val unit = if (name.startsWith("lib/") && name.endsWith(".so")) 16384 else 4
+                        val base = localOffset + 30 + name.length
+                        val rem = (base % unit).toInt()
+                        extraLen = if (rem == 0) 0 else (unit - rem)
+                        alignPadBytes += extraLen
+                        alignedStored++
+                    }
+                    val hdr = ByteArray(30)
+                    val b = ByteBuffer.wrap(hdr).order(ByteOrder.LITTLE_ENDIAN)
+                    b.putInt(0x04034b50)
+                    b.putShort(20)
+                    b.putShort(0)
+                    b.putShort(method.toShort())
+                    b.putShort(0)
+                    b.putShort(0x0821)
+                    b.putInt(crc.toInt())
+                    b.putInt(compressedSize.toInt())
+                    b.putInt(uncompressedSize.toInt())
+                    b.putShort(name.length.toShort())
+                    b.putShort(extraLen.toShort())
+                    raf.write(hdr)
+                    raf.write(name.toByteArray(Charsets.UTF_8))
+                    if (extraLen > 0) raf.write(ByteArray(extraLen))
+                    val dataOffset = raf.filePointer
+
+                    // Kernel-level Zero-Copy transfer directly between file descriptors
+                    val dstChannel = raf.channel
+                    var transferred = 0L
+                    while (transferred < compressedSize) {
+                        val count = srcChannel.transferTo(srcDataOffset + transferred, compressedSize - transferred, dstChannel)
+                        if (count <= 0) break
+                        transferred += count
+                    }
+                    raf.seek(dataOffset + compressedSize)
+
+                    cdEntries.add(
+                        CdRecord(
+                            name = name,
+                            method = method,
+                            compressedSize = compressedSize,
+                            uncompressedSize = uncompressedSize,
+                            crc = crc,
+                            localOffset = localOffset,
+                            dataOffset = dataOffset,
+                        )
+                    )
+                    bytesWritten += 30 + name.length + extraLen + compressedSize
+                }
                 val existingDirs = HashSet<String>()
                 for (name in src.entries.keys) {
                     if (name.endsWith("/")) existingDirs.add(name)
@@ -164,23 +225,14 @@ object ZipRepacker {
                 val total = keptEntries.size + bundle.manifest.entries.size
                 var done = 0
                 val patchedLibs = ArrayList<String>()
+                val srcChannel = src.file.channel
                 for (entry in keptEntries) {
                     onEntry?.invoke(done, total, entry.name, "keep")
                     if (entry.name == LIBCS_ENTRY) {
                         val content = src.readContent(entry)
                         val patched = patchLibCs(content)
                         if (patched != null) {
-                            val out = java.io.ByteArrayOutputStream()
-                            val def = Deflater(9, true)
-                            def.setInput(patched)
-                            def.finish()
-                            val chunk = ByteArray(8192)
-                            while (!def.finished()) {
-                                val n = def.deflate(chunk)
-                                out.write(chunk, 0, n)
-                            }
-                            def.end()
-                            val compressed = out.toByteArray()
+                            val compressed = deflate(patched)
                             writeLocalHeader(
                                 name = entry.name,
                                 method = 8,
@@ -195,16 +247,14 @@ object ZipRepacker {
                             continue
                         }
                     }
-                    val raw = ByteArray(entry.compressedSize.toInt())
-                    src.file.seek(entry.dataOffset)
-                    src.file.readFully(raw)
-                    writeLocalHeader(
+                    writeLocalHeaderFromChannel(
                         name = entry.name,
                         method = entry.method,
                         compressedSize = entry.compressedSize,
                         uncompressedSize = entry.uncompressedSize,
                         crc = entry.crc32,
-                        data = raw,
+                        srcChannel = srcChannel,
+                        srcDataOffset = entry.dataOffset,
                     )
                     done++
                     progress?.invoke(bytesWritten, srcLen)
@@ -295,27 +345,29 @@ object ZipRepacker {
                 }
                 val cdOffset = raf.filePointer
                 run {
-                    val cb = java.io.ByteArrayOutputStream()
+                    val cb = java.io.ByteArrayOutputStream(cdEntries.size * 64)
+                    val headerBuf = ByteBuffer.allocate(46).order(ByteOrder.LITTLE_ENDIAN)
+                    val headerArr = headerBuf.array()
                     for (rec in cdEntries) {
-                        val b = ByteBuffer.allocate(46).order(ByteOrder.LITTLE_ENDIAN)
-                        b.putInt(0x02014b50)
-                        b.putShort(20)                     
-                        b.putShort(20)                     
-                        b.putShort(0)                      
-                        b.putShort(rec.method.toShort())
-                        b.putShort(0)
-                        b.putShort(0x0821)
-                        b.putInt(rec.crc.toInt())
-                        b.putInt(rec.compressedSize.toInt())
-                        b.putInt(rec.uncompressedSize.toInt())
-                        b.putShort(rec.name.length.toShort())
-                        b.putShort(0)                      
-                        b.putShort(0)                      
-                        b.putShort(0)                      
-                        b.putShort(0)                      
-                        b.putInt(0)                        
-                        b.putInt(rec.localOffset.toInt())
-                        cb.write(b.array())
+                        headerBuf.clear()
+                        headerBuf.putInt(0x02014b50)
+                        headerBuf.putShort(20)
+                        headerBuf.putShort(20)
+                        headerBuf.putShort(0)
+                        headerBuf.putShort(rec.method.toShort())
+                        headerBuf.putShort(0)
+                        headerBuf.putShort(0x0821)
+                        headerBuf.putInt(rec.crc.toInt())
+                        headerBuf.putInt(rec.compressedSize.toInt())
+                        headerBuf.putInt(rec.uncompressedSize.toInt())
+                        headerBuf.putShort(rec.name.length.toShort())
+                        headerBuf.putShort(0)
+                        headerBuf.putShort(0)
+                        headerBuf.putShort(0)
+                        headerBuf.putShort(0)
+                        headerBuf.putInt(0)
+                        headerBuf.putInt(rec.localOffset.toInt())
+                        cb.write(headerArr, 0, 46)
                         cb.write(rec.name.toByteArray(Charsets.UTF_8))
                     }
                     raf.write(cb.toByteArray())
@@ -355,14 +407,100 @@ object ZipRepacker {
     }
     private fun patchLibCs(content: ByteArray): ByteArray? {
         val out = content.copyOf()
+        // 1. Fast path: Check if all exact offsets match
+        var directMatch = true
         for ((off, rt) in LIBCS_PATCHES) {
-            if (out.size < off + 4) return null
+            if (out.size < off + 4) { directMatch = false; break }
             val high = out[off + 3].toInt() and 0xFF
             val reg = out[off].toInt() and 0x1F
-            if (high != 0xB4 || reg != rt) return null
-            out[off + 3] = 0xB6.toByte()   
+            if (high != 0xB4 || reg != rt) {
+                directMatch = false
+                break
+            }
         }
-        return out
+        if (directMatch) {
+            for ((off, _) in LIBCS_PATCHES) {
+                out[off + 3] = 0xB6.toByte()
+            }
+            return out
+        }
+
+        // 2. Resilient fallback: Global delta shift detection
+        // Cluster 1 has 6 consecutive checks at rt=20 spaced exactly by 0x90 bytes.
+        // If the binary shifted due to an update, find the shift delta.
+        val anchorOff = LIBCS_PATCHES[0].first // 0x240be4
+        val maxShift = 0x40000 // +/- 256KB search window
+        val searchStart = maxOf(4, anchorOff - maxShift)
+        val searchEnd = minOf(out.size - 0x600, anchorOff + maxShift)
+        var detectedDelta: Int? = null
+
+        var probe = searchStart
+        while (probe < searchEnd) {
+            val h0 = out[probe + 3].toInt() and 0xFF
+            val r0 = out[probe].toInt() and 0x1F
+            if (h0 == 0xB4 && r0 == 20) {
+                // Verify 0x90 stride on next 2 elements to confirm anchor
+                val p1 = probe + 0x90
+                val p2 = probe + 0x120
+                if (p2 + 4 < out.size) {
+                    val h1 = out[p1 + 3].toInt() and 0xFF
+                    val r1 = out[p1].toInt() and 0x1F
+                    val h2 = out[p2 + 3].toInt() and 0xFF
+                    val r2 = out[p2].toInt() and 0x1F
+                    if (h1 == 0xB4 && r1 == 20 && h2 == 0xB4 && r2 == 20) {
+                        detectedDelta = probe - anchorOff
+                        break
+                    }
+                }
+            }
+            probe += 4 // ARM64 instructions are 4-byte aligned
+        }
+
+        if (detectedDelta != null) {
+            val delta = detectedDelta
+            var deltaMatches = true
+            for ((off, rt) in LIBCS_PATCHES) {
+                val targetOff = off + delta
+                if (targetOff < 0 || targetOff + 4 > out.size) { deltaMatches = false; break }
+                val high = out[targetOff + 3].toInt() and 0xFF
+                val reg = out[targetOff].toInt() and 0x1F
+                if (high != 0xB4 || reg != rt) {
+                    deltaMatches = false
+                    break
+                }
+            }
+            if (deltaMatches) {
+                for ((off, _) in LIBCS_PATCHES) {
+                    out[off + delta + 3] = 0xB6.toByte()
+                }
+                return out
+            }
+        }
+
+        // 3. Windowed per-patch scan (+/- 512 bytes local search)
+        var patchedCount = 0
+        for ((off, rt) in LIBCS_PATCHES) {
+            val window = 512
+            val wStart = maxOf(0, (off - window) and -4)
+            val wEnd = minOf(out.size - 4, (off + window) and -4)
+            var foundAt = -1
+            var p = wStart
+            while (p <= wEnd) {
+                val high = out[p + 3].toInt() and 0xFF
+                val reg = out[p].toInt() and 0x1F
+                if (high == 0xB4 && reg == rt) {
+                    foundAt = p
+                    break
+                }
+                p += 4
+            }
+            if (foundAt != -1) {
+                out[foundAt + 3] = 0xB6.toByte()
+                patchedCount++
+            }
+        }
+
+        return if (patchedCount >= LIBCS_PATCHES.size / 2) out else null
     }
     private fun excludable(name: String, exclude: ExcludeRule): Boolean {
         for (p in exclude.exact) if (name == p) return true
@@ -377,13 +515,13 @@ object ZipRepacker {
         if (name.startsWith("lib/$keepAbi/")) return false
         return true
     }
-    private fun deflate(data: ByteArray): ByteArray {
-        val out = java.io.ByteArrayOutputStream()
-        val def = Deflater(9, true)
+    private fun deflate(data: ByteArray, level: Int = Deflater.DEFAULT_COMPRESSION): ByteArray {
+        val out = java.io.ByteArrayOutputStream(maxOf(64, data.size / 2))
+        val def = Deflater(level, true)
         try {
             def.setInput(data)
             def.finish()
-            val chunk = ByteArray(8192)
+            val chunk = ByteArray(32768)
             while (!def.finished()) {
                 val n = def.deflate(chunk)
                 out.write(chunk, 0, n)

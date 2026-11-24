@@ -32,9 +32,21 @@ class ZipRaw private constructor(
         val compressedSize: Long,
         val uncompressedSize: Long,
         val crc32: Long,
-        val dataOffset: Long,
-        val flags: Int,
+        val localOffset: Long = 0L,
+        val flags: Int = 0,
+        internal var _cachedDataOffset: Long = -1L,
+        internal var fileRef: RandomAccessFile? = null,
     ) {
+        val dataOffset: Long
+            get() {
+                if (_cachedDataOffset >= 0) return _cachedDataOffset
+                val raf = fileRef
+                if (raf != null) {
+                    _cachedDataOffset = localDataOffset(raf, localOffset)
+                    return _cachedDataOffset
+                }
+                return localOffset + 30 + name.length
+            }
         val requiresAlignment: Boolean
             get() = name == "resources.arsc" || name.endsWith(".so") || name.endsWith(".dex") || name.endsWith(".png")
     }
@@ -113,12 +125,17 @@ class ZipRaw private constructor(
                 cb.get(nameBytes)
                 val name = String(nameBytes, Charsets.UTF_8)
                 cb.position(cb.position() + extraLen + commentLen)
-                val dataOffset = localDataOffset(raf, localOffset)
                 sorted.add(
                     ZipEntryInfo(
-                        name = name, method = method,
-                        compressedSize = compSize, uncompressedSize = uncompSize,
-                        crc32 = crc, dataOffset = dataOffset, flags = flags,
+                        name = name,
+                        method = method,
+                        compressedSize = compSize,
+                        uncompressedSize = uncompSize,
+                        crc32 = crc,
+                        localOffset = localOffset,
+                        flags = flags,
+                        _cachedDataOffset = -1L,
+                        fileRef = raf,
                     )
                 )
             }
