@@ -41,6 +41,8 @@ import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.filled.Warning
@@ -53,6 +55,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -97,6 +100,7 @@ internal fun displayAbi(abi: String): String = when (abi) {
 fun PatchScreen(vm: PatcherViewModel, onOpenLibraries: () -> Unit) {
     val engineInstalled by vm.engineInstalled.collectAsState()
     val cstrikeReady by vm.cstrikeReady.collectAsState()
+    val gameReady by vm.gameInstalled.collectAsState()
     val abi by vm.abi.collectAsState()
     val patchable = abi in vm.patchableAbis
     val showStatus = patchable && (!engineInstalled || !cstrikeReady)
@@ -128,6 +132,17 @@ fun PatchScreen(vm: PatcherViewModel, onOpenLibraries: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 DownloadRow(vm, index = 0, total = 2, onOpenLibraries = onOpenLibraries)
                 BuildRow(vm, index = 1, total = 2)
+            }
+        }
+        if (gameReady) {
+            item(key = "launch_section") {
+                Column(
+                    modifier = Modifier.animateItem(),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    CommandArgsRow(vm, index = 0, total = 2)
+                    LaunchGameRow(vm, index = 1, total = 2)
+                }
             }
         }
         item { Spacer(Modifier.height(16.dp)) }
@@ -220,7 +235,7 @@ private fun GameStatusCard(vm: PatcherViewModel) {
         else -> Triple(
             "cstrike folder was not found",
             "All game files must be installed before patching. Put the cstrike folder in the game directory and return here.",
-            "https://github.com/Yoriva/patcher/releases",
+            null,
         )
     }
     Surface(
@@ -254,13 +269,19 @@ private fun GameStatusCard(vm: PatcherViewModel) {
                     color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f),
                 )
             }
-            Spacer(Modifier.width(16.dp))
-            Button(
-                onClick = {
-                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-                },
-            ) {
-                Text("Install")
+            if (!engineInstalled && url != null) {
+                Spacer(Modifier.width(16.dp))
+                Button(
+                    onClick = {
+                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.onErrorContainer,
+                        contentColor = MaterialTheme.colorScheme.errorContainer,
+                    ),
+                ) {
+                    Text("Install", fontWeight = FontWeight.SemiBold)
+                }
             }
         }
     }
@@ -412,14 +433,14 @@ private fun BuildRow(vm: PatcherViewModel, index: Int, total: Int) {
     }
     GroupedItem(
         title = when (patchState) {
-            is PatchUiState.Done -> if (clientIsInstalled) "Already Patched" else "Patch Succeeded"
+            is PatchUiState.Done -> if (clientIsInstalled) "CS 1.6 Ready" else "Patch Succeeded"
             is PatchUiState.Failed -> "Patch Failed"
             is PatchUiState.Running -> "Patching APK…"
-            PatchUiState.Idle -> if (showPatched) "Already Patched" else "Build Patched APK"
+            PatchUiState.Idle -> if (showPatched) "CS 1.6 Ready" else "Build Patched APK"
         },
         subtitle = when (patchState) {
             is PatchUiState.Done, PatchUiState.Idle -> if (showPatched) {
-                "The patched client is installed on this device"
+                "AMXX client is installed and ready to play"
             } else {
                 null
             }
@@ -450,7 +471,7 @@ private fun BuildRow(vm: PatcherViewModel, index: Int, total: Int) {
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         if (clientIsInstalled) {
-                            SmallButton("Repatch", Icons.Filled.RocketLaunch, filled = true) {
+                            SmallButton("Repatch", Icons.Filled.RocketLaunch, filled = false) {
                                 vm.reset()
                                 vm.startPatch()
                             }
@@ -535,6 +556,130 @@ private fun BuildRow(vm: PatcherViewModel, index: Int, total: Int) {
                 progress = running.progress,
                 left = running.step.name.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() },
                 right = "${(running.progress * 100).toInt()}%",
+            )
+        }
+    }
+}
+@Composable
+private fun CommandArgsRow(vm: PatcherViewModel, index: Int, total: Int) {
+    val launchArgs by vm.launchArgs.collectAsState()
+    var expanded by remember { mutableStateOf(false) }
+    val arrowRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(220),
+        label = "argsArrowRotation",
+    )
+
+    Card(
+        onClick = {
+            if (expanded) {
+                vm.setLaunchArgs(launchArgs.trim())
+            }
+            expanded = !expanded
+        },
+        modifier = Modifier.fillMaxWidth(),
+        shape = getGroupedItemShape(index, total),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 18.dp, end = 16.dp, top = 16.dp, bottom = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Command Arguments",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    AnimatedVisibility(
+                        visible = !expanded,
+                        enter = expandVertically(tween(220)) + fadeIn(tween(180)),
+                        exit = shrinkVertically(tween(220)) + fadeOut(tween(140)),
+                    ) {
+                        Column {
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = launchArgs.trim().ifEmpty { "-dev 2 -log" },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                Icon(
+                    imageVector = Icons.Filled.KeyboardArrowDown,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .size(22.dp)
+                        .graphicsLayer { rotationZ = arrowRotation },
+                )
+            }
+
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(tween(220)) + fadeIn(tween(180)),
+                exit = shrinkVertically(tween(220)) + fadeOut(tween(140)),
+            ) {
+                OutlinedTextField(
+                    value = launchArgs,
+                    onValueChange = { vm.setLaunchArgs(it) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 18.dp, end = 18.dp, bottom = 16.dp),
+                    singleLine = false,
+                    maxLines = 3,
+                    shape = RoundedCornerShape(16.dp),
+                    placeholder = { Text("-dev 2 -log") },
+                )
+            }
+        }
+    }
+}
+@Composable
+private fun LaunchGameRow(vm: PatcherViewModel, index: Int, total: Int) {
+    val engineInstalled by vm.engineInstalled.collectAsState()
+    val clientInstalled by vm.clientInstalled.collectAsState()
+    val ready = engineInstalled && clientInstalled
+
+    Card(
+        onClick = { vm.launchGame() },
+        enabled = ready,
+        modifier = Modifier.fillMaxWidth(),
+        shape = getGroupedItemShape(index, total),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.PlayArrow,
+                contentDescription = null,
+                modifier = Modifier.size(22.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "Launch it!",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
             )
         }
     }

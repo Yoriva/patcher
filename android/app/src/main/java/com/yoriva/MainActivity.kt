@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -74,12 +75,19 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.unit.Dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -295,39 +303,159 @@ fun PatcherApp(vm: PatcherViewModel) {
         animationSpec = spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow),
         label = "settingsRotation",
     )
+    val configuration = LocalConfiguration.current
+    val isTablet = configuration.screenWidthDp >= 600
+
     Box(modifier = Modifier.fillMaxSize()) {
-        Scaffold(
-            containerColor = MaterialTheme.colorScheme.background,
-            contentColor = MaterialTheme.colorScheme.onBackground,
-            topBar = {
-                TopAppBar(
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.background,
-                            titleContentColor = MaterialTheme.colorScheme.onBackground,
-                            actionIconContentColor = MaterialTheme.colorScheme.onBackground,
-                            navigationIconContentColor = MaterialTheme.colorScheme.onBackground,
-                        ),
-                        navigationIcon = {
-                            if (!isMainTab) {
-                                TopBarBackButton(onClick = { nav.popBackStack() })
-                            }
-                        },
-                        title = {
-                            if (isMainTab) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(vertical = 4.dp),
-                                ) {
-                                    Image(
-                                        painter = painterResource(id = R.drawable.yoriva_logo),
-                                        contentDescription = "Yoriva Logo",
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clip(CircleShape),
-                                    )
-                                    Spacer(Modifier.width(10.dp))
+        Row(modifier = Modifier.fillMaxSize()) {
+            if (isTablet && isMainTab) {
+                NavigationRail(
+                    modifier = Modifier.fillMaxHeight(),
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    header = {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(top = 16.dp, bottom = 20.dp),
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.yoriva_logo),
+                                contentDescription = "Yoriva Logo",
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape),
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Yoriva",
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = (-0.2).sp,
+                                ),
+                                color = MaterialTheme.colorScheme.onBackground,
+                            )
+                        }
+                    },
+                ) {
+                    bottomNavItems.forEach { item ->
+                        val selected = pagerState.currentPage == item.index
+                        NavigationRailItem(
+                            selected = selected,
+                            onClick = {
+                                if (pagerState.currentPage != item.index) {
+                                    tabScope.launch { pagerState.animateScrollToPage(item.index) }
+                                }
+                            },
+                            icon = {
+                                Icon(
+                                    imageVector = if (selected) item.selectedIcon else item.unselectedIcon,
+                                    contentDescription = item.title,
+                                )
+                            },
+                            label = {
+                                Text(
+                                    text = item.title,
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                    ),
+                                )
+                            },
+                            colors = NavigationRailItemDefaults.colors(
+                                selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                selectedTextColor = MaterialTheme.colorScheme.onBackground,
+                                indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
+                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                            ),
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick = { showLibraries = true }) {
+                        Icon(
+                            imageVector = Icons.Filled.Extension,
+                            contentDescription = "Libraries",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    IconButton(onClick = { showTheme = true }) {
+                        Icon(
+                            imageVector = Icons.Filled.Palette,
+                            contentDescription = "Theme",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    IconButton(onClick = { showSettings = true }) {
+                        Icon(
+                            imageVector = Icons.Rounded.Settings,
+                            contentDescription = "Settings",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.graphicsLayer { rotationZ = settingsRotation },
+                        )
+                    }
+                    Spacer(Modifier.height(16.dp))
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .weight(1f),
+            ) {
+                Scaffold(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    contentColor = MaterialTheme.colorScheme.onBackground,
+                    topBar = {
+                        TopAppBar(
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = MaterialTheme.colorScheme.background,
+                                titleContentColor = MaterialTheme.colorScheme.onBackground,
+                                actionIconContentColor = MaterialTheme.colorScheme.onBackground,
+                                navigationIconContentColor = MaterialTheme.colorScheme.onBackground,
+                            ),
+                            navigationIcon = {
+                                if (!isMainTab) {
+                                    TopBarBackButton(onClick = { nav.popBackStack() })
+                                }
+                            },
+                            title = {
+                                if (isMainTab) {
+                                    if (!isTablet) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(vertical = 4.dp),
+                                        ) {
+                                            Image(
+                                                painter = painterResource(id = R.drawable.yoriva_logo),
+                                                contentDescription = "Yoriva Logo",
+                                                modifier = Modifier
+                                                    .size(28.dp)
+                                                    .clip(CircleShape),
+                                            )
+                                            Spacer(Modifier.width(10.dp))
+                                            Text(
+                                                "Yoriva",
+                                                style = MaterialTheme.typography.titleLarge.copy(
+                                                    fontWeight = FontWeight.Bold,
+                                                    letterSpacing = (-0.3).sp,
+                                                ),
+                                                color = MaterialTheme.colorScheme.onBackground,
+                                            )
+                                        }
+                                    } else {
+                                        Text(
+                                            text = if (pagerState.currentPage == 0) "Patcher" else "AMXX Tools",
+                                            style = MaterialTheme.typography.titleLarge.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                letterSpacing = (-0.3).sp,
+                                            ),
+                                            color = MaterialTheme.colorScheme.onBackground,
+                                        )
+                                    }
+                                } else {
                                     Text(
-                                        "Yoriva",
+                                        text = "Yoriva",
                                         style = MaterialTheme.typography.titleLarge.copy(
                                             fontWeight = FontWeight.Bold,
                                             letterSpacing = (-0.3).sp,
@@ -335,127 +463,126 @@ fun PatcherApp(vm: PatcherViewModel) {
                                         color = MaterialTheme.colorScheme.onBackground,
                                     )
                                 }
-                            } else {
-                                Text(
-                                    text = "Yoriva",
-                                    style = MaterialTheme.typography.titleLarge.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        letterSpacing = (-0.3).sp,
-                                    ),
-                                    color = MaterialTheme.colorScheme.onBackground,
-                                )
-                            }
-                        },
-                        actions = {
-                            if (isMainTab) {
-                                IconButton(onClick = { showSettings = true }) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Settings,
-                                        contentDescription = "Settings",
-                                        tint = MaterialTheme.colorScheme.onBackground,
-                                        modifier = Modifier
-                                            .size(24.dp)
-                                            .graphicsLayer { rotationZ = settingsRotation },
+                            },
+                            actions = {
+                                if (isMainTab && !isTablet) {
+                                    IconButton(onClick = { showSettings = true }) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Settings,
+                                            contentDescription = "Settings",
+                                            tint = MaterialTheme.colorScheme.onBackground,
+                                            modifier = Modifier
+                                                .size(24.dp)
+                                                .graphicsLayer { rotationZ = settingsRotation },
+                                        )
+                                    }
+                                }
+                            },
+                        )
+                    },
+                    bottomBar = {
+                        if (!isTablet && isMainTab) {
+                            NavigationBar(
+                                containerColor = MaterialTheme.colorScheme.background,
+                                contentColor = MaterialTheme.colorScheme.onSurface,
+                                tonalElevation = 0.dp,
+                            ) {
+                                bottomNavItems.forEach { item ->
+                                    val selected = pagerState.currentPage == item.index
+                                    NavigationBarItem(
+                                        selected = selected,
+                                        onClick = {
+                                            if (pagerState.currentPage != item.index) {
+                                                tabScope.launch { pagerState.animateScrollToPage(item.index) }
+                                            }
+                                        },
+                                        icon = {
+                                            Icon(
+                                                imageVector = if (selected) item.selectedIcon else item.unselectedIcon,
+                                                contentDescription = item.title,
+                                            )
+                                        },
+                                        label = {
+                                            Text(
+                                                text = item.title,
+                                                style = MaterialTheme.typography.labelMedium.copy(
+                                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                                ),
+                                            )
+                                        },
+                                        colors = NavigationBarItemDefaults.colors(
+                                            selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                            selectedTextColor = MaterialTheme.colorScheme.onBackground,
+                                            indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
+                                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                                        ),
                                     )
                                 }
                             }
-                        },
-                    )
-            },
-            bottomBar = {
-                if (isMainTab) {
-                    NavigationBar(
-                        containerColor = MaterialTheme.colorScheme.background,
-                        contentColor = MaterialTheme.colorScheme.onSurface,
-                        tonalElevation = 0.dp,
-                    ) {
-                        bottomNavItems.forEach { item ->
-                            val selected = pagerState.currentPage == item.index
-                            NavigationBarItem(
-                                selected = selected,
-                                onClick = {
-                                    if (pagerState.currentPage != item.index) {
-                                        tabScope.launch { pagerState.animateScrollToPage(item.index) }
-                                    }
-                                },
-                                icon = {
-                                    Icon(
-                                        imageVector = if (selected) item.selectedIcon else item.unselectedIcon,
-                                        contentDescription = item.title,
-                                    )
-                                },
-                                label = {
-                                    Text(
-                                        text = item.title,
-                                        style = MaterialTheme.typography.labelMedium.copy(
-                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                        ),
-                                    )
-                                },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    selectedTextColor = MaterialTheme.colorScheme.onBackground,
-                                    indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
-                                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                                ),
-                            )
                         }
-                    }
-                }
-            },
-        ) { padding ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-            ) {
-                NavHost(
-                    navController = nav,
-                    startDestination = Dest.Tabs.route,
-                    modifier = Modifier.fillMaxSize(),
-                    enterTransition = {
-                        slideInHorizontally(
-                            initialOffsetX = { fullWidth -> (fullWidth * 0.25f).toInt() },
-                            animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
-                        ) + fadeIn(animationSpec = tween(durationMillis = 250))
                     },
-                    exitTransition = {
-                        slideOutHorizontally(
-                            targetOffsetX = { fullWidth -> (-fullWidth * 0.15f).toInt() },
-                            animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
-                        ) + fadeOut(animationSpec = tween(durationMillis = 200))
-                    },
-                    popEnterTransition = {
-                        slideInHorizontally(
-                            initialOffsetX = { fullWidth -> (-fullWidth * 0.15f).toInt() },
-                            animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
-                        )
-                    },
-                    popExitTransition = {
-                        slideOutHorizontally(
-                            targetOffsetX = { fullWidth -> fullWidth },
-                            animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
-                        )
-                    },
-                ) {
-                    composable(Dest.Tabs.route) {
-                        HorizontalPager(
-                            state = pagerState,
-                            modifier = Modifier.fillMaxSize(),
-                            beyondViewportPageCount = 1,
-                        ) { page ->
-                            when (page) {
-                                0 -> PatchScreen(
-                                    vm = vm,
-                                    onOpenLibraries = { showLibraries = true },
-                                )
-                                else -> ToolsScreen(
-                                    vm = vm,
-                                    gameInstalled = clientInstalled,
-                                    onGoToPatch = { tabScope.launch { pagerState.animateScrollToPage(0) } },
-                                    onOpenPluginConfig = { showPluginConfig = true },
-                                )
+                ) { padding ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(padding),
+                        contentAlignment = Alignment.TopCenter,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .widthIn(max = if (isTablet) 880.dp else Dp.Unspecified),
+                        ) {
+                            NavHost(
+                                navController = nav,
+                                startDestination = Dest.Tabs.route,
+                                modifier = Modifier.fillMaxSize(),
+                                enterTransition = {
+                                    slideInHorizontally(
+                                        initialOffsetX = { fullWidth -> (fullWidth * 0.25f).toInt() },
+                                        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+                                    ) + fadeIn(animationSpec = tween(durationMillis = 250))
+                                },
+                                exitTransition = {
+                                    slideOutHorizontally(
+                                        targetOffsetX = { fullWidth -> (-fullWidth * 0.15f).toInt() },
+                                        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+                                    ) + fadeOut(animationSpec = tween(durationMillis = 200))
+                                },
+                                popEnterTransition = {
+                                    slideInHorizontally(
+                                        initialOffsetX = { fullWidth -> (-fullWidth * 0.15f).toInt() },
+                                        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+                                    )
+                                },
+                                popExitTransition = {
+                                    slideOutHorizontally(
+                                        targetOffsetX = { fullWidth -> fullWidth },
+                                        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+                                    )
+                                },
+                            ) {
+                                composable(Dest.Tabs.route) {
+                                    HorizontalPager(
+                                        state = pagerState,
+                                        modifier = Modifier.fillMaxSize(),
+                                        beyondViewportPageCount = 1,
+                                    ) { page ->
+                                        when (page) {
+                                            0 -> PatchScreen(
+                                                vm = vm,
+                                                onOpenLibraries = { showLibraries = true },
+                                            )
+                                            else -> ToolsScreen(
+                                                vm = vm,
+                                                gameInstalled = clientInstalled,
+                                                onGoToPatch = { tabScope.launch { pagerState.animateScrollToPage(0) } },
+                                                onOpenPluginConfig = { showPluginConfig = true },
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -607,7 +734,9 @@ fun PatcherApp(vm: PatcherViewModel) {
                             vm = vm,
                             onSelect = {
                                 pluginFile = it
-                                showPluginEditor = true
+                                if (!isTablet) {
+                                    showPluginEditor = true
+                                }
                             },
                         )
                     }
@@ -615,7 +744,7 @@ fun PatcherApp(vm: PatcherViewModel) {
             }
         }
         AnimatedVisibility(
-            visible = showPluginEditor,
+            visible = showPluginEditor && !isTablet,
             enter = slideInHorizontally(
                 initialOffsetX = { fullWidth -> fullWidth },
                 animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
