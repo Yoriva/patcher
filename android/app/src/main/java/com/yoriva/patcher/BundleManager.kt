@@ -187,7 +187,7 @@ class BundleManager(
                 _libsChecking.value = true
                 try {
                     coreAssets = try {
-                        IncrementalUpdateManager.fetchReleaseAssets("libs", abi)
+                        IncrementalUpdateManager.fetchReleaseAssets(PatcherViewModel.ASSETS_TAG, abi)
                     } catch (_: Throwable) {
                         emptyList()
                     }
@@ -251,7 +251,7 @@ class BundleManager(
                 val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, abi, _libExcluded.value)
                 if (files.isNotEmpty()) {
                     val b = buildBundleFromFileMap(files, abi)
-                    markBundleTagKnown("libs")
+                    markBundleTagKnown(PatcherViewModel.ASSETS_TAG)
                     loadedBundle = b
                     _bundle.value = BundleState.Loaded
                 }
@@ -278,7 +278,7 @@ class BundleManager(
 
     private suspend fun fetchAllAssets(abi: String): List<IncrementalUpdateManager.AssetInfo> {
         val core: List<IncrementalUpdateManager.AssetInfo> = try {
-            IncrementalUpdateManager.fetchReleaseAssets("libs", abi)
+            IncrementalUpdateManager.fetchReleaseAssets(PatcherViewModel.ASSETS_TAG, abi)
         } catch (_: Throwable) {
             emptyList()
         }
@@ -345,7 +345,7 @@ class BundleManager(
         _bundle.value = BundleState.Downloading(0.04f)
         var jobStarted = false
         return try {
-            val tagName = "libs"
+            val tagName = PatcherViewModel.ASSETS_TAG
             setReleaseNote(tagName)
             val coreAssets = IncrementalUpdateManager.fetchReleaseAssets(tagName, abiProvider())
             if (coreAssets.isEmpty()) throw IOException("No .so assets found for ABI ${abiProvider()}")

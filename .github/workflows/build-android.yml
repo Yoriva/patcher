@@ -51,7 +51,7 @@ jobs:
             "$GITHUB_WORKSPACE/build-out/compiler/arm64-v8a" \
             "$GITHUB_WORKSPACE/build-out/compiler/armeabi-v7a"
           cd /tmp/prevpc
-          gh release download libs --repo "$GITHUB_REPOSITORY" \
+          gh release download assets --repo "$GITHUB_REPOSITORY" \
             --pattern 'compiler-*' --clobber
           shopt -s nullglob
           for f in *; do
@@ -156,6 +156,7 @@ jobs:
             git push origin continuous
             gh release create continuous \
               --title "Yoriva Continuous" \
+              --prerelease \
               --notes "Yoriva Continuous build"
           fi
           shopt -s nullglob
@@ -164,4 +165,4 @@ jobs:
           Commit: ${{ steps.meta.outputs.commit_msg }}
           Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           Built: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          gh release edit continuous --title "Yoriva Continuous" --notes "$BODY" 2>/dev/null || true
+          gh release edit continuous --title "Yoriva Continuous" --prerelease --notes "$BODY" 2>/dev/null || true

@@ -682,6 +682,7 @@ private fun externalRoot(app: Application): File {
         const val CLIENT_APK_ASSET = "CS16Client-Android.apk"
         const val GAME_CLIENT_PACKAGE = "su.xash.cs16client.nexora"
         const val CONTINUOUS_TAG = "continuous"
+        const val ASSETS_TAG = "assets"
         const val CONTINUOUS_APK = "yoriva_continuous.apk"
         const val RELEASE_APK = "yoriva.apk"
         const val VERSION_FILE = "version.txt"

@@ -54,7 +54,7 @@ class AddonsManager(
             _addons.value = AddonsState.Downloading(0f, "Resolving latest release…")
             JobProgress.begin(app, com.yoriva.patcher.PatcherViewModel.JOB_ADDONS, "Addons", "Resolving the release…")
             try {
-                val tag = "extras"
+                val tag = com.yoriva.patcher.PatcherViewModel.ASSETS_TAG
                 val zip = File(bundleProvider.cacheDir(), "amxx-addons.zip")
                 _addons.value = AddonsState.Downloading(0f, "Downloading addons…")
                 com.yoriva.data.ReleaseRepository.downloadUrl(

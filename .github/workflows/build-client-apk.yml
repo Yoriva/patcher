@@ -1,4 +1,4 @@
-name: build client APK (extras)
+name: build client APK (assets)
 
 on:
   workflow_dispatch:
@@ -94,19 +94,19 @@ jobs:
              "$GITHUB_WORKSPACE/CS16Client-Android.apk"
           ls -lh "$GITHUB_WORKSPACE/CS16Client-Android.apk"
 
-      - name: Upload to extras release
+      - name: Upload to assets release
         if: steps.type.outputs.needs_client == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if ! gh release view extras >/dev/null 2>&1; then
+          if ! gh release view assets >/dev/null 2>&1; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -f extras
-            git push origin extras
-            gh release create extras --title "Yoriva Extras" --notes "Addons, game assets and client APK (rolling)."
+            git tag -f assets
+            git push origin assets --force
+            gh release create assets --title "Assets" --prerelease --notes "Native libs, manifests, compiler, addons, game assets and bridge APK."
           fi
-          gh release upload extras --clobber "$GITHUB_WORKSPACE/CS16Client-Android.apk"
-          echo "uploaded CS16Client-Android.apk to extras"
+          gh release upload assets --clobber "$GITHUB_WORKSPACE/CS16Client-Android.apk"
+          echo "uploaded CS16Client-Android.apk to assets"

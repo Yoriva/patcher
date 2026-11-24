@@ -195,7 +195,7 @@ jobs:
             "$GITHUB_WORKSPACE/build-out/compiler/armeabi-v7a" \
             "$GITHUB_WORKSPACE/build-out/plugins"
           cd /tmp/prevso
-          gh release download libs --repo "$GITHUB_REPOSITORY" \
+          gh release download assets --repo "$GITHUB_REPOSITORY" \
             --pattern 'arm64-v8a_*' --pattern 'armeabi-v7a_*' --pattern 'compiler-*' \
             --clobber
           shopt -s nullglob
@@ -467,25 +467,30 @@ jobs:
           fi
           ls "$GITHUB_WORKSPACE/compiler-assets" || true
 
-      - name: Release libs (rolling)
-        if: success() && steps.detect.outputs.needs_libs == 'true' && steps.detect.outputs.continuous == 'true'
+      - name: Release assets
+        if: success() && steps.detect.outputs.needs_libs == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view libs >/dev/null 2>&1; then
+          set -euo pipefail
+          if ! gh release view assets >/dev/null 2>&1; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -f libs
-            git push origin libs
-            gh release create libs --title "Yoriva Libs" --notes "Native libs and manifests (rolling)."
+            git tag -f assets
+            git push origin assets --force
+            gh release create assets --title "Assets" --prerelease --notes "Native libs, manifests, compiler, addons, game assets and bridge APK."
           fi
           shopt -s nullglob
           ls -la manifest.json manifest-v7a.json build-meta.json
-          gh release upload libs --clobber manifest.json manifest-v7a.json build-meta.json
-          gh release upload libs --clobber incremental/arm64-v8a/*.so
-          gh release upload libs --clobber incremental-v7a/armeabi-v7a/*.so
-          gh release upload libs --clobber compiler-assets/*
+          gh release upload assets --clobber \
+            manifest.json manifest-v7a.json build-meta.json \
+            incremental/arm64-v8a/*.so \
+            incremental-v7a/armeabi-v7a/*.so \
+            compiler-assets/* \
+            amxx-addons.zip game-assets.zip
+          gh release edit assets --title "Assets" --prerelease 2>/dev/null || true
+          echo "assets release updated"
 
       - name: Trigger Android build
         if: >-
@@ -509,22 +514,3 @@ jobs:
             '{event_type:"android-build",client_payload:{sha:$sha,version:$version,code:$code,continuous:$continuous}}' \
             | gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" --input -
           echo "dispatched Android build for $TARGET_SHA"
-
-      - name: Release extras (addons, game assets)
-        if: >-
-          success() &&
-          (steps.detect.outputs.needs_libs == 'true')
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          if ! gh release view extras >/dev/null 2>&1; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -f extras
-            git push origin extras
-            gh release create extras --title "Yoriva Extras" --notes "Addons, game assets and client APK (rolling)."
-          fi
-          gh release upload extras --clobber amxx-addons.zip game-assets.zip 2>/dev/null || true
-          echo "extras release updated"

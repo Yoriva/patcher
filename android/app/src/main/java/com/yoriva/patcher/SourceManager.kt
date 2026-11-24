@@ -116,7 +116,7 @@ class SourceManager(
                     )
                 }
             }
-            val tag = "extras"
+            val tag = com.yoriva.patcher.PatcherViewModel.ASSETS_TAG
             val remote = tag.let {
                 ReleaseRepository.probe(ReleaseRepository.assetUrl(com.yoriva.patcher.PatcherViewModel.CLIENT_APK_REPO, it, com.yoriva.patcher.PatcherViewModel.CLIENT_APK_ASSET))
             }
@@ -229,7 +229,7 @@ class SourceManager(
         var partial: File? = null
         return try {
             val repo = com.yoriva.patcher.PatcherViewModel.CLIENT_APK_REPO
-            val tag = "extras"
+            val tag = com.yoriva.patcher.PatcherViewModel.ASSETS_TAG
             val name = com.yoriva.patcher.PatcherViewModel.CLIENT_APK_ASSET
             val url = ReleaseRepository.assetUrl(repo, tag, name)
             val remote = ReleaseRepository.probe(url)

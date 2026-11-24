@@ -104,7 +104,7 @@ class PatchManager(
         } else {
             if (zip.exists()) zip.delete()
             onStatus("Downloading game content…")
-            val tag = "extras"
+            val tag = com.yoriva.patcher.PatcherViewModel.ASSETS_TAG
             ReleaseRepository.downloadUrl(
                 ReleaseRepository.assetUrl(repo, tag, "game-assets.zip"),
                 zip,

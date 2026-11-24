@@ -197,7 +197,7 @@ build-release:
           "$WS/build-out/compiler/armeabi-v7a" \
           "$WS/build-out/plugins"
         cd /tmp/prevso
-        gh release download libs --repo "$GH_REPO" \
+        gh release download assets --repo "$GH_REPO" \
           --pattern 'arm64-v8a_*' --pattern 'armeabi-v7a_*' --pattern 'compiler-*' \
           --clobber
         shopt -s nullglob
@@ -227,7 +227,7 @@ build-release:
           "$WS/build-out/compiler/arm64-v8a" \
           "$WS/build-out/compiler/armeabi-v7a"
         cd /tmp/prevpc
-        gh release download libs --repo "$GH_REPO" \
+        gh release download assets --repo "$GH_REPO" \
           --pattern 'compiler-*' --clobber
         shopt -s nullglob
         for f in *; do
@@ -494,6 +494,7 @@ PY
         if ! gh release view continuous >/dev/null 2>&1; then
           gh release create continuous \
             --title "Yoriva Continuous" \
+            --prerelease \
             --notes "Yoriva Continuous build"
         fi
         if [ "$NEEDS_ANDROID" = "true" ]; then
@@ -501,26 +502,19 @@ PY
         fi
 
         if [ "$NEEDS_LIBS" = "true" ]; then
-          if ! gh release view libs >/dev/null 2>&1; then
-            gh release create libs --title "Yoriva Libs" --notes "Native libs and manifests (rolling)."
+          if ! gh release view assets >/dev/null 2>&1; then
+            gh release create assets --title "Assets" --prerelease --notes "Native libs, manifests, compiler, addons, game assets and bridge APK."
           fi
-          gh release upload libs --clobber manifest.json manifest-v7a.json build-meta.json \
+          gh release upload assets --clobber manifest.json manifest-v7a.json build-meta.json \
             incremental/arm64-v8a/*.so incremental-v7a/armeabi-v7a/*.so \
-            compiler-assets/* 2>/dev/null || true
-        fi
-
-        if [ "$NEEDS_LIBS" = "true" ]; then
-          if ! gh release view extras >/dev/null 2>&1; then
-            gh release create extras --title "Yoriva Extras" --notes "Addons, game assets and client APK (rolling)."
-          fi
-          gh release upload extras --clobber amxx-addons.zip game-assets.zip 2>/dev/null || true
+            compiler-assets/* amxx-addons.zip game-assets.zip 2>/dev/null || true
         fi
 
         BODY="Yoriva Continuous build ${APP_VERSION_NAME:-}
       Commit: ${MSG}
       Run: ${CI_PIPELINE_URL}
       Built: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        gh release edit continuous --title "Yoriva Continuous" --notes "$BODY" 2>/dev/null || true
+        gh release edit continuous --title "Yoriva Continuous" --prerelease --notes "$BODY" 2>/dev/null || true
       else
         if [ "$NEEDS_ANDROID" = "true" ] && [ -n "$CI_COMMIT_TAG" ]; then
           echo "== Release (app APK) for tag $CI_COMMIT_TAG =="
