@@ -65,6 +65,7 @@ fun SettingsScreen(
     vm: PatcherViewModel,
     onBack: () -> Unit = {},
     onOpenTheme: () -> Unit = {},
+    onOpenUpdates: () -> Unit = {},
     onOpenAbout: () -> Unit = {},
     onShareLogs: () -> Unit = {},
 ) {
@@ -79,6 +80,7 @@ fun SettingsScreen(
     val cleanup by vm.cleanup.collectAsState()
     val cleanupAvailable by vm.cleanupAvailable.collectAsState()
     val patchState by vm.patch.collectAsState()
+    val appUpdate by vm.appUpdate.collectAsState()
     val busyBulk by vm.downloadAllRunning.collectAsState()
     val compiling by vm.compile.collectAsState()
     val busyCleanup = patchState is com.yoriva.patcher.PatchUiState.Running ||
@@ -332,14 +334,24 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(start = 8.dp, bottom = 4.dp),
             )
+            val updateSubtitle = when (val u = appUpdate) {
+                is com.yoriva.patcher.AppUpdate.Checking -> "Checking GitHub releases…"
+                is com.yoriva.patcher.AppUpdate.Available -> "Update available · ${u.remoteVersion}"
+                is com.yoriva.patcher.AppUpdate.Downloading -> "Downloading update…"
+                is com.yoriva.patcher.AppUpdate.Downloaded,
+                is com.yoriva.patcher.AppUpdate.Installing -> "Update ready to install"
+                is com.yoriva.patcher.AppUpdate.Failed -> "Update check failed"
+                else -> "Current version: ${vm.installedAppVersion}"
+            }
             GroupedActionCard(
-                title = "Check for Updates",
-                subtitle = "Scan GitHub releases and module updates",
+                title = "Updates",
+                subtitle = updateSubtitle,
                 icon = Icons.Filled.SystemUpdate,
                 index = 0,
                 total = 3,
                 onClick = {
-                    vm.checkAppUpdate()
+                    onOpenUpdates()
+                    vm.checkAppUpdate(manual = true)
                     vm.refreshLibStatus()
                 },
             )

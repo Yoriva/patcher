@@ -134,6 +134,7 @@ import com.yoriva.ui.screens.SettingsScreen
 import com.yoriva.ui.screens.PluginEditorScreen
 import com.yoriva.ui.screens.SaveChangesDialog
 import com.yoriva.ui.screens.TopBarBackButton
+import com.yoriva.ui.screens.UpdatesScreen
 import com.yoriva.ui.screens.getGroupedItemShape
 import com.yoriva.ui.theme.Gray30
 import com.yoriva.ui.theme.Gray40
@@ -284,6 +285,7 @@ fun PatcherApp(vm: PatcherViewModel) {
     val tabScope = rememberCoroutineScope()
     var showSettings by remember { mutableStateOf(false) }
     var showTheme by remember { mutableStateOf(false) }
+    var showUpdates by remember { mutableStateOf(false) }
     var showPluginConfig by remember { mutableStateOf(false) }
     var showPluginEditor by remember { mutableStateOf(false) }
     var pluginFile by remember { mutableStateOf<com.yoriva.patcher.ConfigFileInfo?>(null) }
@@ -295,6 +297,7 @@ fun PatcherApp(vm: PatcherViewModel) {
             showPluginEditor ||
             showPluginConfig ||
             showTheme ||
+            showUpdates ||
             showLibraries ||
             showSettings ||
             (isMainTab && pagerState.currentPage != 0 && !showSetup),
@@ -306,6 +309,7 @@ fun PatcherApp(vm: PatcherViewModel) {
             }
             showPluginConfig -> showPluginConfig = false
             showTheme -> showTheme = false
+            showUpdates -> showUpdates = false
             showLibraries -> showLibraries = false
             showSettings -> showSettings = false
             else -> tabScope.launch { pagerState.animateScrollToPage(0) }
@@ -622,9 +626,11 @@ fun PatcherApp(vm: PatcherViewModel) {
                         vm = vm,
                         onBack = {
                             showTheme = false
+                            showUpdates = false
                             showSettings = false
                         },
                         onOpenTheme = { showTheme = true },
+                        onOpenUpdates = { showUpdates = true },
                         onOpenAbout = { showAbout = true },
                         onShareLogs = {
                             scope.launch(Dispatchers.IO) {
@@ -842,14 +848,27 @@ fun PatcherApp(vm: PatcherViewModel) {
         currentUpdate is AppUpdate.Downloaded ||
         currentUpdate is AppUpdate.Installing ||
         (currentUpdate as? AppUpdate.Failed)?.mandatory == true
-    if (isMandatoryUpdate) {
-        FullScreenUpdateScreen(vm = vm, state = currentUpdate)
-    } else if (
-        (currentUpdate as? AppUpdate.Checking)?.manual == true ||
-        currentUpdate is AppUpdate.UpToDate ||
-        (currentUpdate is AppUpdate.Failed && !currentUpdate.mandatory)
+    AnimatedVisibility(
+        visible = isMandatoryUpdate || showUpdates,
+        enter = slideInHorizontally(
+            initialOffsetX = { fullWidth -> fullWidth },
+            animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+        ) + fadeIn(animationSpec = tween(durationMillis = 250)),
+        exit = slideOutHorizontally(
+            targetOffsetX = { fullWidth -> fullWidth },
+            animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+        ) + fadeOut(animationSpec = tween(durationMillis = 250)),
     ) {
-        UpdateStatusDialog(vm = vm, state = currentUpdate)
+        UpdatesScreen(
+            vm = vm,
+            mandatory = isMandatoryUpdate,
+            onBack = {
+                if (!isMandatoryUpdate) {
+                    showUpdates = false
+                    vm.dismissUpdate()
+                }
+            },
+        )
     }
 }
 private fun hasStorageAccess(context: Context): Boolean =
@@ -1214,630 +1233,4 @@ private fun formatUpdateDate(millis: Long): String {
         java.text.DateFormat.MEDIUM,
         java.text.DateFormat.SHORT,
     ).format(java.util.Date(millis))
-}
-@Composable
-private fun FullScreenUpdateScreen(vm: PatcherViewModel, state: AppUpdate) {
-    BackHandler(enabled = true) {}
-    val context = LocalContext.current
-    val uriHandler = LocalUriHandler.current
-    Surface(
-        modifier = Modifier
-            .fillMaxSize()
-            .clickable(
-                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                indication = null,
-                onClick = {},
-            ),
-        color = MaterialTheme.colorScheme.background,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .safeDrawingPadding()
-                .padding(horizontal = 24.dp, vertical = 20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .widthIn(max = 520.dp)
-                    .verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.errorContainer,
-                ) {
-                    Text(
-                        text = "MANDATORY UPDATE",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
-                }
-                Spacer(modifier = Modifier.height(18.dp))
-                Box(
-                    modifier = Modifier
-                        .size(80.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.SystemUpdate,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(38.dp),
-                    )
-                }
-                Spacer(modifier = Modifier.height(18.dp))
-                Text(
-                    text = when (state) {
-                        is AppUpdate.Checking -> "Checking Required Update…"
-                        is AppUpdate.Available -> "Update Required"
-                        is AppUpdate.Downloading -> "Downloading Update…"
-                        is AppUpdate.Downloaded -> "Preparing Installer…"
-                        is AppUpdate.Installing -> if (state.needsInstallPermission) {
-                            "Permission Required"
-                        } else {
-                            "Install Update"
-                        }
-                        is AppUpdate.Failed -> "Update Failed"
-                        else -> "Update Required"
-                    },
-                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onBackground,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                val subtitleText = when (state) {
-                    is AppUpdate.Available -> state.notes.ifBlank { state.remoteVersion }
-                    is AppUpdate.Downloading -> state.tag
-                    is AppUpdate.Downloaded -> state.tag
-                    is AppUpdate.Installing -> state.tag
-                    else -> "You must update Yoriva to continue using the app."
-                }
-                Text(
-                    text = subtitleText,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-
-                when (state) {
-                    is AppUpdate.Checking -> {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(24.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                            ),
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                            ) {
-                                CircularProgressIndicator()
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text(
-                                    text = "Fetching the latest release details from GitHub…",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center,
-                                )
-                            }
-                        }
-                    }
-
-                    is AppUpdate.Available -> {
-                        val profile = state.authorLogin.ifBlank {
-                            state.authorName.ifBlank { "Yoriva" }
-                        }
-                        if (state.authorLogin.isNotBlank() ||
-                            state.authorName.isNotBlank() ||
-                            state.updatedAtMillis > 0L
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .clickable(enabled = state.authorLogin.isNotBlank()) {
-                                        if (state.authorLogin.isNotBlank()) {
-                                            uriHandler.openUri("https://github.com/${state.authorLogin}")
-                                        }
-                                    }
-                                    .background(MaterialTheme.colorScheme.surfaceContainer)
-                                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                GithubAvatar(username = profile)
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = state.authorName.ifBlank {
-                                            state.authorLogin.ifBlank { "Yoriva" }
-                                        },
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                    )
-                                    val meta = listOfNotNull(
-                                        state.authorLogin.takeIf { it.isNotBlank() }?.let { "@$it" },
-                                        formatUpdateDate(state.updatedAtMillis)
-                                            .takeIf { it.isNotBlank() }
-                                            ?.let { "Updated $it" },
-                                    ).joinToString(" · ")
-                                    if (meta.isNotBlank()) {
-                                        Spacer(modifier = Modifier.height(1.dp))
-                                        Text(
-                                            text = meta,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                }
-                                if (state.authorLogin.isNotBlank()) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                        modifier = Modifier.size(16.dp),
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(12.dp))
-                        }
-
-                        if (state.commitMessage.isNotBlank() || state.releaseNotes.isNotBlank()) {
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(20.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                                ),
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp),
-                                ) {
-                                    if (state.commitMessage.isNotBlank()) {
-                                        Text(
-                                            text = "What's new",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.primary,
-                                        )
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Text(
-                                            text = state.commitMessage.trim().take(1200),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                        )
-                                        if (state.commitSha.isNotBlank()) {
-                                            Spacer(modifier = Modifier.height(6.dp))
-                                            Text(
-                                                text = "Commit ${state.commitSha.take(7)}",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                    }
-                                    if (state.releaseNotes.isNotBlank()) {
-                                        if (state.commitMessage.isNotBlank()) {
-                                            Spacer(modifier = Modifier.height(12.dp))
-                                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                                            Spacer(modifier = Modifier.height(12.dp))
-                                        }
-                                        Text(
-                                            text = "Release notes",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.primary,
-                                        )
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Text(
-                                            text = state.releaseNotes.trim().take(1600),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(12.dp))
-                        }
-
-                        Text(
-                            text = if (state.size > 0) {
-                                "Download size: ${formatBytes(state.size)} · Updates are required before continuing."
-                            } else {
-                                "Updates are required before continuing."
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                        )
-                    }
-
-                    is AppUpdate.Downloading -> {
-                        val frac = if (state.total > 0) {
-                            (state.downloaded.toDouble() / state.total).toFloat().coerceIn(0f, 1f)
-                        } else 0f
-                        val pct = (frac * 100f).toInt().coerceIn(0, 100)
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(24.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                            ),
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(20.dp),
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        text = if (state.total > 0) {
-                                            "${formatBytes(state.downloaded)} / ${formatBytes(state.total)}"
-                                        } else {
-                                            formatBytes(state.downloaded)
-                                        },
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                    )
-                                    Text(
-                                        text = if (state.total > 0) "$pct%" else formatSpeed(state.bytesPerSec),
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary,
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(12.dp))
-                                if (state.total > 0) {
-                                    LinearProgressIndicator(
-                                        progress = { frac },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(10.dp)
-                                            .clip(CircleShape),
-                                    )
-                                } else {
-                                    LinearProgressIndicator(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(10.dp)
-                                            .clip(CircleShape),
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Text(
-                                    text = "${formatSpeed(state.bytesPerSec)} · Installer opens automatically when complete.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
-
-                    is AppUpdate.Downloaded,
-                    is AppUpdate.Installing,
-                    -> {
-                        val installState = state as? AppUpdate.Installing
-                        val errorMsg = installState?.errorMessage
-                        if (!errorMsg.isNullOrBlank()) {
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(20.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                                ),
-                            ) {
-                                Text(
-                                    text = errorMsg,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                    modifier = Modifier.padding(16.dp),
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(12.dp))
-                        }
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(24.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                            ),
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(20.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Security,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(28.dp),
-                                )
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Text(
-                                    text = if (installState?.needsInstallPermission == true) {
-                                        "Allow Yoriva to install app updates in Android settings, then return here to finish installing."
-                                    } else {
-                                        "Confirm the Android installation prompt to update Yoriva. The app will reopen automatically afterward."
-                                    },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center,
-                                )
-                            }
-                        }
-                    }
-
-                    is AppUpdate.Failed -> {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(20.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer,
-                            ),
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(18.dp),
-                            ) {
-                                Text(
-                                    text = "Could not complete mandatory update",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = state.message,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                )
-                            }
-                        }
-                    }
-
-                    else -> {}
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .widthIn(max = 520.dp)
-                    .padding(top = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                when (state) {
-                    is AppUpdate.Available -> {
-                        Button(
-                            onClick = { vm.downloadAppUpdate() },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(54.dp),
-                            shape = RoundedCornerShape(18.dp),
-                        ) {
-                            Text(
-                                text = "Update Now",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
-                    }
-
-                    is AppUpdate.Downloading -> {
-                        FilledTonalButton(
-                            onClick = {},
-                            enabled = false,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(54.dp),
-                            shape = RoundedCornerShape(18.dp),
-                        ) {
-                            Text("Downloading Update…")
-                        }
-                    }
-
-                    is AppUpdate.Installing -> {
-                        if (state.needsInstallPermission) {
-                            Button(
-                                onClick = {
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                        val intent = Intent(
-                                            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                                            Uri.parse("package:${context.packageName}"),
-                                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        runCatching { context.startActivity(intent) }
-                                    }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(54.dp),
-                                shape = RoundedCornerShape(18.dp),
-                            ) {
-                                Text(
-                                    text = "Allow Install Permission",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            FilledTonalButton(
-                                onClick = { vm.retryInstallUpdate() },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(48.dp),
-                                shape = RoundedCornerShape(16.dp),
-                            ) {
-                                Text("Install Update")
-                            }
-                        } else {
-                            Button(
-                                onClick = { vm.retryInstallUpdate() },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(54.dp),
-                                shape = RoundedCornerShape(18.dp),
-                            ) {
-                                Text(
-                                    text = "Install Update",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            TextButton(onClick = { vm.redownloadAppUpdate() }) {
-                                Text("Re-download APK")
-                            }
-                        }
-                    }
-
-                    is AppUpdate.Failed -> {
-                        Button(
-                            onClick = {
-                                if (state.canRetryDownload) {
-                                    vm.downloadAppUpdate()
-                                } else {
-                                    vm.checkAppUpdate(manual = true)
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(54.dp),
-                            shape = RoundedCornerShape(18.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Refresh,
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp),
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = if (state.canRetryDownload) "Retry Download" else "Retry Check",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
-                        if (state.canRetryDownload) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            TextButton(onClick = { vm.checkAppUpdate(manual = true) }) {
-                                Text("Re-check Release")
-                            }
-                        }
-                    }
-
-                    else -> {}
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun UpdateStatusDialog(vm: PatcherViewModel, state: AppUpdate) {
-    AlertDialog(
-        onDismissRequest = {
-            if (state !is AppUpdate.Checking) vm.dismissUpdate()
-        },
-        icon = {
-            Box(
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.SystemUpdate,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(28.dp),
-                )
-            }
-        },
-        title = {
-            Text(
-                when (state) {
-                    is AppUpdate.Checking -> "Checking for updates…"
-                    is AppUpdate.UpToDate -> "Up to date"
-                    is AppUpdate.Failed -> "Update check failed"
-                    else -> "Update"
-                },
-                style = MaterialTheme.typography.titleLarge,
-                textAlign = TextAlign.Center,
-            )
-        },
-        text = {
-            when (state) {
-                is AppUpdate.Checking -> {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.5.dp)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text("Contacting GitHub releases…", style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-                is AppUpdate.UpToDate -> {
-                    Text(
-                        "You have the latest version (${state.tag}).",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                is AppUpdate.Failed -> {
-                    Text(
-                        state.message,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                else -> {}
-            }
-        },
-        confirmButton = {
-            when (state) {
-                is AppUpdate.Failed -> {
-                    TextButton(onClick = { vm.checkAppUpdate(manual = true) }) {
-                        Text("Retry")
-                    }
-                }
-                is AppUpdate.UpToDate -> {
-                    TextButton(onClick = { vm.dismissUpdate() }) {
-                        Text("OK")
-                    }
-                }
-                else -> {}
-            }
-        },
-        dismissButton = {
-            if (state is AppUpdate.Failed) {
-                TextButton(onClick = { vm.dismissUpdate() }) {
-                    Text("Close")
-                }
-            }
-        },
-    )
 }

@@ -77,6 +77,17 @@ class UpdateManager(
     )
     val appUpdate: StateFlow<AppUpdate> = _appUpdate.asStateFlow()
 
+    private val _lastCheckedAtMillis = MutableStateFlow(
+        updatePrefs.getLong(KEY_LAST_CHECK_AT, 0L),
+    )
+    val lastCheckedAtMillis: StateFlow<Long> = _lastCheckedAtMillis.asStateFlow()
+
+    val currentVersionName: String
+        get() = installedVersion() ?: "unknown"
+
+    val currentApkSizeBytes: Long
+        get() = installedApkSize() ?: 0L
+
     @Volatile
     private var checkJob: Job? = null
 
@@ -161,6 +172,9 @@ class UpdateManager(
                 }
                 lastCheckElapsedMs = SystemClock.elapsedRealtime()
                 lastCheckSucceeded = true
+                val checkedWallMs = System.currentTimeMillis()
+                _lastCheckedAtMillis.value = checkedWallMs
+                updatePrefs.edit().putLong(KEY_LAST_CHECK_AT, checkedWallMs).apply()
                 if (versionDiffers || sizeDiffers) {
                     persistMandatoryUpdate(remoteVersion)
                     val release = ReleaseRepository.fetchReleaseDetails(
@@ -465,6 +479,7 @@ class UpdateManager(
         private const val AUTO_CHECK_COOLDOWN_MS = 15_000L
         private const val KEY_REQUIRED_FINGERPRINT = "required_for_fingerprint"
         private const val KEY_REQUIRED_TARGET = "required_target_version"
+        private const val KEY_LAST_CHECK_AT = "last_check_timestamp"
         private val installEvents = MutableSharedFlow<Pair<Int, String?>>(extraBufferCapacity = 8)
 
         internal fun notifyInstallStatus(status: Int, message: String?) {

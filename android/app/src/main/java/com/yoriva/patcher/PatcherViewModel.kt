@@ -610,6 +610,9 @@ private fun externalRoot(app: Application): File {
         return false
     }
     val appUpdate: StateFlow<AppUpdate> get() = updateManager.appUpdate
+    val lastAppUpdateCheckAtMillis: StateFlow<Long> get() = updateManager.lastCheckedAtMillis
+    val installedAppVersion: String get() = updateManager.currentVersionName
+    val installedAppSizeBytes: Long get() = updateManager.currentApkSizeBytes
     fun checkAppUpdate(manual: Boolean = true) = updateManager.checkAppUpdate(manual)
     fun onResumeAppUpdate() = updateManager.onAppResumed()
     fun downloadAppUpdate() = updateManager.downloadAppUpdate()
