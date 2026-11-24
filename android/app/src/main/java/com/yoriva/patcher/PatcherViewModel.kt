@@ -612,13 +612,18 @@ private fun externalRoot(app: Application): File {
                 }
             }
 
-            val clientLaunch = pm.getLaunchIntentForPackage(clientPkg)
-            if (clientLaunch != null) {
-                clientLaunch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                clientLaunch.putExtra("auto_launch", true)
-                clientLaunch.putExtra("argv", fullArgv)
+            val bridgeCandidates = listOfNotNull(
+                Intent().setComponent(android.content.ComponentName(clientPkg, "su.xash.cs16client.MainActivity")),
+                Intent("su.xash.engine.MOD").setPackage(clientPkg),
+                pm.getLaunchIntentForPackage(clientPkg),
+            )
+            for (bridgeIntent in bridgeCandidates) {
+                if (bridgeIntent.resolveActivity(pm) == null) continue
+                bridgeIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                bridgeIntent.putExtra("auto_launch", true)
+                bridgeIntent.putExtra("argv", fullArgv)
                 val launched = runCatching {
-                    app.startActivity(clientLaunch)
+                    app.startActivity(bridgeIntent)
                     true
                 }.getOrDefault(false)
                 if (launched) return true
