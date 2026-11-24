@@ -6,7 +6,7 @@ stages:
 variables:
   GIT_DEPTH: "50"
   CACHE_FALLBACK_KEY: "ccache-ndk-r25c"
-  CS16_CLIENT_URL: "https://github.com/Yoriva/cs16-client.git"
+  CS16_CLIENT_URL: "https://github.com/Yoriva/bridge.git"
 
 build-release:
   stage: release
@@ -476,23 +476,14 @@ PY
         test -d "$ANDROID_HOME/ndk/$CLIENT_NDK" || {
           echo "client NDK $CLIENT_NDK is missing"; exit 1; }
 
-        KEYSTORE_FILE_PATH="$WS/signingkey.jks"
-        if [ -n "${CS16_SIGNING_KEY:-}" ]; then
-          echo "$CS16_SIGNING_KEY" | base64 --decode > "$KEYSTORE_FILE_PATH"
-          export KEYSTORE_FILE_PATH KEYSTORE_PASSWORD="$CS16_KEYSTORE_PASSWORD" \
-                 KEY_ALIAS="$CS16_KEY_ALIAS" KEY_PASSWORD="$CS16_KEY_PASSWORD"
+        if [ -s cs16-client-launcher.patch ]; then
           git apply --check cs16-client-launcher.patch \
             || { echo "cs16-client-launcher.patch does not apply to $(cat cs16-client.pin)"; exit 1; }
           git apply cs16-client-launcher.patch
-          (cd cs16-client/android && ./gradlew --no-daemon assembleGitContinuous --stacktrace)
-          cp cs16-client/android/app/build/outputs/apk/git/continuous/app-git-continuous.apk \
-             "$WS/CS16Client-Android.apk"
-        else
-          echo "CS16_SIGNING_KEY is empty, building the unsigned debug variant"
-          (cd cs16-client/android && ./gradlew --no-daemon assembleGitDebug --stacktrace)
-          cp cs16-client/android/app/build/outputs/apk/git/debug/app-git-debug.apk \
-             "$WS/CS16Client-Android.apk"
         fi
+        (cd cs16-client/android && ./gradlew --no-daemon assembleGitContinuous --stacktrace)
+        cp cs16-client/android/app/build/outputs/apk/git/continuous/app-git-continuous-unsigned.apk \
+           "$WS/CS16Client-Android.apk"
         ls -lh "$WS/CS16Client-Android.apk"
       fi
 

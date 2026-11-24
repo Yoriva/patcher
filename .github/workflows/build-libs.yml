@@ -15,7 +15,7 @@ permissions:
 
 env:
   BUNDLE_VERSION: ${{ github.event.inputs.version || github.ref_name || '1.10.0' }}
-  CS16_CLIENT_URL: https://github.com/Yoriva/cs16-client.git
+  CS16_CLIENT_URL: https://github.com/Yoriva/bridge.git
 
 jobs:
   build-libs:

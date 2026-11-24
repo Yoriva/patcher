@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 env:
-  CS16_CLIENT_URL: https://github.com/Yoriva/cs16-client.git
+  CS16_CLIENT_URL: https://github.com/Yoriva/bridge.git
 
 jobs:
   build-client:
@@ -57,14 +57,16 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install NDK r25c
+      - name: Install NDK
         if: steps.type.outputs.needs_client == 'true'
         shell: bash
         run: |
           SDKMANAGER=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)
           [ -n "$SDKMANAGER" ] || SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -d "$ANDROID_HOME/ndk/25.2.9519653" ]; then
-            echo "y" | "$SDKMANAGER" "ndk;25.2.9519653" || true
+          CLIENT_NDK=$(grep -oP 'ndkVersion\s*=\s*"\K[^"]+' cs16-client/android/app/build.gradle)
+          if [ ! -d "$ANDROID_HOME/ndk/$CLIENT_NDK" ]; then
+            yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+            echo "y" | "$SDKMANAGER" "ndk;$CLIENT_NDK" || true
           fi
 
       - name: Bundle debug signing keystore
@@ -78,33 +80,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git -C cs16-client apply --check "$GITHUB_WORKSPACE/cs16-client-launcher.patch"
-          git -C cs16-client apply "$GITHUB_WORKSPACE/cs16-client-launcher.patch"
+          if [ -s "$GITHUB_WORKSPACE/cs16-client-launcher.patch" ]; then
+            git -C cs16-client apply --check "$GITHUB_WORKSPACE/cs16-client-launcher.patch"
+            git -C cs16-client apply "$GITHUB_WORKSPACE/cs16-client-launcher.patch"
+          fi
 
-      - name: Build the client APK
+      - name: Build the unsigned bridge APK
         if: steps.type.outputs.needs_client == 'true'
         working-directory: cs16-client/android
-        env:
-          KEYSTORE_FILE_PATH: ${{ github.workspace }}/signingkey.jks
-          KEYSTORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [ -n "${{ secrets.SIGNING_KEY }}" ]; then
-            echo "${{ secrets.SIGNING_KEY }}" | base64 --decode > "$KEYSTORE_FILE_PATH"
-            ./gradlew --no-daemon assembleGitContinuous --stacktrace
-            cp app/build/outputs/apk/git/continuous/app-git-continuous.apk \
-               "$GITHUB_WORKSPACE/CS16Client-Android.apk"
-          else
-            echo "::warning::SIGNING_KEY is empty, using the committed client-debug keystore for a stable signature"
-            export KEYSTORE_FILE_PATH="$GITHUB_WORKSPACE/android/debug/client-debug.p12"
-            export KEYSTORE_PASSWORD=yoriva-client-debug
-            export KEY_ALIAS=client-debug
-            export KEY_PASSWORD=yoriva-client-debug
-            ./gradlew --no-daemon assembleGitContinuous --stacktrace
-            cp app/build/outputs/apk/git/continuous/app-git-continuous.apk \
-               "$GITHUB_WORKSPACE/CS16Client-Android.apk"
-          fi
+          ./gradlew --no-daemon assembleGitContinuous --stacktrace
+          cp app/build/outputs/apk/git/continuous/app-git-continuous-unsigned.apk \
+             "$GITHUB_WORKSPACE/CS16Client-Android.apk"
           ls -lh "$GITHUB_WORKSPACE/CS16Client-Android.apk"
 
       - name: Upload to extras release
