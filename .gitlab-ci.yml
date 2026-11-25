@@ -293,6 +293,10 @@ with open(path, 'w', encoding='utf-8') as f:
 print('disabled zbot auto team-balance kicks:', path)
 PY
         NDKBIN="$(echo "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin)"
+        if [ ! -d "$WS/addons" ]; then
+          gh release download assets --repo "$GH_REPO" --pattern 'amxx-addons.zip' --dir /tmp --clobber 2>/dev/null || true
+          [ -f /tmp/amxx-addons.zip ] && unzip -qo /tmp/amxx-addons.zip -d "$WS" || true
+        fi
         TPL="$WS/addons/amxmodx/data/gamedata/common.games/custom/offsets-cstrike-replugged.arm64.txt"
         for ABI in arm64-v8a armeabi-v7a; do
           case "$ABI" in
@@ -393,7 +397,9 @@ PY
         fi
 
         cd "$WS"
-        zip -r amxx-addons.zip addons/ -x '*.gitignore' '*.git/*'
+        if [ -d "$WS/addons" ]; then
+          zip -r amxx-addons.zip addons/ -x '*.gitignore' '*.git/*'
+        fi
 
         ASSETS_DIR="$WS/cs16-client/3rdparty/cs16client-extras"
         if [ ! -d "$ASSETS_DIR" ]; then
@@ -505,9 +511,11 @@ PY
           if ! gh release view assets >/dev/null 2>&1; then
             gh release create assets --title "Assets" --prerelease --notes "Native libs, manifests, compiler, addons, game assets and bridge APK."
           fi
+          EXTRA_ZIPS=(game-assets.zip)
+          [ -f amxx-addons.zip ] && EXTRA_ZIPS+=(amxx-addons.zip)
           gh release upload assets --clobber manifest.json manifest-v7a.json build-meta.json \
             incremental/arm64-v8a/*.so incremental-v7a/armeabi-v7a/*.so \
-            compiler-assets/* amxx-addons.zip game-assets.zip 2>/dev/null || true
+            compiler-assets/* "${EXTRA_ZIPS[@]}" 2>/dev/null || true
         fi
 
         BODY="Yoriva Continuous build ${APP_VERSION_NAME:-}
