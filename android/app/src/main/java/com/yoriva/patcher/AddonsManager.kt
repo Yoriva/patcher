@@ -90,6 +90,11 @@ class AddonsManager(
         }
     }
 
+    fun refreshInstalled() {
+        _installPath.value = gameDirFor(defaultGameId)
+        _installed.value = isInstalledOnDisk()
+    }
+
     fun reset() {
         _addons.value = AddonsState.None
         _installed.value = isInstalledOnDisk()

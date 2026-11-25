@@ -228,6 +228,7 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
         scanLibs(autoLoad = true)
     }
     val addons: StateFlow<AddonsState> get() = addonsManager.addons
+    fun installAddons() = addonsManager.fetchAndInstallAddons()
     data class AbiStatus(
         val abi: String,
         val inSource: Boolean,
@@ -292,6 +293,7 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
         _clientInstalled.value = EngineProbe.isClientInstalled(getApplication())
         _gameInstalled.value = EngineProbe.isGameInstalled(getApplication()) && EngineProbe.gameDataPresent(getApplication())
         _cstrikeReady.value = EngineProbe.cstrikePresent(getApplication())
+        addonsManager.refreshInstalled()
         refreshCleanupAvailability()
     }
     private val bundleManager: BundleManager by lazy {

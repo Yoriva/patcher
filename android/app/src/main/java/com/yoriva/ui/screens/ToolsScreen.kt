@@ -6,7 +6,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,12 +29,18 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -42,7 +50,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -56,6 +66,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -63,6 +75,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.yoriva.patcher.AddonsState
 import com.yoriva.patcher.CompileState
 import com.yoriva.patcher.PatcherViewModel
 import com.yoriva.patcher.SmaSource
@@ -73,18 +86,37 @@ fun ToolsScreen(
     onGoToPatch: () -> Unit = {},
     onOpenPluginConfig: () -> Unit = {},
 ) {
-    if (!gameInstalled) {
-        LockedScreen(
-            title = "Patch it first",
-            description = "Patch and install the game to use the tools.",
-            ctaLabel = "Open Patch screen",
-            onCta = onGoToPatch,
-        )
-        return
-    }
     val scripts by vm.scripts.collectAsState()
     val compile by vm.compile.collectAsState()
     val scriptRoot by vm.scriptRoot.collectAsState()
+    val cstrikeReady by vm.cstrikeReady.collectAsState()
+    val addonsInstalled by vm.addonsInstalled.collectAsState()
+    val addonsState by vm.addons.collectAsState()
+    val engineInstalled by vm.engineInstalled.collectAsState()
+    val clientInstalled by vm.clientInstalled.collectAsState()
+    val toolsReady = (cstrikeReady && addonsInstalled) || scriptRoot != null
+
+    LaunchedEffect(Unit) {
+        vm.refreshGameInstalled()
+    }
+
+    if (!toolsReady) {
+        ToolsSetupGuide(
+            cstrikeReady = cstrikeReady,
+            addonsInstalled = addonsInstalled,
+            addonsState = addonsState,
+            engineInstalled = engineInstalled,
+            clientInstalled = clientInstalled,
+            onInstallAddons = { vm.installAddons() },
+            onRefresh = {
+                vm.refreshGameInstalled()
+                vm.refreshScripts()
+            },
+            onGoToPatch = onGoToPatch,
+        )
+        return
+    }
+
     var selected by remember { mutableStateOf(setOf<String>()) }
     var stampError by remember { mutableStateOf<Pair<String, String>?>(null) }
     val selectedSources = scripts.filter { it.path in selected }
@@ -112,6 +144,50 @@ fun ToolsScreen(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        if (!gameInstalled || !engineInstalled || !clientInstalled) {
+            item {
+                val missingText = when {
+                    !engineInstalled && !clientInstalled -> "Xash3D engine and patched client aren't installed yet."
+                    !engineInstalled -> "Xash3D engine isn't installed yet."
+                    else -> "Patched client isn't installed yet."
+                }
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Client setup incomplete",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = "$missingText Tools still work on your cstrike folder.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        FilledTonalButton(
+                            onClick = onGoToPatch,
+                            shape = CircleShape,
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                        ) {
+                            Text("Patch")
+                        }
+                    }
+                }
+            }
+        }
         item {
             GroupedItem(
                 title = "Config Editor",
@@ -552,5 +628,251 @@ private fun LogBox(text: String, error: Boolean = false) {
                 .verticalScroll(scrollState)
                 .padding(12.dp),
         )
+    }
+}
+
+@Composable
+private fun ToolsSetupGuide(
+    cstrikeReady: Boolean,
+    addonsInstalled: Boolean,
+    addonsState: AddonsState,
+    engineInstalled: Boolean,
+    clientInstalled: Boolean,
+    onInstallAddons: () -> Unit,
+    onRefresh: () -> Unit,
+    onGoToPatch: () -> Unit,
+) {
+    val downloading = addonsState as? AddonsState.Downloading
+    val addonError = (addonsState as? AddonsState.Error)?.message
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text(
+            text = if (!cstrikeReady) "Set up game folder" else "Install addons to use Tools",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
+        Text(
+            text = if (!cstrikeReady) {
+                "Tools edit AMX Mod X / YapB configs and compile .sma scripts directly inside your cstrike folder."
+            } else {
+                "Your cstrike folder is ready. Download AMX Mod X & YapB addons to unlock the Config Editor and Plugin Compiler."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        if (!addonError.isNullOrBlank()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                ),
+            ) {
+                Text(
+                    text = addonError,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(16.dp),
+                )
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            ToolsCheckRow(
+                icon = Icons.Filled.Folder,
+                title = "Game folder (cstrike)",
+                subtitle = if (cstrikeReady) "Detected on storage" else "Put cstrike in storage (.xash or xash)",
+                done = cstrikeReady,
+                index = 0,
+                total = 3,
+            )
+            ToolsCheckRow(
+                icon = Icons.Filled.Download,
+                title = "AMX Mod X & YapB addons",
+                subtitle = when {
+                    addonsInstalled -> "Installed"
+                    downloading != null -> downloading.step
+                    cstrikeReady -> "Required for Config Editor & Compiler"
+                    else -> "Waiting for cstrike folder"
+                },
+                done = addonsInstalled,
+                progress = downloading?.percent,
+                index = 1,
+                total = 3,
+                trailing = if (cstrikeReady && !addonsInstalled && downloading == null) {
+                    {
+                        FilledTonalButton(
+                            onClick = onInstallAddons,
+                            shape = CircleShape,
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                        ) {
+                            Text("Install")
+                        }
+                    }
+                } else null,
+            )
+            ToolsCheckRow(
+                icon = Icons.Filled.RocketLaunch,
+                title = "Engine & patched client",
+                subtitle = when {
+                    engineInstalled && clientInstalled -> "Ready to launch"
+                    !engineInstalled && !clientInstalled -> "Optional for editing · install from Patch tab"
+                    !engineInstalled -> "Xash3D engine missing · optional for Tools"
+                    else -> "Patched client missing · optional for Tools"
+                },
+                done = engineInstalled && clientInstalled,
+                index = 2,
+                total = 3,
+            )
+        }
+
+        Spacer(Modifier.height(4.dp))
+
+        if (cstrikeReady && !addonsInstalled) {
+            Button(
+                onClick = onInstallAddons,
+                enabled = downloading == null,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp),
+                shape = CircleShape,
+            ) {
+                Text(
+                    text = if (downloading != null) "Installing addons…" else "Install Addons",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            OutlinedButton(
+                onClick = onGoToPatch,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp),
+                shape = CircleShape,
+            ) {
+                Text("Go to Patch")
+            }
+        } else {
+            Button(
+                onClick = onGoToPatch,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp),
+                shape = CircleShape,
+            ) {
+                Text(
+                    text = "Go to Patch",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            OutlinedButton(
+                onClick = onRefresh,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp),
+                shape = CircleShape,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Check Folder Again")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToolsCheckRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    done: Boolean,
+    index: Int,
+    total: Int,
+    progress: Float? = null,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = getGroupedItemShape(index, total),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (done) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            },
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = if (done) Icons.Filled.CheckCircle else icon,
+                        contentDescription = null,
+                        tint = if (done) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSecondaryContainer
+                        },
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (trailing != null) {
+                    Spacer(Modifier.width(10.dp))
+                    trailing()
+                }
+            }
+            if (progress != null) {
+                Spacer(Modifier.height(10.dp))
+                LinearProgressIndicator(
+                    progress = { progress.coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(CircleShape),
+                )
+            }
+        }
     }
 }
