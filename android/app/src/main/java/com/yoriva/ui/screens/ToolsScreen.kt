@@ -5,7 +5,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -69,7 +68,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -140,186 +138,142 @@ fun ToolsScreen(
         val available = scripts.mapTo(HashSet()) { it.path }
         selected = selected.intersect(available)
     }
-    val config = LocalConfiguration.current
-    val isWide = config.screenWidthDp >= 720
-    val logMaxHeight = (config.screenHeightDp * 0.26f).dp.coerceIn(96.dp, 220.dp)
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        LazyColumn(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            if (!gameInstalled || !engineInstalled || !clientInstalled) {
-                item(key = "incomplete_banner") {
-                    val missingText = when {
-                        !engineInstalled && !clientInstalled -> "Xash3D engine and patched client aren't installed yet."
-                        !engineInstalled -> "Xash3D engine isn't installed yet."
-                        else -> "Patched client isn't installed yet."
-                    }
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 10.dp),
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Client setup incomplete",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                                Spacer(Modifier.height(2.dp))
-                                Text(
-                                    text = "$missingText Tools still work on your cstrike folder.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
-                                )
-                            }
-                            Spacer(Modifier.width(12.dp))
-                            FilledTonalButton(
-                                onClick = onGoToPatch,
-                                shape = CircleShape,
-                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
-                            ) {
-                                Text("Patch")
-                            }
-                        }
-                    }
-                }
-            }
-            item(key = "config_editor") {
-                Box(modifier = Modifier.padding(bottom = 10.dp)) {
-                    GroupedItem(
-                        title = "Config Editor",
-                        subtitle = "Edit AMX Mod X and YapB config files",
-                        index = 0,
-                        total = 1,
-                        trailing = {
-                            SmallButton(
-                                text = "Edit",
-                                icon = Icons.Filled.Edit,
-                                onClick = onOpenPluginConfig,
-                            )
-                        },
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        item(key = "config_editor") {
+            GroupedItem(
+                title = "Config Editor",
+                subtitle = "Edit AMX Mod X and YapB config files",
+                index = 0,
+                total = 1,
+                trailing = {
+                    SmallButton(
+                        text = "Edit",
+                        icon = Icons.Filled.Edit,
+                        onClick = onOpenPluginConfig,
                     )
-                }
-            }
-            item(key = "plugins_folder") {
-                Box(modifier = Modifier.padding(bottom = 10.dp)) {
-                    GroupedItem(
-                        title = if (scriptRoot != null) "Plugins folder found" else "Plugins folder",
-                        subtitle = scriptRoot ?: "Searching for the game folder…",
-                        index = 0,
-                        total = 1,
-                    )
-                }
-            }
-            item(key = "plugins_header") {
-                PluginsHeaderRow(
-                    scriptCount = scripts.size,
-                    selectedCount = selected.size,
-                    onSelectAll = {
-                        selected = if (selected.size != scripts.size) {
-                            scripts.map { it.path }.toSet()
-                        } else {
-                            emptySet()
-                        }
-                    },
-                    onAddPlugin = { pickPlugin() },
-                    modifier = Modifier.padding(bottom = 6.dp),
+                },
+            )
+            Spacer(Modifier.height(20.dp))
+        }
+        item(key = "plugins_folder") {
+            GroupedItem(
+                title = if (scriptRoot != null) "Plugins folder found" else "Plugins folder",
+                subtitle = scriptRoot ?: "Searching for the game folder…",
+                index = 0,
+                total = 1,
+            )
+            Spacer(Modifier.height(20.dp))
+        }
+        item(key = "plugins_header") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 8.dp, end = 4.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Plugins",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f),
                 )
-            }
-            when {
-                scriptRoot == null -> item(key = "retry_folder") {
-                    RetryCard(
-                        text = "Game folder not detected yet. Install addons first, then tap Retry.",
-                        onRetry = { vm.refreshScripts() },
-                    )
-                }
-                scripts.isEmpty() -> item(key = "retry_empty") {
-                    RetryCard(
-                        text = "No .sma plugin sources found in the detected folder.",
-                        onRetry = { vm.refreshScripts() },
-                    )
-                }
-                isWide -> {
-                    val rows = scripts.chunked(2)
-                    items(rows.size, key = { idx -> rows[idx].first().path }) { rowIdx ->
-                        val pair = rows[rowIdx]
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = if (rowIdx < rows.lastIndex) 6.dp else 0.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            pair.forEach { source ->
-                                ScriptRow(
-                                    source = source,
-                                    selected = source.path in selected,
-                                    error = failures[source.path],
-                                    shape = RoundedCornerShape(16.dp),
-                                    onClick = {
-                                        selected = if (source.path in selected) selected - source.path else selected + source.path
-                                    },
-                                    onErrorClick = { message -> stampError = source.path to message },
-                                    modifier = Modifier.weight(1f),
-                                )
-                            }
-                            if (pair.size == 1) {
-                                Spacer(modifier = Modifier.weight(1f))
-                            }
-                        }
+                FilledTonalButton(
+                    onClick = { pickPlugin() },
+                    modifier = Modifier.height(38.dp),
+                    shape = RoundedCornerShape(percent = 50),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    ),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "Add",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
                     }
                 }
-                else -> {
-                    itemsIndexed(scripts, key = { _, s -> s.path }) { index, source ->
-                        ScriptRow(
-                            source = source,
-                            selected = source.path in selected,
-                            error = failures[source.path],
-                            shape = getGroupedItemShape(index, scripts.size),
-                            onClick = {
-                                selected = if (source.path in selected) selected - source.path else selected + source.path
-                            },
-                            onErrorClick = { message -> stampError = source.path to message },
+                if (scripts.isNotEmpty()) {
+                    Spacer(Modifier.width(6.dp))
+                    FilledTonalButton(
+                        onClick = {
+                            selected = if (selected.size != scripts.size) {
+                                scripts.map { it.path }.toSet()
+                            } else {
+                                emptySet()
+                            }
+                        },
+                        modifier = Modifier.height(38.dp),
+                        shape = RoundedCornerShape(percent = 50),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                        colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        ),
+                    ) {
+                        Text(
+                            text = if (selected.size == scripts.size) "Clear" else "Select all",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
                         )
                     }
                 }
             }
-            item(key = "bottom_pad") { Spacer(Modifier.height(8.dp)) }
         }
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.background,
-            tonalElevation = 2.dp,
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-            ) {
-                BuildSection(
-                    compile = compile,
-                    scriptRoot = scriptRoot,
-                    scriptCount = scripts.size,
-                    selectedSources = selectedSources,
-                    logMaxHeight = logMaxHeight,
-                    onCompile = { vm.compileAll(selectedSources) },
+        when {
+            scriptRoot == null -> item(key = "retry_folder") {
+                RetryCard(
+                    text = "Game folder not detected yet. Install addons first, then tap Retry.",
+                    onRetry = { vm.refreshScripts() },
                 )
             }
+            scripts.isEmpty() -> item(key = "retry_empty") {
+                RetryCard(
+                    text = "No .sma plugin sources found in the detected folder.",
+                    onRetry = { vm.refreshScripts() },
+                )
+            }
+            else -> itemsIndexed(scripts, key = { _, s -> s.path }) { index, source ->
+                ScriptRow(
+                    source = source,
+                    selected = source.path in selected,
+                    error = failures[source.path],
+                    index = index,
+                    total = scripts.size,
+                    onClick = {
+                        selected = if (source.path in selected) selected - source.path else selected + source.path
+                    },
+                    onErrorClick = { message -> stampError = source.path to message },
+                )
+                if (index < scripts.lastIndex) {
+                    Spacer(Modifier.height(2.dp))
+                }
+            }
         }
+        item(key = "build_section") {
+            Spacer(Modifier.height(20.dp))
+            BuildSection(
+                compile = compile,
+                scriptRoot = scriptRoot,
+                scriptCount = scripts.size,
+                selectedSources = selectedSources,
+                onCompile = { vm.compileAll(selectedSources) },
+            )
+        }
+        item(key = "bottom_pad") { Spacer(Modifier.height(16.dp)) }
     }
     stampError?.let { (name, message) ->
         ErrorDialog(
@@ -330,120 +284,28 @@ fun ToolsScreen(
     }
 }
 @Composable
-private fun PluginsHeaderRow(
-    scriptCount: Int,
-    selectedCount: Int,
-    onSelectAll: () -> Unit,
-    onAddPlugin: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(start = 8.dp, end = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Row(
-            modifier = Modifier.weight(1f),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = "Plugins",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            if (scriptCount > 0) {
-                Surface(
-                    shape = CircleShape,
-                    color = if (selectedCount > 0) {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.surfaceContainerHigh
-                    },
-                ) {
-                    Text(
-                        text = if (selectedCount > 0) "$selectedCount / $scriptCount" else "$scriptCount",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = if (selectedCount > 0) {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                    )
-                }
-            }
-        }
-        FilledTonalButton(
-            onClick = onAddPlugin,
-            modifier = Modifier.height(36.dp),
-            shape = CircleShape,
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-            colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            ),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Filled.Add,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = "Add",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-        }
-        if (scriptCount > 0) {
-            Spacer(Modifier.width(6.dp))
-            FilledTonalButton(
-                onClick = onSelectAll,
-                modifier = Modifier.height(36.dp),
-                shape = CircleShape,
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                ),
-            ) {
-                Text(
-                    text = if (selectedCount == scriptCount) "Clear" else "Select all",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-        }
-    }
-}
-@Composable
 private fun ScriptRow(
     source: SmaSource,
     selected: Boolean,
     error: String?,
-    shape: RoundedCornerShape,
+    index: Int,
+    total: Int,
     onClick: () -> Unit,
     onErrorClick: (String) -> Unit,
-    modifier: Modifier = Modifier,
 ) {
-    val container = when {
-        error != null -> MaterialTheme.colorScheme.errorContainer
-        selected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-        else -> MaterialTheme.colorScheme.surfaceContainer
+    val container = if (error != null) {
+        MaterialTheme.colorScheme.errorContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainer
     }
-    val titleColor = when {
-        error != null -> MaterialTheme.colorScheme.onErrorContainer
-        selected -> MaterialTheme.colorScheme.onPrimaryContainer
-        else -> MaterialTheme.colorScheme.onSurface
+    val titleColor = if (error != null) {
+        MaterialTheme.colorScheme.onErrorContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
     }
+    val shape = getGroupedItemShape(index, total)
     Card(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
             .clickable(onClick = onClick),
@@ -512,7 +374,6 @@ private fun BuildSection(
     scriptRoot: String?,
     scriptCount: Int,
     selectedSources: List<SmaSource>,
-    logMaxHeight: androidx.compose.ui.unit.Dp,
     onCompile: () -> Unit,
 ) {
     val compiling = compile as? CompileState.Compiling
@@ -576,7 +437,7 @@ private fun BuildSection(
                 Box(
                     modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 14.dp),
                 ) {
-                    LogBox(text = logText, error = failures.isNotEmpty(), maxHeight = logMaxHeight)
+                    LogBox(text = logText, error = failures.isNotEmpty())
                 }
             }
         }
