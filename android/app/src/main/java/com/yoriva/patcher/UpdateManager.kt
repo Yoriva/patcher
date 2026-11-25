@@ -82,6 +82,15 @@ class UpdateManager(
     )
     val lastCheckedAtMillis: StateFlow<Long> = _lastCheckedAtMillis.asStateFlow()
 
+    private val _recentCommits = MutableStateFlow<List<ReleaseRepository.CommitDetails>>(emptyList())
+    val recentCommits: StateFlow<List<ReleaseRepository.CommitDetails>> = _recentCommits.asStateFlow()
+
+    private val _commitsLoading = MutableStateFlow(false)
+    val commitsLoading: StateFlow<Boolean> = _commitsLoading.asStateFlow()
+
+    @Volatile
+    private var commitsJob: Job? = null
+
     val currentVersionName: String
         get() = installedVersion() ?: "unknown"
 
@@ -206,6 +215,7 @@ class UpdateManager(
                     )
                     lastAvailable = available
                     _appUpdate.value = available
+                    loadRecentCommits(force = true)
                 } else {
                     clearMandatoryUpdate()
                     lastAvailable = null
@@ -224,6 +234,22 @@ class UpdateManager(
                 } else {
                     AppUpdate.Idle
                 }
+            }
+        }
+    }
+
+    fun loadRecentCommits(force: Boolean = false) {
+        if (commitsJob?.isActive == true) return
+        if (!force && _recentCommits.value.isNotEmpty()) return
+        commitsJob = scope.launch(Dispatchers.IO) {
+            _commitsLoading.value = true
+            try {
+                val list = ReleaseRepository.fetchRecentCommits(PatcherViewModel.APP_RELEASE_REPO)
+                if (list.isNotEmpty()) {
+                    _recentCommits.value = list
+                }
+            } finally {
+                _commitsLoading.value = false
             }
         }
     }

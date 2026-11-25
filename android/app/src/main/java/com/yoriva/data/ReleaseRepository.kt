@@ -1,8 +1,12 @@
 package com.yoriva.data
+import android.text.Html
+import android.util.Xml
 import okhttp3.CacheControl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONArray
 import org.json.JSONObject
+import org.xmlpull.v1.XmlPullParser
 import java.io.File
 import java.io.IOException
 import java.net.URLEncoder
@@ -89,6 +93,126 @@ object ReleaseRepository {
                 authoredAtMillis = parseIsoDate(author?.optString("date").orEmpty()),
             )
         }.getOrNull()
+    }
+    suspend fun fetchRecentCommits(repo: String, branch: String = "main", limit: Int = 15): List<CommitDetails> {
+        val encodedBranch = URLEncoder.encode(branch, "UTF-8")
+        val apiUrl = "https://api.github.com/repos/$repo/commits?sha=$encodedBranch&per_page=$limit"
+        val apiBody = fetchText(apiUrl)
+        if (!apiBody.isNullOrBlank() && apiBody.trimStart().startsWith("[")) {
+            val parsed = runCatching {
+                val arr = JSONArray(apiBody)
+                buildList {
+                    for (i in 0 until arr.length()) {
+                        val item = arr.optJSONObject(i) ?: continue
+                        val sha = item.optString("sha").trim()
+                        if (sha.isBlank()) continue
+                        val commit = item.optJSONObject("commit")
+                        val author = commit?.optJSONObject("author")
+                        val githubAuthor = item.optJSONObject("author")
+                        add(
+                            CommitDetails(
+                                sha = sha,
+                                message = commit?.optString("message").orEmpty().trim(),
+                                authorName = author?.optString("name").orEmpty().trim(),
+                                authorLogin = githubAuthor?.optString("login").orEmpty().trim(),
+                                authoredAtMillis = parseIsoDate(author?.optString("date").orEmpty()),
+                            ),
+                        )
+                    }
+                }
+            }.getOrNull()
+            if (!parsed.isNullOrEmpty()) return parsed
+        }
+        return fetchRecentCommitsFromAtom(repo, branch, limit)
+    }
+
+    private suspend fun fetchRecentCommitsFromAtom(
+        repo: String,
+        branch: String,
+        limit: Int,
+    ): List<CommitDetails> {
+        val atomUrl = "https://github.com/$repo/commits/$branch.atom?t=${System.currentTimeMillis()}"
+        val xml = fetchText(atomUrl) ?: return emptyList()
+        return runCatching {
+            val parser = Xml.newPullParser()
+            parser.setInput(xml.reader())
+            val out = mutableListOf<CommitDetails>()
+            var inEntry = false
+            var inAuthor = false
+            var sha = ""
+            var title = ""
+            var contentHtml = ""
+            var updated = ""
+            var authorName = ""
+            var authorUri = ""
+            var currentTag = ""
+
+            var event = parser.eventType
+            while (event != XmlPullParser.END_DOCUMENT) {
+                when (event) {
+                    XmlPullParser.START_TAG -> {
+                        currentTag = parser.name.orEmpty()
+                        when (currentTag) {
+                            "entry" -> {
+                                inEntry = true
+                                inAuthor = false
+                                sha = ""
+                                title = ""
+                                contentHtml = ""
+                                updated = ""
+                                authorName = ""
+                                authorUri = ""
+                            }
+                            "author" -> if (inEntry) inAuthor = true
+                        }
+                    }
+                    XmlPullParser.TEXT -> {
+                        val txt = parser.text.orEmpty()
+                        if (inEntry) {
+                            when (currentTag) {
+                                "id" -> if (sha.isBlank()) sha = txt.substringAfterLast('/').trim()
+                                "title" -> title += txt
+                                "updated" -> updated += txt
+                                "content" -> contentHtml += txt
+                                "name" -> if (inAuthor) authorName += txt
+                                "uri" -> if (inAuthor) authorUri += txt
+                            }
+                        }
+                    }
+                    XmlPullParser.END_TAG -> {
+                        val endTag = parser.name.orEmpty()
+                        if (endTag == "author") {
+                            inAuthor = false
+                        } else if (endTag == "entry" && inEntry) {
+                            inEntry = false
+                            val decoded = if (contentHtml.isNotBlank()) {
+                                Html.fromHtml(contentHtml, Html.FROM_HTML_MODE_LEGACY)
+                                    .toString()
+                                    .trim()
+                            } else {
+                                title.trim()
+                            }
+                            val login = authorUri.trim().substringAfterLast('/').takeIf {
+                                authorUri.contains("github.com/") && it.isNotBlank()
+                            } ?: ""
+                            if (sha.isNotBlank()) {
+                                out += CommitDetails(
+                                    sha = sha,
+                                    message = decoded.ifBlank { title.trim() },
+                                    authorName = authorName.trim(),
+                                    authorLogin = login,
+                                    authoredAtMillis = parseIsoDate(updated.trim()),
+                                )
+                            }
+                            if (out.size >= limit) break
+                        }
+                        currentTag = ""
+                    }
+                }
+                event = parser.next()
+            }
+            out
+        }.getOrDefault(emptyList())
     }
     private fun parseIsoDate(raw: String): Long = try {
         val cleaned = raw.replace(Regex("\\.\\d+Z$"), "Z")

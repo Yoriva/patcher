@@ -611,9 +611,12 @@ private fun externalRoot(app: Application): File {
     }
     val appUpdate: StateFlow<AppUpdate> get() = updateManager.appUpdate
     val lastAppUpdateCheckAtMillis: StateFlow<Long> get() = updateManager.lastCheckedAtMillis
+    val recentCommits: StateFlow<List<com.yoriva.data.ReleaseRepository.CommitDetails>> get() = updateManager.recentCommits
+    val commitsLoading: StateFlow<Boolean> get() = updateManager.commitsLoading
     val installedAppVersion: String get() = updateManager.currentVersionName
     val installedAppSizeBytes: Long get() = updateManager.currentApkSizeBytes
     fun checkAppUpdate(manual: Boolean = true) = updateManager.checkAppUpdate(manual)
+    fun loadRecentCommits(force: Boolean = false) = updateManager.loadRecentCommits(force)
     fun onResumeAppUpdate() = updateManager.onAppResumed()
     fun downloadAppUpdate() = updateManager.downloadAppUpdate()
     fun installAppUpdate(file: File) = updateManager.installAppUpdate(file)

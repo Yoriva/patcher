@@ -46,6 +46,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -61,6 +62,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil.compose.SubcomposeAsyncImage
+import com.yoriva.data.ReleaseRepository
 import com.yoriva.patcher.AppUpdate
 import com.yoriva.patcher.PatcherViewModel
 import java.text.DateFormat
@@ -77,8 +79,14 @@ fun UpdatesScreen(
 ) {
     val state by vm.appUpdate.collectAsState()
     val lastCheckedAt by vm.lastAppUpdateCheckAtMillis.collectAsState()
+    val recentCommits by vm.recentCommits.collectAsState()
+    val commitsLoading by vm.commitsLoading.collectAsState()
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
+
+    LaunchedEffect(Unit) {
+        vm.loadRecentCommits()
+    }
 
     if (mandatory) {
         BackHandler(enabled = true) {}
@@ -157,6 +165,7 @@ fun UpdatesScreen(
                 onRefresh = {
                     if (canPullToRefresh) {
                         vm.checkAppUpdate(manual = true)
+                        vm.loadRecentCommits(force = true)
                     }
                 },
                 modifier = Modifier
@@ -415,6 +424,71 @@ fun UpdatesScreen(
                         }
                     }
 
+                    if (recentCommits.isNotEmpty() || commitsLoading) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "Recent commits",
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            if (commitsLoading && recentCommits.isNotEmpty()) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            }
+                        }
+
+                        if (recentCommits.isEmpty() && commitsLoading) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(20.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                ),
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                    Text(
+                                        text = "Loading recent commits…",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                recentCommits.forEachIndexed { index, commit ->
+                                    CommitHistoryRow(
+                                        commit = commit,
+                                        index = index,
+                                        total = recentCommits.size,
+                                        isLatestBadge = index == 0,
+                                        onClick = {
+                                            uriHandler.openUri(
+                                                "https://github.com/${PatcherViewModel.APP_RELEASE_REPO}/commit/${commit.sha}",
+                                            )
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(8.dp))
                 }
             }
@@ -606,6 +680,96 @@ private fun UpdateInfoTile(
             ),
             color = contentColor,
         )
+    }
+}
+
+@Composable
+private fun CommitHistoryRow(
+    commit: ReleaseRepository.CommitDetails,
+    index: Int,
+    total: Int,
+    isLatestBadge: Boolean,
+    onClick: () -> Unit,
+) {
+    val lines = commit.message.trim().lines()
+    val subject = lines.firstOrNull().orEmpty().ifBlank { commit.sha.take(7) }
+    val body = lines.drop(1).joinToString("\n").trim()
+    val authorDisplay = commit.authorName.ifBlank { commit.authorLogin.ifBlank { "Yoriva" } }
+    val timeLabel = formatUpdateTimestamp(commit.authoredAtMillis)
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(getGroupedItemShape(index, total))
+            .clickable(onClick = onClick),
+        shape = getGroupedItemShape(index, total),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = if (isLatestBadge) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    },
+                ) {
+                    Text(
+                        text = commit.sha.take(7),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                        ),
+                        color = if (isLatestBadge) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSecondaryContainer
+                        },
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    )
+                }
+                val meta = buildString {
+                    append(authorDisplay)
+                    if (timeLabel.isNotBlank()) append(" · $timeLabel")
+                }
+                Text(
+                    text = meta,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+            Text(
+                text = subject,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            if (body.isNotBlank()) {
+                Text(
+                    text = body.take(400),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 
