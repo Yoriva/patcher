@@ -307,6 +307,7 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     val libsError: StateFlow<String?> get() = bundleManager.libsError
     val pluginsDownloading: StateFlow<Boolean> get() = bundleManager.pluginsDownloading
     val coreOutdatedCount: StateFlow<Int> get() = bundleManager.coreOutdatedCount
+    val coreMissingCount: StateFlow<Int> get() = bundleManager.coreMissingCount
     val gameAssetsOutdated: StateFlow<Boolean> get() = patchManager.gameAssetsOutdated
     fun dismissLibsError() = bundleManager.dismissLibsError()
     fun refreshLibStatus(force: Boolean = true) = bundleManager.refreshLibStatus(force)

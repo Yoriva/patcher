@@ -124,6 +124,8 @@ class BundleManager(
         _customLibs.value = emptyList()
         _customLibProblem.value = null
         autoExcluded = emptySet()
+        _coreOutdatedCount.value = 0
+        _coreMissingCount.value = 0
         applyExclusions()
     }
 
@@ -245,9 +247,7 @@ class BundleManager(
                         if (loadedBundle != null && localFiles.isNotEmpty()) rebuildLoadedBundleFiles()
                     }
                     if (coreChecked) {
-                        _coreOutdatedCount.value = _libs.value.count {
-                            it.source == LibSource.CORE && !it.upToDate && it.releaseSize > 0
-                        }
+                        recomputeCoreCounts()
                     }
                 }
             }
@@ -313,6 +313,19 @@ class BundleManager(
 
     private val _coreOutdatedCount = MutableStateFlow(0)
     val coreOutdatedCount: StateFlow<Int> = _coreOutdatedCount.asStateFlow()
+
+    private val _coreMissingCount = MutableStateFlow(0)
+    val coreMissingCount: StateFlow<Int> = _coreMissingCount.asStateFlow()
+
+    private fun recomputeCoreCounts() {
+        val list = _libs.value
+        _coreOutdatedCount.value = list.count {
+            it.source == LibSource.CORE && it.localSize > 0L && !it.upToDate && it.releaseSize > 0L
+        }
+        _coreMissingCount.value = list.count {
+            it.source == LibSource.CORE && it.localSize == 0L && it.releaseSize > 0L
+        }
+    }
 
     fun cancelBundleDownload() {
         bundleJob?.cancel()
@@ -464,9 +477,7 @@ class BundleManager(
             }
             enableDownloadedLib(libName)
             rebuildLoadedBundleFiles()
-            _coreOutdatedCount.value = _libs.value.count {
-                it.source == LibSource.CORE && !it.upToDate && it.releaseSize > 0
-            }
+            recomputeCoreCounts()
         } catch (c: CancellationException) {
             _libs.value = _libs.value.map {
                 if (it.name == libName) it.copy(downloading = false, downloadProgress = -1f) else it
@@ -521,6 +532,7 @@ class BundleManager(
                 markBundleTagKnown(tagName)
                 recordAppliedBuilds(abi, coreAssets)
                 _coreOutdatedCount.value = 0
+                _coreMissingCount.value = 0
                 _bundle.value = BundleState.Ready(
                     "Libraries up to date · ${b.manifest.entries.size} files",
                     b.manifest.entries.size,
@@ -580,10 +592,31 @@ class BundleManager(
                         )
                     }
                 },
+                onFileDone = { _, asset, file ->
+                    recordAppliedBuilds(abi, listOf(asset))
+                    val size = file.length()
+                    _libs.value = _libs.value.map { lib ->
+                        if (lib.name == asset.cleanName) {
+                            lib.copy(
+                                localSize = size,
+                                releaseSize = asset.size.takeIf { s -> s > 0 } ?: size,
+                                upToDate = true,
+                                downloading = false,
+                                downloadProgress = -1f,
+                            )
+                        } else lib
+                    }
+                    recomputeCoreCounts()
+                },
                 onProgress = { _, _, bytesWritten ->
                     onByteProgress?.invoke(bytesWritten, diff.totalBytes)
                 },
             )
+            _libs.value = _libs.value.map {
+                if (it.source == LibSource.CORE && it.downloading) {
+                    it.copy(downloading = false, downloadProgress = -1f)
+                } else it
+            }
             clearAutoExcluded(diff.toDownload.map { it.cleanName }.toSet())
             val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, abi, _libExcluded.value)
             if (files.isEmpty()) throw IOException("No .so files found after download")
@@ -598,6 +631,7 @@ class BundleManager(
             loadedBundle = b
             downloadingAbi = null
             _coreOutdatedCount.value = 0
+            _coreMissingCount.value = 0
             scanLibs()
             refreshAbiStatus()
             if (jobStarted) {
@@ -615,6 +649,11 @@ class BundleManager(
             refreshAbiStatus()
             throw c
         } catch (t: Throwable) {
+            _libs.value = _libs.value.map {
+                if (it.source == LibSource.CORE && it.downloading) {
+                    it.copy(downloading = false, downloadProgress = -1f)
+                } else it
+            }
             val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, abi, _libExcluded.value)
             if (files.isNotEmpty() && loadedBundle == null) {
                 val b = buildBundleFromFileMap(files, abi)

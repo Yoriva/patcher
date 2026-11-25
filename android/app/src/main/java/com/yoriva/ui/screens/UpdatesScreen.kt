@@ -51,7 +51,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -561,18 +560,6 @@ private fun UpdatesBottomBar(
                     ) {
                         Text("Allow install permission")
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Button(
-                        onClick = { vm.retryInstallUpdate() },
-                        modifier = buttonModifier,
-                        shape = CircleShape,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            contentColor = MaterialTheme.colorScheme.onSurface,
-                        ),
-                    ) {
-                        Text("Install")
-                    }
                 } else {
                     Button(
                         onClick = { vm.retryInstallUpdate() },
@@ -580,10 +567,6 @@ private fun UpdatesBottomBar(
                         shape = CircleShape,
                     ) {
                         Text("Install")
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    TextButton(onClick = { vm.redownloadAppUpdate() }) {
-                        Text("Re-download APK")
                     }
                 }
             }

@@ -303,6 +303,7 @@ private fun DownloadRow(
     val gameAssetsProgress by vm.gameAssetsProgress.collectAsState()
     val assetsSyncError by vm.assetsSyncError.collectAsState()
     val coreOutdated by vm.coreOutdatedCount.collectAsState()
+    val coreMissing by vm.coreMissingCount.collectAsState()
     val gameAssetsOutdated by vm.gameAssetsOutdated.collectAsState()
     val abi by vm.abi.collectAsState()
     val patchable = abi in vm.patchableAbis
@@ -311,9 +312,9 @@ private fun DownloadRow(
     val isFetching = download is SourceDownloadState.Fetching
     val downloadingBundle = bundleState as? BundleState.Downloading
     val hasClient = source != null
-    val bundleReady = target?.installed == true ||
+    val bundleReady = (target?.installed == true ||
         bundleState is BundleState.Ready ||
-        bundleState is BundleState.Loaded
+        bundleState is BundleState.Loaded) && coreMissing == 0
     val allReady = hasClient && bundleReady
     val busy = bulkRunning || downloading != null || isFetching || downloadingBundle != null
     val outdated = download as? SourceDownloadState.Outdated

@@ -267,6 +267,7 @@ object IncrementalUpdateManager {
         abi: String,
         onFileStart: (index: Int, asset: AssetInfo) -> Unit = { _, _ -> },
         onFileProgress: (index: Int, asset: AssetInfo, progress: Float) -> Unit = { _, _, _ -> },
+        onFileDone: (index: Int, asset: AssetInfo, file: File) -> Unit = { _, _, _ -> },
         onProgress: (downloaded: Int, total: Int, bytesWritten: Long) -> Unit = { _, _, _ -> },
     ) {
         val targetDir = File(libsDir, abi).apply { mkdirs() }
@@ -280,6 +281,7 @@ object IncrementalUpdateManager {
                 }
                 onProgress(index, toDownload.size, completedBytes + written)
             }
+            onFileDone(index, asset, destFile)
             completedBytes += destFile.length()
             onProgress(index + 1, toDownload.size, completedBytes)
         }

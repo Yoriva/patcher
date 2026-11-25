@@ -104,6 +104,10 @@ class PatchManager(
             return
         }
         val zip = gameAssetsZipFile()
+        if (!zip.exists()) {
+            _gameAssetsOutdated.value = false
+            return
+        }
         if (!zipIsComplete(zip)) {
             _gameAssetsOutdated.value = true
             return
