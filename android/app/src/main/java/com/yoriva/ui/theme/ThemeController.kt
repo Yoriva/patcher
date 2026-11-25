@@ -27,9 +27,7 @@ data class ThemeChoice(
     val mode: ThemeMode = ThemeMode.System,
     val amoled: Boolean = false,
     val screenScale: Float = 1f,
-) {
-    val themeId: String get() = if (keyColor == 0) "dynamic" else "custom_$keyColor"
-}
+)
 class ThemeController(app: Application) : AndroidViewModel(app) {
     private val prefs by lazy {
         app.getSharedPreferences("theme_prefs", Context.MODE_PRIVATE)

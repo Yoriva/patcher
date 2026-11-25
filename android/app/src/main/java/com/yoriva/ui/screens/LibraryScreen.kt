@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
@@ -29,6 +30,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -55,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.yoriva.patcher.BundleState
 import com.yoriva.patcher.LibInfo
 import com.yoriva.patcher.LibSource
 import com.yoriva.patcher.PatcherViewModel
@@ -65,11 +68,19 @@ fun LibraryScreen(vm: PatcherViewModel) {
     val libs = allLibs.filter { it.source == LibSource.CORE }
     val plugins = allLibs.filter { it.source == LibSource.PLUGIN }
     val customLibs by vm.customLibs.collectAsState()
+    val libsCheckingError by vm.libsError.collectAsState()
     val checking by vm.libsChecking.collectAsState()
+    val pluginsDownloading by vm.pluginsDownloading.collectAsState()
+    val coreOutdated by vm.coreOutdatedCount.collectAsState()
+    val bundleState by vm.bundle.collectAsState()
     val problem by vm.customLibProblem.collectAsState()
     val abi by vm.abi.collectAsState()
     val excluded by vm.libExcluded.collectAsState()
-    val redownloading by vm.downloadAllRunning.collectAsState()
+    val downloadAllRunning by vm.downloadAllRunning.collectAsState()
+    val downloadingBundle = bundleState as? BundleState.Downloading
+    val syncingLibs = downloadingBundle != null || downloadAllRunning
+    val missingCoreCount = libs.count { it.localSize == 0L && it.releaseSize > 0L }
+    val anyPluginActionable = plugins.any { !it.upToDate && it.releaseSize > 0 }
     val addLibs = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris -> if (uris.isNotEmpty()) vm.addCustomLibs(uris) }
@@ -86,30 +97,72 @@ fun LibraryScreen(vm: PatcherViewModel) {
     }
     LaunchedEffect(Unit) { vm.scanLibs(checkRemote = true) }
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            end = 16.dp,
+            top = 12.dp,
+            bottom = 12.dp + navigationBarBottomPadding(),
+        ),
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
         item {
             LibrarySummary(
-                installed = allLibs,
+                installed = allLibs.filter { it.localSize > 0L },
                 customCount = customLibs.size,
+                coreOutdated = coreOutdated,
+                missingCore = missingCoreCount,
                 excluded = excluded,
-                redownloading = redownloading,
-                onRedownload = { vm.downloadAll() },
+                downloadingBundle = downloadingBundle,
+                syncing = syncingLibs,
+                onSync = { vm.fetchAndDownloadBundle() },
+                onStop = {
+                    vm.cancelBundleDownload()
+                    if (downloadAllRunning) vm.cancelDownloadAll()
+                },
             )
+        }
+        if (!libsCheckingError.isNullOrBlank()) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                    ),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = libsCheckingError.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = { vm.dismissLibsError() }) {
+                            Text("Dismiss", color = MaterialTheme.colorScheme.onErrorContainer)
+                        }
+                        TextButton(onClick = { vm.refreshLibStatus(force = true) }) {
+                            Text("Retry", color = MaterialTheme.colorScheme.onErrorContainer)
+                        }
+                    }
+                }
+            }
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 LibrarySectionHeader(
-                    title = "Installed Libraries",
-                    action = { CheckUpdatesButton(checking = checking) { vm.refreshLibStatus() } },
+                    title = "Core Libraries",
+                    action = { CheckUpdatesButton(checking = checking) { vm.refreshLibStatus(force = true) } },
                 )
                 if (libs.isEmpty()) {
                     EmptyLibraryCard(
                         title = "No libraries yet",
-                        subtitle = "Download the bundle from the Patch screen to see the files it will inject.",
+                        subtitle = "Download assets from the Patch screen to see the core libraries it will inject.",
                     )
                 } else {
                     libs.forEachIndexed { index, lib ->
@@ -120,6 +173,7 @@ fun LibraryScreen(vm: PatcherViewModel) {
                             excluded = lib.name in excluded,
                             onToggle = { include -> vm.setLibExcluded(lib.name, !include) },
                             onUpdate = { vm.refreshSingleLib(lib.name) },
+                            onCancel = { vm.cancelSingleLib(lib.name) },
                         )
                     }
                 }
@@ -129,12 +183,22 @@ fun LibraryScreen(vm: PatcherViewModel) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 LibrarySectionHeader(
                     title = "Yoriva Plugins",
-                    action = { CheckUpdatesButton(checking = checking) { vm.refreshLibStatus() } },
+                    action = {
+                        if (anyPluginActionable || pluginsDownloading) {
+                            DownloadPluginsButton(
+                                downloading = pluginsDownloading,
+                                onDownload = { vm.downloadOptionalPlugins() },
+                                onCancel = { vm.cancelPluginsDownload() },
+                            )
+                        } else {
+                            CheckUpdatesButton(checking = checking) { vm.refreshLibStatus(force = true) }
+                        }
+                    },
                 )
                 if (plugins.isEmpty()) {
                     EmptyLibraryCard(
-                        title = "No plugins yet",
-                        subtitle = "Check for updates to load plugins from the Yoriva Plugins release.",
+                        title = "No optional plugins loaded",
+                        subtitle = "Check for updates to browse optional plugins from Yoriva Plugins.",
                     )
                 } else {
                     plugins.forEachIndexed { index, lib ->
@@ -145,6 +209,7 @@ fun LibraryScreen(vm: PatcherViewModel) {
                             excluded = lib.name in excluded,
                             onToggle = { include -> vm.setLibExcluded(lib.name, !include) },
                             onUpdate = { vm.refreshSingleLib(lib.name) },
+                            onCancel = { vm.cancelSingleLib(lib.name) },
                         )
                     }
                 }
@@ -217,71 +282,119 @@ fun LibraryScreen(vm: PatcherViewModel) {
 private fun LibrarySummary(
     installed: List<LibInfo>,
     customCount: Int,
+    coreOutdated: Int,
+    missingCore: Int,
     excluded: Set<String>,
-    redownloading: Boolean,
-    onRedownload: () -> Unit,
+    downloadingBundle: BundleState.Downloading?,
+    syncing: Boolean,
+    onSync: () -> Unit,
+    onStop: () -> Unit,
 ) {
     val included = installed.count { it.name !in excluded }
+    val updatesCount = coreOutdated + missingCore
+    val subtitleText = when {
+        downloadingBundle != null && downloadingBundle.fileTotal > 0 ->
+            "${downloadingBundle.currentFile.ifBlank { "Syncing" }} (${downloadingBundle.fileIndex + 1}/${downloadingBundle.fileTotal})"
+        syncing -> "Checking and syncing libraries…"
+        updatesCount > 0 -> "$updatesCount updates available · $included/${installed.size} included"
+        customCount > 0 -> "$included/${installed.size} included · $customCount custom"
+        else -> "$included/${installed.size} included · Up to date"
+    }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceContainer,
         contentColor = MaterialTheme.colorScheme.onSurface,
         shape = MaterialTheme.shapes.large,
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Extension,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(24.dp),
-            )
-            Spacer(Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Libraries",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = "$included/${installed.size} included · $customCount custom",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Spacer(Modifier.width(10.dp))
-            SmallPillButton(
-                onClick = onRedownload,
-                enabled = !redownloading,
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (redownloading) {
-                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(6.dp))
+                Icon(
+                    imageVector = Icons.Filled.Extension,
+                    contentDescription = null,
+                    tint = if (updatesCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(24.dp),
+                )
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Downloading",
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        text = "Libraries",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
                     )
-                } else {
-                    Icon(
-                        imageVector = Icons.Filled.Refresh,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.height(2.dp))
                     Text(
-                        "Re-download",
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        text = subtitleText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (updatesCount > 0 && !syncing) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
+                Spacer(Modifier.width(10.dp))
+                if (syncing) {
+                    SmallPillButton(
+                        onClick = onStop,
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "Stop",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        )
+                    }
+                } else {
+                    val hasUpdates = updatesCount > 0
+                    SmallPillButton(
+                        onClick = onSync,
+                        containerColor = if (hasUpdates) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.secondaryContainer
+                        },
+                        contentColor = if (hasUpdates) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSecondaryContainer
+                        },
+                    ) {
+                        Icon(
+                            imageVector = if (hasUpdates) Icons.Filled.Download else Icons.Filled.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            if (hasUpdates) "Update ($updatesCount)" else "Sync",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        )
+                    }
+                }
+            }
+            if (downloadingBundle != null) {
+                ProgressFooter(
+                    progress = downloadingBundle.percent.coerceIn(0f, 1f),
+                    left = if (downloadingBundle.fileTotal > 0) {
+                        "File ${downloadingBundle.fileIndex + 1} of ${downloadingBundle.fileTotal}"
+                    } else {
+                        "Preparing…"
+                    },
+                    right = "${(downloadingBundle.percent * 100).toInt().coerceIn(0, 100)}%",
+                )
             }
         }
     }
@@ -349,18 +462,23 @@ private fun LibraryEntry(
     excluded: Boolean,
     onToggle: (Boolean) -> Unit,
     onUpdate: () -> Unit,
+    onCancel: () -> Unit,
 ) {
-    val hasUpdate = !lib.upToDate && lib.releaseSize > 0
+    val isOptionalAvailable = lib.source == LibSource.PLUGIN && lib.localSize == 0L && lib.releaseSize > 0
+    val hasAction = !lib.upToDate && lib.releaseSize > 0
+    val hasUpdate = hasAction && !isOptionalAvailable
     val canInclude = lib.upToDate && lib.localSize > 0L
     val subtitle = when {
         lib.downloading && lib.downloadProgress >= 0 ->
             "Downloading… ${(lib.downloadProgress * 100).toInt()}%"
         lib.downloading -> "Downloading…"
-        hasUpdate && lib.localSize == 0L ->
+        isOptionalAvailable ->
+            "Optional · ${lib.releaseSize.mb()}"
+        hasAction && lib.localSize == 0L ->
             "Not installed · ${lib.releaseSize.mb()}"
         hasUpdate ->
-            "Update available · ${lib.releaseSize.mb()}"
-        lib.localSize > 0 -> "${lib.localSize.mb()} · Up to date"
+            "Update · ${lib.localSize.mb()} → ${lib.releaseSize.mb()}"
+        lib.localSize > 0 -> "${lib.localSize.mb()} · Installed"
         else -> "Not installed"
     }
     Card(
@@ -389,7 +507,7 @@ private fun LibraryEntry(
                         text = lib.name,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (excluded) 0.45f else 1f),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (excluded && canInclude) 0.45f else 1f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -410,12 +528,28 @@ private fun LibraryEntry(
                 }
                 Spacer(Modifier.width(10.dp))
                 when {
-                    lib.downloading -> CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp,
+                    lib.downloading -> FilledTonalIconButton(
+                        onClick = onCancel,
+                        modifier = Modifier.size(34.dp),
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        ),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Cancel ${lib.name}",
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    isOptionalAvailable -> UpdateLibraryButton(
+                        contentDescription = "Download ${lib.name}",
+                        optional = true,
+                        onClick = onUpdate,
                     )
-                    hasUpdate -> UpdateLibraryButton(
-                        label = if (lib.localSize == 0L) "Download" else "Update",
+                    hasAction -> UpdateLibraryButton(
+                        contentDescription = if (lib.localSize == 0L) "Download ${lib.name}" else "Update ${lib.name}",
+                        optional = lib.localSize == 0L,
                         onClick = onUpdate,
                     )
                     else -> Unit
@@ -532,16 +666,54 @@ private fun CustomLibraryEntry(
     }
 }
 @Composable
-private fun UpdateLibraryButton(label: String, onClick: () -> Unit) {
+private fun DownloadPluginsButton(
+    downloading: Boolean,
+    onDownload: () -> Unit,
+    onCancel: () -> Unit,
+) {
     SmallPillButton(
-        onClick = onClick,
-        containerColor = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        height = 34.dp,
+        onClick = if (downloading) onCancel else onDownload,
+        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
     ) {
-        Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(15.dp))
-        Spacer(Modifier.width(5.dp))
-        Text(label, style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+        if (downloading) {
+            Icon(Icons.Rounded.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Stop", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold))
+        } else {
+            Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Download all", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold))
+        }
+    }
+}
+@Composable
+private fun UpdateLibraryButton(
+    contentDescription: String,
+    optional: Boolean = false,
+    onClick: () -> Unit,
+) {
+    FilledTonalIconButton(
+        onClick = onClick,
+        modifier = Modifier.size(34.dp),
+        colors = IconButtonDefaults.filledTonalIconButtonColors(
+            containerColor = if (optional) {
+                MaterialTheme.colorScheme.secondaryContainer
+            } else {
+                MaterialTheme.colorScheme.primaryContainer
+            },
+            contentColor = if (optional) {
+                MaterialTheme.colorScheme.onSecondaryContainer
+            } else {
+                MaterialTheme.colorScheme.onPrimaryContainer
+            },
+        ),
+    ) {
+        Icon(
+            imageVector = if (optional) Icons.Filled.Download else Icons.Filled.Refresh,
+            contentDescription = contentDescription,
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 @Composable

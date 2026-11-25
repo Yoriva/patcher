@@ -4,6 +4,11 @@ import android.content.ClipboardManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.background
@@ -46,7 +51,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -138,17 +142,17 @@ fun ToolsScreen(
         val available = scripts.mapTo(HashSet()) { it.path }
         selected = selected.intersect(available)
     }
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
-        item(key = "config_editor") {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             GroupedItem(
                 title = "Config Editor",
                 subtitle = "Edit AMX Mod X and YapB config files",
                 index = 0,
-                total = 1,
+                total = 2,
                 trailing = {
                     SmallButton(
                         text = "Edit",
@@ -157,33 +161,64 @@ fun ToolsScreen(
                     )
                 },
             )
-            Spacer(Modifier.height(20.dp))
-        }
-        item(key = "plugins_folder") {
-            GroupedItem(
-                title = if (scriptRoot != null) "Plugins folder found" else "Plugins folder",
-                subtitle = scriptRoot ?: "Searching for the game folder…",
-                index = 0,
-                total = 1,
+            BuildSection(
+                compile = compile,
+                scriptRoot = scriptRoot,
+                scriptCount = scripts.size,
+                selectedSources = selectedSources,
+                index = 1,
+                total = 2,
+                onCompile = { vm.compileAll(selectedSources) },
             )
-            Spacer(Modifier.height(20.dp))
         }
-        item(key = "plugins_header") {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 8.dp, end = 4.dp, bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+        Spacer(Modifier.height(16.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 8.dp, end = 4.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Plugins",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f),
+            )
+            FilledTonalButton(
+                onClick = { pickPlugin() },
+                modifier = Modifier.height(38.dp),
+                shape = RoundedCornerShape(percent = 50),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                ),
             ) {
-                Text(
-                    text = "Plugins",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.weight(1f),
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Filled.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "Add",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+            if (scripts.isNotEmpty()) {
+                Spacer(Modifier.width(6.dp))
                 FilledTonalButton(
-                    onClick = { pickPlugin() },
+                    onClick = {
+                        selected = if (selected.size != scripts.size) {
+                            scripts.map { it.path }.toSet()
+                        } else {
+                            emptySet()
+                        }
+                    },
                     modifier = Modifier.height(38.dp),
                     shape = RoundedCornerShape(percent = 50),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
@@ -192,88 +227,51 @@ fun ToolsScreen(
                         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     ),
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Filled.Add,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = "Add",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
+                    Text(
+                        text = if (selected.size == scripts.size) "Clear" else "Select all",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
-                if (scripts.isNotEmpty()) {
-                    Spacer(Modifier.width(6.dp))
-                    FilledTonalButton(
+            }
+        }
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+        ) {
+            when {
+                scriptRoot == null -> item(key = "retry_folder") {
+                    RetryCard(
+                        text = "Game folder not detected yet. Install addons first, then tap Retry.",
+                        onRetry = { vm.refreshScripts() },
+                    )
+                }
+                scripts.isEmpty() -> item(key = "retry_empty") {
+                    RetryCard(
+                        text = "No .sma plugin sources found in the detected folder.",
+                        onRetry = { vm.refreshScripts() },
+                    )
+                }
+                else -> itemsIndexed(scripts, key = { _, s -> s.path }) { index, source ->
+                    ScriptRow(
+                        source = source,
+                        selected = source.path in selected,
+                        error = failures[source.path],
+                        index = index,
+                        total = scripts.size,
                         onClick = {
-                            selected = if (selected.size != scripts.size) {
-                                scripts.map { it.path }.toSet()
-                            } else {
-                                emptySet()
-                            }
+                            selected = if (source.path in selected) selected - source.path else selected + source.path
                         },
-                        modifier = Modifier.height(38.dp),
-                        shape = RoundedCornerShape(percent = 50),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                        colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        ),
-                    ) {
-                        Text(
-                            text = if (selected.size == scripts.size) "Clear" else "Select all",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
+                        onErrorClick = { message -> stampError = source.path to message },
+                    )
+                    if (index < scripts.lastIndex) {
+                        Spacer(Modifier.height(2.dp))
                     }
                 }
             }
+            item(key = "bottom_pad") { Spacer(Modifier.height(12.dp)) }
         }
-        when {
-            scriptRoot == null -> item(key = "retry_folder") {
-                RetryCard(
-                    text = "Game folder not detected yet. Install addons first, then tap Retry.",
-                    onRetry = { vm.refreshScripts() },
-                )
-            }
-            scripts.isEmpty() -> item(key = "retry_empty") {
-                RetryCard(
-                    text = "No .sma plugin sources found in the detected folder.",
-                    onRetry = { vm.refreshScripts() },
-                )
-            }
-            else -> itemsIndexed(scripts, key = { _, s -> s.path }) { index, source ->
-                ScriptRow(
-                    source = source,
-                    selected = source.path in selected,
-                    error = failures[source.path],
-                    index = index,
-                    total = scripts.size,
-                    onClick = {
-                        selected = if (source.path in selected) selected - source.path else selected + source.path
-                    },
-                    onErrorClick = { message -> stampError = source.path to message },
-                )
-                if (index < scripts.lastIndex) {
-                    Spacer(Modifier.height(2.dp))
-                }
-            }
-        }
-        item(key = "build_section") {
-            Spacer(Modifier.height(20.dp))
-            BuildSection(
-                compile = compile,
-                scriptRoot = scriptRoot,
-                scriptCount = scripts.size,
-                selectedSources = selectedSources,
-                onCompile = { vm.compileAll(selectedSources) },
-            )
-        }
-        item(key = "bottom_pad") { Spacer(Modifier.height(16.dp)) }
     }
     stampError?.let { (name, message) ->
         ErrorDialog(
@@ -374,6 +372,8 @@ private fun BuildSection(
     scriptRoot: String?,
     scriptCount: Int,
     selectedSources: List<SmaSource>,
+    index: Int = 0,
+    total: Int = 1,
     onCompile: () -> Unit,
 ) {
     val compiling = compile as? CompileState.Compiling
@@ -392,7 +392,7 @@ private fun BuildSection(
         selectedSources.isEmpty() -> when {
             scriptRoot == null -> "Waiting for the game folder to be detected…"
             scriptCount == 0 -> "No .sma plugin sources found in the detected folder."
-            else -> "Select one or more plugins above."
+            else -> "Select one or more plugins below."
         }
         selectedSources.size == 1 -> selectedSources.first().name
         else -> "${selectedSources.size} plugins selected"
@@ -406,9 +406,10 @@ private fun BuildSection(
     GroupedItem(
         title = title,
         subtitle = subtitle,
-        index = 0,
-        total = 1,
+        index = index,
+        total = total,
         error = done != null && failures.isNotEmpty(),
+        animateSize = false,
         trailing = {
             if (compiling != null) {
                 SmallProgressButton("Building")
@@ -433,7 +434,11 @@ private fun BuildSection(
             ) {
                 Text(if (showLog) "Hide Build Log" else "View Build Log")
             }
-            AnimatedVisibility(visible = showLog) {
+            AnimatedVisibility(
+                visible = showLog,
+                enter = expandVertically(tween(220)) + fadeIn(tween(180)),
+                exit = shrinkVertically(tween(220)) + fadeOut(tween(140)),
+            ) {
                 Box(
                     modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 14.dp),
                 ) {

@@ -7,10 +7,10 @@ import com.yoriva.lib.Bundle
 import com.yoriva.lib.BundleManifest
 import com.yoriva.patcher.LibInfo
 import com.yoriva.patcher.PatcherViewModel.CustomLib
-import com.yoriva.patcher.PatcherViewModel.PatchComponent
-import com.yoriva.patcher.BundleState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 
 class BundleManager(
     private val app: Application,
@@ -28,9 +29,7 @@ class BundleManager(
     private val recordAppliedBuilds: (String, List<IncrementalUpdateManager.AssetInfo>) -> Unit,
     private val markBundleTagKnown: (String) -> Unit,
     private val refreshAbiStatus: () -> Unit,
-    private val setReleaseNote: (String) -> Unit,
     private val externalRoot: File,
-    private val gameDirProvider: () -> File,
 ) {
 
     val libsDir = File(externalRoot, "libs")
@@ -40,9 +39,6 @@ class BundleManager(
 
     private val _bundle = MutableStateFlow<BundleState>(BundleState.None)
     val bundle: StateFlow<BundleState> = _bundle.asStateFlow()
-
-    private val _bundleVersion = MutableStateFlow("")
-    val bundleVersion: StateFlow<String> = _bundleVersion.asStateFlow()
 
     private val _libs = MutableStateFlow<List<LibInfo>>(emptyList())
     val libs: StateFlow<List<LibInfo>> = _libs.asStateFlow()
@@ -98,8 +94,6 @@ class BundleManager(
         rebuildLoadedBundle()
     }
 
-    fun toggleLibExcluded(name: String) = setLibExcluded(name, name !in _libExcluded.value)
-
     private fun rebuildLoadedBundleFiles() {
         val abi = abiProvider()
         val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, abi, _libExcluded.value)
@@ -122,27 +116,15 @@ class BundleManager(
         _bundle.value = BundleState.None
     }
 
-    fun clearLocalLibraryCache() {
-        listOf("arm64-v8a", "armeabi-v7a").forEach { abi ->
-            File(libsDir, abi).listFiles()?.forEach { it.deleteRecursively() }
-        }
-        resetAll()
-    }
-
     internal fun resetAll() {
         loadedBundle = null
         downloadingAbi = null
         _bundle.value = BundleState.None
-        _bundleVersion.value = ""
         _libs.value = emptyList()
         _customLibs.value = emptyList()
         _customLibProblem.value = null
         autoExcluded = emptySet()
         applyExclusions()
-    }
-
-    internal fun setBundleVersion(version: String) {
-        _bundleVersion.value = version
     }
 
     fun useCachedBundle() {
@@ -152,7 +134,6 @@ class BundleManager(
             val b = buildBundleFromFileMap(files, abi)
             loadedBundle = b
             _bundle.value = BundleState.Loaded
-            _bundleVersion.value = b.manifest.version
             scanLibs()
             refreshAbiStatus()
             return
@@ -165,65 +146,79 @@ class BundleManager(
         }
     }
 
-    fun useLoadedBundle() {
-        val b = loadedBundle ?: return
-        _bundle.value = BundleState.Ready("Loaded", b.manifest.entries.size, b.manifest.version)
+    private val cachedCoreAssets = ConcurrentHashMap<String, List<IncrementalUpdateManager.AssetInfo>>()
+    private val cachedPluginAssets = ConcurrentHashMap<String, List<IncrementalUpdateManager.AssetInfo>>()
+    private val lastCheckAtMs = ConcurrentHashMap<String, Long>()
+    private val singleLibJobs = ConcurrentHashMap<String, Job>()
+
+    private val _libsError = MutableStateFlow<String?>(null)
+    val libsError: StateFlow<String?> = _libsError.asStateFlow()
+
+    fun dismissLibsError() {
+        _libsError.value = null
     }
 
-    fun scanLibs(autoLoad: Boolean = false, checkRemote: Boolean = false) {
+    fun scanLibs(autoLoad: Boolean = false, checkRemote: Boolean = false, force: Boolean = false) {
         scope.launch(Dispatchers.IO) {
             val abi = abiProvider()
             val targetDir = File(libsDir, abi)
             val localFiles = if (targetDir.isDirectory) {
                 targetDir.listFiles()
                     ?.filter { it.isFile && it.name.endsWith(".so") }
-                    ?.map { it.name to it }
-                    ?.toMap()
+                    ?.associateBy { it.name }
                     ?: emptyMap()
             } else emptyMap()
-            var coreAssets: List<IncrementalUpdateManager.AssetInfo> = emptyList()
-            var pluginAssets: List<IncrementalUpdateManager.AssetInfo> = emptyList()
+
+            var coreAssets = cachedCoreAssets[abi].orEmpty()
+            var pluginAssets = cachedPluginAssets[abi].orEmpty()
+
             if (checkRemote) {
-                _libsChecking.value = true
-                try {
-                    coreAssets = try {
-                        IncrementalUpdateManager.fetchReleaseAssets(PatcherViewModel.ASSETS_TAG, abi)
-                    } catch (_: Throwable) {
-                        emptyList()
+                val now = System.currentTimeMillis()
+                val lastCheck = lastCheckAtMs[abi] ?: 0L
+                val isCacheFresh = !force && coreAssets.isNotEmpty() && (now - lastCheck) < REMOTE_CHECK_COOLDOWN_MS
+                if (!isCacheFresh) {
+                    _libsChecking.value = true
+                    var coreError: Throwable? = null
+                    var pluginError: Throwable? = null
+                    try {
+                        val fetchedCore = try {
+                            IncrementalUpdateManager.fetchReleaseAssets(PatcherViewModel.ASSETS_TAG, abi)
+                        } catch (t: Throwable) {
+                            if (t is CancellationException) throw t
+                            coreError = t
+                            null
+                        }
+                        if (fetchedCore != null && fetchedCore.isNotEmpty()) {
+                            coreAssets = fetchedCore
+                            cachedCoreAssets[abi] = fetchedCore
+                        }
+                        val fetchedPlugins = try {
+                            IncrementalUpdateManager.fetchPluginAssets(abi)
+                        } catch (t: Throwable) {
+                            if (t is CancellationException) throw t
+                            pluginError = t
+                            null
+                        }
+                        if (fetchedPlugins != null) {
+                            pluginAssets = fetchedPlugins
+                            cachedPluginAssets[abi] = fetchedPlugins
+                        }
+                        val err = coreError ?: pluginError
+                        if (coreError == null && pluginError == null) {
+                            lastCheckAtMs[abi] = System.currentTimeMillis()
+                            _libsError.value = null
+                        } else if (force || (coreAssets.isEmpty() && pluginAssets.isEmpty())) {
+                            _libsError.value = err?.message ?: "Failed to check library updates"
+                        }
+                    } finally {
+                        _libsChecking.value = false
                     }
-                    pluginAssets = try {
-                        IncrementalUpdateManager.fetchPluginAssets(abi)
-                    } catch (_: Throwable) {
-                        emptyList()
-                    }
-                } finally {
-                    _libsChecking.value = false
                 }
             }
-            val coreMap = coreAssets.associateBy { it.cleanName }
-            val pluginMap = pluginAssets.associateBy { it.cleanName }
-            val allNames = (localFiles.keys + coreMap.keys + pluginMap.keys).distinct().sorted()
-            _libs.value = allNames.map { name ->
-                val f = localFiles[name]
-                val asset = coreMap[name] ?: pluginMap[name]
-                val source = if (pluginMap.containsKey(name) || isPluginLibName(name, abi)) {
-                    LibSource.PLUGIN
-                } else {
-                    LibSource.CORE
-                }
-                LibInfo(
-                    name = name,
-                    localSize = f?.length() ?: 0L,
-                    releaseSize = asset?.size ?: (f?.length() ?: 0L),
-                    upToDate = if (asset != null) {
-                        IncrementalUpdateManager.isUpToDate(
-                            File(targetDir, name), asset, appliedBuilds(abi)[name]
-                        )
-                    } else true,
-                    source = source,
-                )
-            }
-            if (checkRemote) {
+
+            rebuildLibState(abi, targetDir, localFiles, coreAssets, pluginAssets)
+
+            if (checkRemote || coreAssets.isNotEmpty()) {
                 val coreChecked = coreAssets.isNotEmpty()
                 val pluginChecked = pluginAssets.isNotEmpty()
                 if (coreChecked || pluginChecked) {
@@ -236,7 +231,12 @@ class BundleManager(
                         }
                         if (!checked) return@forEach
                         checkedNames.add(lib.name)
-                        if (lib.localSize == 0L || !lib.upToDate) invalid.add(lib.name)
+                        // Optional plugins that are not installed are never treated as broken/invalid.
+                        val isInvalid = when (lib.source) {
+                            LibSource.CORE -> lib.localSize == 0L || !lib.upToDate
+                            LibSource.PLUGIN -> lib.localSize > 0L && !lib.upToDate
+                        }
+                        if (isInvalid) invalid.add(lib.name)
                     }
                     val nextAuto = (autoExcluded - checkedNames) + invalid
                     if (nextAuto != autoExcluded) {
@@ -244,10 +244,15 @@ class BundleManager(
                         applyExclusions()
                         if (loadedBundle != null && localFiles.isNotEmpty()) rebuildLoadedBundleFiles()
                     }
+                    if (coreChecked) {
+                        _coreOutdatedCount.value = _libs.value.count {
+                            it.source == LibSource.CORE && !it.upToDate && it.releaseSize > 0
+                        }
+                    }
                 }
             }
-            val outdated = _libs.value.filter { !it.upToDate && it.releaseSize > 0 }
-            if (autoLoad && outdated.isEmpty() && (coreAssets.isNotEmpty() || pluginAssets.isNotEmpty())) {
+            val coreOutdated = _libs.value.filter { it.source == LibSource.CORE && !it.upToDate && it.releaseSize > 0 }
+            if (autoLoad && coreOutdated.isEmpty() && coreAssets.isNotEmpty()) {
                 val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, abi, _libExcluded.value)
                 if (files.isNotEmpty()) {
                     val b = buildBundleFromFileMap(files, abi)
@@ -259,131 +264,287 @@ class BundleManager(
         }
     }
 
+    private fun rebuildLibState(
+        abi: String,
+        targetDir: File,
+        localFiles: Map<String, File>,
+        coreAssets: List<IncrementalUpdateManager.AssetInfo>,
+        pluginAssets: List<IncrementalUpdateManager.AssetInfo>,
+    ) {
+        val coreMap = coreAssets.associateBy { it.cleanName }
+        val pluginMap = pluginAssets.associateBy { it.cleanName }
+        val prevMap = _libs.value.associateBy { it.name }
+        val allNames = (localFiles.keys + coreMap.keys + pluginMap.keys).distinct().sorted()
+        _libs.value = allNames.map { name ->
+            val f = localFiles[name]
+            val asset = coreMap[name] ?: pluginMap[name]
+            val source = if (pluginMap.containsKey(name) || isPluginLibName(name, abi)) {
+                LibSource.PLUGIN
+            } else {
+                LibSource.CORE
+            }
+            val prev = prevMap[name]
+            LibInfo(
+                name = name,
+                localSize = f?.length() ?: 0L,
+                releaseSize = asset?.size ?: (f?.length() ?: 0L),
+                upToDate = if (asset != null) {
+                    IncrementalUpdateManager.isUpToDate(
+                        File(targetDir, name), asset, appliedBuilds(abi)[name],
+                    )
+                } else true,
+                downloading = prev?.downloading == true,
+                downloadProgress = if (prev?.downloading == true) prev.downloadProgress else -1f,
+                source = source,
+            )
+        }
+    }
+
     private fun isPluginLibName(name: String, abi: String): Boolean {
         val suffix = if (abi == "arm64-v8a") "arm64" else "arm"
         return name.endsWith("_yoriva_${suffix}.so")
     }
 
-    fun refreshLibStatus() {
-        scanLibs(checkRemote = true)
+    private var bundleJob: Job? = null
+    private var pluginsJob: Job? = null
+
+    private val _pluginsDownloading = MutableStateFlow(false)
+    val pluginsDownloading: StateFlow<Boolean> = _pluginsDownloading.asStateFlow()
+
+    private val _coreOutdatedCount = MutableStateFlow(0)
+    val coreOutdatedCount: StateFlow<Int> = _coreOutdatedCount.asStateFlow()
+
+    fun cancelBundleDownload() {
+        bundleJob?.cancel()
+        bundleJob = null
+        downloadingAbi = null
+        _libs.value = _libs.value.map {
+            if (it.source == LibSource.CORE && it.downloading) {
+                it.copy(downloading = false, downloadProgress = -1f)
+            } else it
+        }
+        if (_bundle.value is BundleState.Downloading) {
+            _bundle.value = if (loadedBundle != null) BundleState.Loaded else BundleState.None
+        }
+        refreshAbiStatus()
+    }
+
+    fun cancelSingleLib(libName: String) {
+        singleLibJobs.remove(libName)?.cancel()
+        _libs.value = _libs.value.map {
+            if (it.name == libName) it.copy(downloading = false, downloadProgress = -1f) else it
+        }
+    }
+
+    fun cancelPluginDownloads() {
+        pluginsJob?.cancel()
+        pluginsJob = null
+        _pluginsDownloading.value = false
+        _libs.value = _libs.value.map {
+            if (it.source == LibSource.PLUGIN && it.downloading) {
+                it.copy(downloading = false, downloadProgress = -1f)
+            } else it
+        }
+    }
+
+    fun cancelAllDownloads() {
+        singleLibJobs.keys.toList().forEach { key -> singleLibJobs.remove(key)?.cancel() }
+        cancelBundleDownload()
+        cancelPluginDownloads()
+    }
+
+    fun refreshLibStatus(force: Boolean = true) {
+        scanLibs(checkRemote = true, force = force)
     }
 
     fun refreshSingleLib(libName: String) {
-        val current = _libs.value.firstOrNull { it.name == libName }
-        if (current?.downloading == true) return
-        scope.launch(Dispatchers.IO) {
-            downloadLib(libName)
+        if (singleLibJobs[libName]?.isActive == true) return
+        val job = scope.launch(Dispatchers.IO) {
+            try {
+                downloadLib(libName)
+            } finally {
+                singleLibJobs.remove(libName)
+            }
+        }
+        singleLibJobs[libName] = job
+    }
+
+    /**
+     * Downloads any missing or outdated optional Yoriva plugins from `Yoriva/yoriva-plugins`.
+     */
+    fun downloadOptionalPlugins() {
+        if (pluginsJob?.isActive == true) return
+        _pluginsDownloading.value = true
+        _libsError.value = null
+        pluginsJob = scope.launch(Dispatchers.IO) {
+            try {
+                val abi = abiProvider()
+                val pluginAssets = IncrementalUpdateManager.fetchPluginAssets(abi)
+                cachedPluginAssets[abi] = pluginAssets
+                val diff = IncrementalUpdateManager.diff(pluginAssets, libsDir, abi, appliedBuilds(abi))
+                for (asset in diff.toDownload) {
+                    downloadLib(asset.cleanName, prefetchedAssets = pluginAssets)
+                }
+            } catch (_: CancellationException) {
+                _libs.value = _libs.value.map {
+                    if (it.source == LibSource.PLUGIN && it.downloading) {
+                        it.copy(downloading = false, downloadProgress = -1f)
+                    } else it
+                }
+            } catch (t: Throwable) {
+                _libsError.value = t.message ?: "Failed to download Yoriva Plugins"
+            } finally {
+                _pluginsDownloading.value = false
+                scanLibs()
+            }
         }
     }
 
-    private suspend fun fetchAllAssets(abi: String): List<IncrementalUpdateManager.AssetInfo> {
-        val core: List<IncrementalUpdateManager.AssetInfo> = try {
-            IncrementalUpdateManager.fetchReleaseAssets(PatcherViewModel.ASSETS_TAG, abi)
-        } catch (_: Throwable) {
-            emptyList()
+    private suspend fun resolveAssetsFor(
+        libName: String,
+        abi: String,
+    ): List<IncrementalUpdateManager.AssetInfo> {
+        val isPlugin = isPluginLibName(libName, abi) ||
+            _libs.value.firstOrNull { it.name == libName }?.source == LibSource.PLUGIN
+        return if (isPlugin) {
+            cachedPluginAssets[abi]?.takeIf { list -> list.any { it.cleanName == libName } }
+                ?: IncrementalUpdateManager.fetchPluginAssets(abi).also { cachedPluginAssets[abi] = it }
+        } else {
+            cachedCoreAssets[abi]?.takeIf { list -> list.any { it.cleanName == libName } }
+                ?: IncrementalUpdateManager.fetchReleaseAssets(PatcherViewModel.ASSETS_TAG, abi).also {
+                    cachedCoreAssets[abi] = it
+                }
         }
-        val plugins: List<IncrementalUpdateManager.AssetInfo> = try {
-            IncrementalUpdateManager.fetchPluginAssets(abi)
-        } catch (_: Throwable) {
-            emptyList()
-        }
-        return core + plugins
     }
 
-    private suspend fun downloadLib(libName: String) {
+    private fun enableDownloadedLib(libName: String) {
+        clearAutoExcluded(setOf(libName))
+        val manual = manualExcluded.value - libName
+        if (manual != manualExcluded.value) {
+            manualExcluded.value = manual
+            excludedPrefs.edit().putStringSet("excluded", HashSet(manual)).apply()
+            applyExclusions()
+        }
+    }
+
+    private suspend fun downloadLib(
+        libName: String,
+        prefetchedAssets: List<IncrementalUpdateManager.AssetInfo>? = null,
+    ) {
         try {
-            _libs.value = _libs.value.map {
-                if (it.name == libName) it.copy(downloading = true, downloadProgress = 0f) else it
+            _libsError.value = null
+            markLibDownloading(libName, 0f)
+            val abi = abiProvider()
+            val assets = prefetchedAssets ?: resolveAssetsFor(libName, abi)
+            val asset = assets.find { it.cleanName == libName }
+                ?: throw IOException("Asset metadata not found for $libName")
+            IncrementalUpdateManager.downloadSingle(asset, libsDir, abi) { p ->
+                markLibDownloading(libName, p)
             }
-            val assets = fetchAllAssets(abiProvider())
-            val asset = assets.find { it.cleanName == libName } ?: run {
-                _libs.value = _libs.value.map {
-                    if (it.name == libName) it.copy(downloading = false) else it
-                }
-                return
-            }
-            IncrementalUpdateManager.downloadSingle(asset, libsDir, abiProvider()) { p ->
-                _libs.value = _libs.value.map {
-                    if (it.name == libName) it.copy(downloading = true, downloadProgress = p) else it
-                }
-            }
-            val fileOnDisk = File(File(libsDir, abiProvider()), libName)
+            val fileOnDisk = File(File(libsDir, abi), libName)
             val newSize = if (fileOnDisk.exists()) fileOnDisk.length() else 0L
-            if (asset.size > 0 && fileOnDisk.exists() && fileOnDisk.length() != asset.size) {
-                fileOnDisk.delete()
-                _libs.value = _libs.value.map {
-                    if (it.name == libName) it.copy(downloading = false, upToDate = false) else it
-                }
-                return
-            }
             val upToDate = IncrementalUpdateManager.isUpToDate(
-                fileOnDisk, asset, appliedBuilds(abiProvider())[libName]
+                fileOnDisk, asset, appliedBuilds(abi)[libName]
             )
-            recordAppliedBuilds(abiProvider(), listOf(asset))
+            if (!upToDate) {
+                fileOnDisk.delete()
+                throw IOException("Downloaded $libName could not be verified")
+            }
+            recordAppliedBuilds(abi, listOf(asset))
             _libs.value = _libs.value.map {
-                if (it.name == libName) it.copy(localSize = newSize, upToDate = upToDate) else it
+                if (it.name == libName) {
+                    it.copy(
+                        localSize = newSize,
+                        releaseSize = asset.size.takeIf { s -> s > 0 } ?: newSize,
+                        upToDate = true,
+                        downloading = false,
+                        downloadProgress = -1f,
+                    )
+                } else it
             }
-            if (upToDate) {
-                clearAutoExcluded(setOf(libName))
-                rebuildLoadedBundleFiles()
+            enableDownloadedLib(libName)
+            rebuildLoadedBundleFiles()
+            _coreOutdatedCount.value = _libs.value.count {
+                it.source == LibSource.CORE && !it.upToDate && it.releaseSize > 0
             }
+        } catch (c: CancellationException) {
+            _libs.value = _libs.value.map {
+                if (it.name == libName) it.copy(downloading = false, downloadProgress = -1f) else it
+            }
+            throw c
         } catch (t: Throwable) {
             _libs.value = _libs.value.map {
-                if (it.name == libName) it.copy(downloading = false) else it
+                if (it.name == libName) it.copy(downloading = false, downloadProgress = -1f) else it
             }
+            _libsError.value = "$libName: ${t.message ?: "Download failed"}"
         }
     }
 
     fun fetchAndDownloadBundle() {
-        scope.launch(Dispatchers.IO) { fetchAndDownloadBundleNow() }
+        if (bundleJob?.isActive == true) return
+        bundleJob = scope.launch(Dispatchers.IO) {
+            try {
+                fetchAndDownloadBundleNow()
+            } catch (_: CancellationException) {
+            }
+        }
     }
 
-    suspend fun fetchAndDownloadBundleNow(): Boolean {
+    /**
+     * Incrementally syncs only required core mod libraries ([LibSource.CORE]).
+     * Optional Yoriva Plugins are left untouched and downloaded on-demand from Libraries.
+     */
+    suspend fun fetchAndDownloadBundleNow(
+        reportJob: Boolean = true,
+        onByteProgress: ((done: Long, total: Long) -> Unit)? = null,
+    ): Boolean {
         if (_bundle.value is BundleState.Downloading) return false
-        downloadingAbi = abiProvider()
+        val abi = abiProvider()
+        downloadingAbi = abi
         refreshAbiStatus()
         _bundle.value = BundleState.Downloading(0.04f)
         var jobStarted = false
         return try {
             val tagName = PatcherViewModel.ASSETS_TAG
-            setReleaseNote(tagName)
-            val coreAssets = IncrementalUpdateManager.fetchReleaseAssets(tagName, abiProvider())
-            if (coreAssets.isEmpty()) throw IOException("No .so assets found for ABI ${abiProvider()}")
-            val pluginAssets: List<IncrementalUpdateManager.AssetInfo> = try {
-                IncrementalUpdateManager.fetchPluginAssets(abiProvider())
-            } catch (_: Throwable) {
-                emptyList()
-            }
-            val assets = coreAssets + pluginAssets
+            val coreAssets = IncrementalUpdateManager.fetchReleaseAssets(tagName, abi)
+            if (coreAssets.isEmpty()) throw IOException("No .so assets found for ABI $abi")
+            cachedCoreAssets[abi] = coreAssets
             _bundle.update { BundleState.Downloading(0.1f, tagName) }
             val diff = IncrementalUpdateManager.diff(
-                assets, libsDir, abiProvider(), appliedBuilds(abiProvider())
+                coreAssets, libsDir, abi, appliedBuilds(abi)
             )
             if (diff.toDownload.isEmpty()) {
-                clearAutoExcluded(assets.map { it.cleanName }.toSet())
-                val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, abiProvider(), _libExcluded.value)
+                clearAutoExcluded(coreAssets.map { it.cleanName }.toSet())
+                val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, abi, _libExcluded.value)
                 if (files.isEmpty()) throw IOException("No .so files found in libs/")
-                val b = buildBundleFromFileMap(files, abiProvider())
+                val b = buildBundleFromFileMap(files, abi)
                 markBundleTagKnown(tagName)
-                recordAppliedBuilds(abiProvider(), assets)
-                val installed = installIntoGameDir(b)
+                recordAppliedBuilds(abi, coreAssets)
+                _coreOutdatedCount.value = 0
                 _bundle.value = BundleState.Ready(
-                    gameDirMessage("Bundle is up to date", installed),
+                    "Libraries up to date · ${b.manifest.entries.size} files",
                     b.manifest.entries.size,
                     b.manifest.version,
                 )
                 loadedBundle = b
-                _bundleVersion.value = b.manifest.version
+                downloadingAbi = null
                 scanLibs()
+                refreshAbiStatus()
                 return true
             }
-            com.yoriva.jobs.JobProgress.begin(app, com.yoriva.patcher.PatcherViewModel.JOB_LIBS, "Libraries", "Downloading ${diff.toDownload.size} files")
-            jobStarted = true
+            if (reportJob) {
+                com.yoriva.jobs.JobProgress.begin(app, PatcherViewModel.JOB_LIBS, "Libraries", "Downloading ${diff.toDownload.size} files")
+                jobStarted = true
+            }
             IncrementalUpdateManager.downloadChanged(
-                diff.toDownload, libsDir, abiProvider(),
+                diff.toDownload,
+                libsDir,
+                abi,
                 onFileStart = { index, asset ->
                     markLibDownloading(asset.cleanName, 0f)
-                    com.yoriva.jobs.JobProgress.detail(app, com.yoriva.patcher.PatcherViewModel.JOB_LIBS, asset.cleanName)
+                    if (jobStarted) {
+                        com.yoriva.jobs.JobProgress.detail(app, PatcherViewModel.JOB_LIBS, asset.cleanName)
+                    }
                     _bundle.update {
                         BundleState.Downloading(
                             percent = 0.15f + (0.75f * index.toFloat() / diff.toDownload.size).coerceAtMost(0.75f),
@@ -398,13 +559,15 @@ class BundleManager(
                     markLibDownloading(asset.cleanName, fileProgress)
                     val overall =
                         (index + fileProgress.coerceIn(0f, 1f)) / diff.toDownload.size.toFloat()
-                    com.yoriva.jobs.JobProgress.progress(
-                        app,
-                        com.yoriva.patcher.PatcherViewModel.JOB_LIBS,
-                        (overall * 100).toLong().toInt().toLong().coerceIn(0, 99),
-                        100L,
-                        "${asset.cleanName} ${(fileProgress * 100).toInt().coerceIn(0, 100)}%",
-                    )
+                    if (jobStarted) {
+                        com.yoriva.jobs.JobProgress.progress(
+                            app,
+                            PatcherViewModel.JOB_LIBS,
+                            (overall * 100).toLong().coerceIn(0L, 99L),
+                            100L,
+                            "${asset.cleanName} ${(fileProgress * 100).toInt().coerceIn(0, 100)}%",
+                        )
+                    }
                     val base = 0.15f + (0.75f * index.toFloat() / diff.toDownload.size).coerceAtMost(0.75f)
                     val perFileWeight = 0.75f / diff.toDownload.size
                     _bundle.update {
@@ -417,103 +580,59 @@ class BundleManager(
                         )
                     }
                 },
+                onProgress = { _, _, bytesWritten ->
+                    onByteProgress?.invoke(bytesWritten, diff.totalBytes)
+                },
             )
-            val targetDir = File(libsDir, abiProvider())
-            for (asset in diff.toDownload) {
-                val f = File(targetDir, asset.cleanName)
-                if (asset.size > 0 && f.exists() && f.length() != asset.size) {
-                    val got = f.length()
-                    f.delete()
-                    throw IOException("${asset.cleanName} came out short ($got of ${asset.size} bytes) — try again")
-                }
-            }
             clearAutoExcluded(diff.toDownload.map { it.cleanName }.toSet())
-            val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, abiProvider(), _libExcluded.value)
+            val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, abi, _libExcluded.value)
             if (files.isEmpty()) throw IOException("No .so files found after download")
-            val b = buildBundleFromFileMap(files, abiProvider())
+            val b = buildBundleFromFileMap(files, abi)
             markBundleTagKnown(tagName)
-            recordAppliedBuilds(abiProvider(), assets)
-            val installed = installIntoGameDir(b)
+            recordAppliedBuilds(abi, coreAssets)
             _bundle.value = BundleState.Ready(
-                gameDirMessage("Updated ${diff.toDownload.size} files", installed),
+                "Updated ${diff.toDownload.size} files",
                 b.manifest.entries.size,
                 b.manifest.version,
             )
             loadedBundle = b
             downloadingAbi = null
-            _bundleVersion.value = b.manifest.version
+            _coreOutdatedCount.value = 0
             scanLibs()
             refreshAbiStatus()
-            com.yoriva.jobs.JobProgress.finish(app, com.yoriva.patcher.PatcherViewModel.JOB_LIBS, "Libraries ready")
+            if (jobStarted) {
+                com.yoriva.jobs.JobProgress.finish(app, PatcherViewModel.JOB_LIBS, "Libraries ready")
+            }
             true
+        } catch (c: CancellationException) {
+            downloadingAbi = null
+            _libs.value = _libs.value.map {
+                if (it.downloading) it.copy(downloading = false, downloadProgress = -1f) else it
+            }
+            _bundle.value = if (loadedBundle != null) BundleState.Loaded else BundleState.None
+            if (jobStarted) com.yoriva.jobs.JobProgress.clear(PatcherViewModel.JOB_LIBS)
+            scanLibs()
+            refreshAbiStatus()
+            throw c
         } catch (t: Throwable) {
-            val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, abiProvider(), _libExcluded.value)
-            if (files.isNotEmpty()) {
-                val b = buildBundleFromFileMap(files, abiProvider())
+            val files = IncrementalUpdateManager.loadBundleFileMap(libsDir, abi, _libExcluded.value)
+            if (files.isNotEmpty() && loadedBundle == null) {
+                val b = buildBundleFromFileMap(files, abi)
                 loadedBundle = b
                 _bundle.value = BundleState.Loaded
                 scanLibs()
                 if (jobStarted) {
-                    com.yoriva.jobs.JobProgress.finish(app, com.yoriva.patcher.PatcherViewModel.JOB_LIBS, "Using the libraries already on disk")
+                    com.yoriva.jobs.JobProgress.finish(app, PatcherViewModel.JOB_LIBS, "Using the libraries already on disk")
                 }
             } else {
                 _bundle.value = BundleState.DownloadError(t.message ?: "Unknown error")
                 if (jobStarted) {
-                    com.yoriva.jobs.JobProgress.finish(app, com.yoriva.patcher.PatcherViewModel.JOB_LIBS, t.message ?: "Download failed", ok = false)
+                    com.yoriva.jobs.JobProgress.finish(app, PatcherViewModel.JOB_LIBS, t.message ?: "Download failed", ok = false)
                 }
             }
             downloadingAbi = null
             refreshAbiStatus()
             false
-        }
-    }
-
-    private fun installIntoGameDir(bundle: Bundle): Int? {
-        val gameDir = gameDirProvider()
-        if (!gameDir.isDirectory) return null
-        wipeObsoleteGameDlls(gameDir)
-        var count = 0
-        bundle.manifest.entries.forEach { entry ->
-            val relative = gameInstallPathFor(entry.target) ?: return@forEach
-            val source = bundle.diskFiles[entry.source]
-                ?: bundle.diskFiles[entry.target]
-                ?: return@forEach
-            if (!source.isFile) return@forEach
-            val dest = File(gameDir, relative)
-            dest.parentFile?.mkdirs()
-            source.copyTo(dest, overwrite = true)
-            dest.setExecutable(true)
-            count++
-        }
-        return count
-    }
-
-    private fun gameDirMessage(base: String, installed: Int?): String = when {
-        installed == null -> "$base · cstrike folder not found"
-        installed == 0 -> "$base · nothing to place in cstrike"
-        else -> "$base · $installed files placed in cstrike"
-    }
-
-    private fun gameInstallPathFor(target: String): String? {
-        val name = target.substringAfterLast('/')
-        if (name.endsWith(".so")) {
-            return null
-        }
-        return null
-    }
-
-    private fun wipeObsoleteGameDlls(gameDir: File) {
-        val targets = listOf(
-            "addons/yapb/bin",
-            "addons/amxmodx/modules",
-            "addons/amxmodx",
-            "addons/metamod",
-            "cl_dlls",
-            "dlls",
-        )
-        for (rel in targets) {
-            File(gameDir, rel).listFiles { f -> f.isFile && f.name.endsWith(".so") }
-                ?.forEach { it.delete() }
         }
     }
 
@@ -714,21 +833,7 @@ class BundleManager(
         }
     }
 
-    fun patchComponents(): List<PatchComponent> {
-        val b = loadedBundle ?: return emptyList()
-        val order = listOf("amxx", "metamod", "yapb", "client", "menu", "modules", "plugins", "game", "other")
-        return b.manifest.entries
-            .groupBy { componentKeyFor(it.target) }
-            .mapNotNull { (key, entries) ->
-                PatchComponent(
-                    key = key,
-                    label = labelForComponent(key),
-                    description = entries.joinToString(", ") {
-                        it.target.substringAfterLast("/")
-                    },
-                    entryTargets = entries.map { it.target },
-                )
-            }
-            .sortedBy { order.indexOf(it.key) }
+    companion object {
+        private const val REMOTE_CHECK_COOLDOWN_MS = 20_000L
     }
 }

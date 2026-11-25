@@ -246,7 +246,12 @@ private fun ConfigList(
     val grouped = files.groupBy { it.group }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            end = 16.dp,
+            top = 4.dp,
+            bottom = 8.dp + navigationBarBottomPadding(),
+        ),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         GROUP_ORDER.forEach { group ->

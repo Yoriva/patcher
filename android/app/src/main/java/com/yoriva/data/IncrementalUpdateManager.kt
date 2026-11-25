@@ -1,17 +1,14 @@
 ﻿package com.yoriva.data
+
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.File
+import java.io.IOException
 import java.security.MessageDigest
-import java.util.concurrent.TimeUnit
+
 object IncrementalUpdateManager {
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .build()
     private val json = Json { ignoreUnknownKeys = true }
+
     @Serializable
     data class ReleaseAsset(
         val name: String = "",
@@ -19,11 +16,13 @@ object IncrementalUpdateManager {
         val browser_download_url: String = "",
         val digest: String = "",
     )
+
     @Serializable
     data class ReleaseInfo(
         val tag_name: String = "",
         val assets: List<ReleaseAsset> = emptyList(),
     )
+
     @Serializable
     data class ManifestInfo(
         val version: String = "",
@@ -39,6 +38,7 @@ object IncrementalUpdateManager {
             val size: Long = 0,
         )
     }
+
     data class AssetInfo(
         val assetName: String,
         val cleanName: String,
@@ -46,96 +46,132 @@ object IncrementalUpdateManager {
         val downloadUrl: String,
         val sha256: String = "",
         val build: String = "",
+        val etag: String = "",
     )
+
     data class UpdateResult(
         val toDownload: List<AssetInfo>,
         val upToDate: List<AssetInfo>,
         val totalBytes: Long,
     )
+
     private const val REPO = "Yoriva/patcher"
     private const val PLUGIN_REPO = "Yoriva/yoriva-plugins"
     private const val PLUGIN_TAG = "continuous"
+
     suspend fun fetchReleaseAssets(tag: String, abi: String): List<AssetInfo> {
         val manifestName = if (abi == "arm64-v8a") "manifest.json" else "manifest-v7a.json"
-        val manifest = try {
-            fetchManifestAssets(tag, manifestName)
-        } catch (_: Throwable) {
-            null
-        }
+        val manifest = runCatching { fetchManifestAssets(tag, manifestName) }.getOrNull()
         if (manifest != null) return manifest
-        return fetchReleaseAssetsApi(tag, abi)
+        val api = fetchReleaseAssetsApi(tag, abi)
+        if (api.isNotEmpty()) return api
+        val expanded = fetchExpandedAssets(
+            repo = REPO,
+            tag = tag,
+            filter = { name -> name.startsWith("${abi}_") && name.endsWith(".so") },
+            cleanName = { name -> name.removePrefix("${abi}_") },
+        )
+        if (expanded != null) return expanded
+        throw IOException("Could not load core library list for $abi")
     }
+
     suspend fun fetchPluginAssets(abi: String, tag: String = PLUGIN_TAG): List<AssetInfo> {
         val suffix = if (abi == "arm64-v8a") "arm64" else "arm"
-        val release = fetchRelease(PLUGIN_REPO, tag) ?: return emptyList()
-        return release.assets
-            .filter { it.name.endsWith("_yoriva_${suffix}.so") }
-            .map { asset ->
-                AssetInfo(
-                    assetName = asset.name,
-                    cleanName = asset.name,
-                    size = asset.size,
-                    downloadUrl = asset.browser_download_url,
-                    sha256 = sha256Digest(asset.digest),
-                )
-            }
+        val release = fetchRelease(PLUGIN_REPO, tag)
+        if (release != null) {
+            return release.assets
+                .filter { it.name.endsWith("_yoriva_${suffix}.so") }
+                .map { asset ->
+                    AssetInfo(
+                        assetName = asset.name,
+                        cleanName = asset.name,
+                        size = asset.size,
+                        downloadUrl = asset.browser_download_url,
+                        sha256 = sha256Digest(asset.digest),
+                    )
+                }
+        }
+        val expanded = fetchExpandedAssets(
+            repo = PLUGIN_REPO,
+            tag = tag,
+            filter = { name -> name.endsWith("_yoriva_${suffix}.so") },
+            cleanName = { name -> name },
+        )
+        if (expanded != null) return expanded
+        throw IOException("Could not load Yoriva Plugins from GitHub")
     }
+
     private suspend fun fetchManifestAssets(tag: String, manifestName: String): List<AssetInfo>? {
         val url = ReleaseRepository.assetUrl(REPO, tag, manifestName)
-        val req = Request.Builder()
-            .url(url)
-            .header("User-Agent", "cs16-amxx-patcher")
-            .header("Accept", "application/json")
-            .build()
-        return client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) return null
-            val manifest = json.decodeFromString<ManifestInfo>(resp.body?.string().orEmpty())
-            manifest.files.map { f ->
-                AssetInfo(
-                    assetName = f.asset,
-                    cleanName = f.name,
-                    size = f.size,
-                    downloadUrl = ReleaseRepository.assetUrl(REPO, tag, f.asset),
-                    sha256 = f.sha256,
-                    build = f.build,
-                )
-            }
+        val raw = ReleaseRepository.fetchJson(url, accept = "application/json") ?: return null
+        val manifest = json.decodeFromString<ManifestInfo>(raw)
+        return manifest.files.map { f ->
+            AssetInfo(
+                assetName = f.asset,
+                cleanName = f.name,
+                size = f.size,
+                downloadUrl = ReleaseRepository.assetUrl(REPO, tag, f.asset),
+                sha256 = f.sha256,
+                build = f.build,
+            )
         }
     }
+
     private suspend fun fetchReleaseAssetsApi(tag: String, abi: String): List<AssetInfo> {
         val release = fetchRelease(REPO, tag) ?: return emptyList()
         return release.assets
             .filter { it.name.startsWith("${abi}_") && it.name.endsWith(".so") }
             .map { asset ->
-                val cleanName = asset.name.removePrefix("${abi}_")
                 AssetInfo(
                     assetName = asset.name,
-                    cleanName = cleanName,
+                    cleanName = asset.name.removePrefix("${abi}_"),
                     size = asset.size,
                     downloadUrl = asset.browser_download_url,
                     sha256 = sha256Digest(asset.digest),
                 )
             }
     }
-    private suspend fun fetchRelease(repo: String, tag: String): ReleaseInfo? {
-        val url = "https://api.github.com/repos/$repo/releases/tags/$tag"
-        return try {
-            val req = Request.Builder()
-                .url(url)
-                .header("User-Agent", "cs16-amxx-patcher")
-                .header("Accept", "application/vnd.github+json")
-                .build()
-            client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return null
-                val body = resp.body?.string() ?: return null
-                json.decodeFromString<ReleaseInfo>(body)
-            }
-        } catch (_: Throwable) {
-            null
+
+    /**
+     * Rate-limit-free fallback parsing GitHub's `releases/expanded_assets` HTML fragment and
+     * probing each matching binary's remote metadata via HEAD.
+     */
+    private suspend fun fetchExpandedAssets(
+        repo: String,
+        tag: String,
+        filter: (String) -> Boolean,
+        cleanName: (String) -> String,
+    ): List<AssetInfo>? {
+        val expandedUrl = "https://github.com/$repo/releases/expanded_assets/$tag?t=${System.currentTimeMillis()}"
+        val html = ReleaseRepository.fetchText(expandedUrl) ?: return null
+        val hrefRegex = Regex("""/$repo/releases/download/$tag/([^"'\s<>]+)""")
+        val names = hrefRegex.findAll(html)
+            .mapNotNull { it.groupValues.getOrNull(1) }
+            .distinct()
+            .filter(filter)
+            .toList()
+        return names.map { assetName ->
+            val downloadUrl = ReleaseRepository.assetUrl(repo, tag, assetName)
+            val probe = ReleaseRepository.probe(downloadUrl)
+            AssetInfo(
+                assetName = assetName,
+                cleanName = cleanName(assetName),
+                size = probe?.size ?: 0L,
+                downloadUrl = downloadUrl,
+                etag = probe?.etag.orEmpty(),
+            )
         }
     }
+
+    private suspend fun fetchRelease(repo: String, tag: String): ReleaseInfo? {
+        val url = "https://api.github.com/repos/$repo/releases/tags/$tag"
+        val body = ReleaseRepository.fetchJson(url, accept = "application/vnd.github+json") ?: return null
+        return runCatching { json.decodeFromString<ReleaseInfo>(body) }.getOrNull()
+    }
+
     private fun sha256Digest(digest: String): String =
         if (digest.startsWith("sha256:")) digest.removePrefix("sha256:") else ""
+
     fun diff(
         releaseAssets: List<AssetInfo>,
         libsDir: File,
@@ -153,23 +189,35 @@ object IncrementalUpdateManager {
                 toDownload.add(asset)
             }
         }
-        val totalBytes = toDownload.sumOf { it.size }
-        return UpdateResult(toDownload = toDownload, upToDate = upToDate, totalBytes = totalBytes)
+        return UpdateResult(
+            toDownload = toDownload,
+            upToDate = upToDate,
+            totalBytes = toDownload.sumOf { it.size },
+        )
     }
+
     fun isUpToDate(
         fileOnDisk: File,
         asset: AssetInfo,
         appliedBuild: String? = null,
     ): Boolean {
-        if (!fileOnDisk.exists()) return false
+        if (!fileOnDisk.isFile) return false
         if (asset.size > 0 && fileOnDisk.length() != asset.size) return false
-        val want = asset.build
-        val have = appliedBuild
-        if (!want.isNullOrEmpty() && !have.isNullOrEmpty()) return want == have
-        val sha = asset.sha256
-        if (sha.isEmpty() || have != null) return true
-        return sha256Of(fileOnDisk) == sha
+        if (asset.sha256.isNotEmpty()) {
+            return sha256Of(fileOnDisk) == asset.sha256
+        }
+        if (asset.build.isNotEmpty() && !appliedBuild.isNullOrEmpty()) {
+            return asset.build == appliedBuild
+        }
+        if (asset.etag.isNotEmpty()) {
+            return ReleaseRepository.isRemoteMatch(
+                fileOnDisk,
+                ReleaseRepository.RemoteInfo(size = asset.size, lastModifiedMillis = 0L, etag = asset.etag),
+            )
+        }
+        return true
     }
+
     fun sha256Of(file: File): String {
         return try {
             val md = MessageDigest.getInstance("SHA-256")
@@ -186,6 +234,33 @@ object IncrementalUpdateManager {
             ""
         }
     }
+
+    private suspend fun downloadAndVerifyAsset(
+        asset: AssetInfo,
+        targetDir: File,
+        onBytes: (written: Long, total: Long) -> Unit,
+    ): File {
+        val destFile = File(targetDir, asset.cleanName)
+        ReleaseRepository.downloadFile(
+            url = asset.downloadUrl,
+            dest = destFile,
+            expectedSize = asset.size,
+            executable = true,
+            onProgress = onBytes,
+        )
+        if (asset.sha256.isNotEmpty() && sha256Of(destFile) != asset.sha256) {
+            destFile.delete()
+            throw IOException("Checksum verification failed for ${asset.cleanName}")
+        }
+        if (asset.etag.isNotEmpty()) {
+            ReleaseRepository.writeFileStamp(
+                destFile,
+                ReleaseRepository.RemoteInfo(size = destFile.length(), lastModifiedMillis = 0L, etag = asset.etag),
+            )
+        }
+        return destFile
+    }
+
     suspend fun downloadChanged(
         toDownload: List<AssetInfo>,
         libsDir: File,
@@ -194,123 +269,57 @@ object IncrementalUpdateManager {
         onFileProgress: (index: Int, asset: AssetInfo, progress: Float) -> Unit = { _, _, _ -> },
         onProgress: (downloaded: Int, total: Int, bytesWritten: Long) -> Unit = { _, _, _ -> },
     ) {
-        val targetDir = File(libsDir, abi)
-        targetDir.mkdirs()
+        val targetDir = File(libsDir, abi).apply { mkdirs() }
+        var completedBytes = 0L
         for ((index, asset) in toDownload.withIndex()) {
             onFileStart(index, asset)
-            val destFile = File(targetDir, asset.cleanName)
-            destFile.parentFile?.mkdirs()
-            val req = Request.Builder()
-                .url(asset.downloadUrl)
-                .header("User-Agent", "cs16-amxx-patcher")
-                .header("Accept", "application/octet-stream")
-                .build()
-            client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) {
-                    val hint = if (resp.code == 403) {
-                        val wait = resp.header("Retry-After")
-                            ?.trim()?.toLongOrNull()
-                        if (wait != null && wait >= 60) " — wait ${wait / 60} min" else ""
-                    } else ""
-                    throw IllegalStateException(
-                        "Download failed for ${asset.assetName}: ${resp.code}$hint"
-                    )
+            val destFile = downloadAndVerifyAsset(asset, targetDir) { written, total ->
+                val expected = asset.size.takeIf { it > 0 } ?: total
+                if (expected > 0) {
+                    onFileProgress(index, asset, (written.toFloat() / expected).coerceIn(0f, 1f))
                 }
-                val body = resp.body ?: throw IllegalStateException("Empty body for ${asset.assetName}")
-                val expectedSize = asset.size.takeIf { it > 0 }
-                    ?: body.contentLength().takeIf { it > 0 }
-                    ?: 0L
-                var written = 0L
-                body.byteStream().use { input ->
-                    destFile.outputStream().use { output ->
-                        val buffer = ByteArray(65536)
-                        while (true) {
-                            val n = input.read(buffer)
-                            if (n < 0) break
-                            output.write(buffer, 0, n)
-                            written += n
-                            if (expectedSize > 0) {
-                                onFileProgress(index, asset, (written.toFloat() / expectedSize).coerceIn(0f, 1f))
-                            }
-                        }
-                    }
-                }
-                destFile.setExecutable(true)
+                onProgress(index, toDownload.size, completedBytes + written)
             }
-            onProgress(index + 1, toDownload.size, toDownload.take(index + 1).sumOf { it.size })
+            completedBytes += destFile.length()
+            onProgress(index + 1, toDownload.size, completedBytes)
         }
     }
+
     suspend fun downloadSingle(
         asset: AssetInfo,
         libsDir: File,
         abi: String,
         onProgress: (Float) -> Unit = {},
     ) {
-        val targetDir = File(libsDir, abi)
-        targetDir.mkdirs()
-        val destFile = File(targetDir, asset.cleanName)
-        destFile.parentFile?.mkdirs()
-        val req = Request.Builder()
-            .url(asset.downloadUrl)
-            .header("User-Agent", "cs16-amxx-patcher")
-            .header("Accept", "application/octet-stream")
-            .build()
-        client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) {
-                val hint = if (resp.code == 403) {
-                    val wait = resp.header("Retry-After")
-                        ?.trim()?.toLongOrNull()
-                    if (wait != null && wait >= 60) " — wait ${wait / 60} min" else ""
-                } else ""
-                throw IllegalStateException(
-                    "Download failed for ${asset.assetName}: ${resp.code}$hint"
-                )
+        val targetDir = File(libsDir, abi).apply { mkdirs() }
+        downloadAndVerifyAsset(asset, targetDir) { written, total ->
+            val expected = asset.size.takeIf { it > 0 } ?: total
+            if (expected > 0) {
+                onProgress((written.toFloat() / expected).coerceIn(0f, 1f))
             }
-            val body = resp.body ?: throw IllegalStateException("Empty body for ${asset.assetName}")
-            val expectedSize = asset.size.takeIf { it > 0 }
-                ?: body.contentLength().takeIf { it > 0 }
-                ?: 0L
-            var written = 0L
-            body.byteStream().use { input ->
-                destFile.outputStream().use { output ->
-                    val buffer = ByteArray(65536)
-                    while (true) {
-                        val n = input.read(buffer)
-                        if (n < 0) break
-                        output.write(buffer, 0, n)
-                        written += n
-                        if (expectedSize > 0) {
-                            onProgress((written.toFloat() / expectedSize).coerceIn(0f, 1f))
-                        }
-                    }
-                }
-            }
-            destFile.setExecutable(true)
         }
     }
+
     fun loadBundleFileMap(libsDir: File, abi: String, exclude: Set<String> = emptySet()): Map<String, File> {
         val targetDir = File(libsDir, abi)
         if (!targetDir.exists()) return emptyMap()
         val suffix = if (abi == "arm64-v8a") "arm64" else "armv7l"
-        val modSuffix = if (abi == "arm64-v8a") "amd64" else "arm"
         val files = HashMap<String, File>()
         targetDir.listFiles()?.filter {
             it.isFile && it.extension == "so" && it.name !in exclude
         }?.forEach { file ->
-            val name = file.name
-            val targetPath = getTargetPath(name, abi, suffix, modSuffix)
+            val targetPath = getTargetPath(file.name, abi, suffix)
             if (targetPath != null) {
                 files[targetPath] = file
             }
         }
         return files
     }
-    private fun getTargetPath(name: String, abi: String, suffix: String, modSuffix: String): String? {
-        return when {
-            name == "libmetadroid.so" -> "lib/$abi/libmetadroid_android_$suffix.so"
-            name.startsWith("lib") && name.endsWith(".so") -> "lib/$abi/$name"
-            name.endsWith(".so") -> "lib/$abi/lib$name"
-            else -> null
-        }
+
+    private fun getTargetPath(name: String, abi: String, suffix: String): String? = when {
+        name == "libmetadroid.so" -> "lib/$abi/libmetadroid_android_$suffix.so"
+        name.startsWith("lib") && name.endsWith(".so") -> "lib/$abi/$name"
+        name.endsWith(".so") -> "lib/$abi/lib$name"
+        else -> null
     }
 }

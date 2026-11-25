@@ -39,6 +39,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -62,7 +63,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -107,7 +108,7 @@ fun PatchScreen(vm: PatcherViewModel, onOpenLibraries: () -> Unit) {
 
     LaunchedEffect(Unit) {
         vm.runAutoDetectAbi()
-        vm.refreshSourceApkStatus()
+        vm.checkAllAssetsStatus()
         vm.refreshGameInstalled()
     }
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -298,6 +299,11 @@ private fun DownloadRow(
     val bundleState by vm.bundle.collectAsState()
     val abiStatus by vm.abiStatus.collectAsState()
     val bulkRunning by vm.downloadAllRunning.collectAsState()
+    val assetsSyncStage by vm.assetsSyncStage.collectAsState()
+    val gameAssetsProgress by vm.gameAssetsProgress.collectAsState()
+    val assetsSyncError by vm.assetsSyncError.collectAsState()
+    val coreOutdated by vm.coreOutdatedCount.collectAsState()
+    val gameAssetsOutdated by vm.gameAssetsOutdated.collectAsState()
     val abi by vm.abi.collectAsState()
     val patchable = abi in vm.patchableAbis
     val target = abiStatus.firstOrNull { it.selected }
@@ -311,30 +317,34 @@ private fun DownloadRow(
     val allReady = hasClient && bundleReady
     val busy = bulkRunning || downloading != null || isFetching || downloadingBundle != null
     val outdated = download as? SourceDownloadState.Outdated
-    val errorNote = outdated?.let { "Client APK: ${it.reason} — download to update it." }
-        ?: when (val s = download) {
-            is SourceDownloadState.Corrupt -> "${s.reason}. Re-download required."
-            is SourceDownloadState.Failed -> s.message
-            else -> (bundleState as? BundleState.DownloadError)?.message
-        }
+    val hasUpdates = outdated != null || coreOutdated > 0 || gameAssetsOutdated
+    val errorNote = when (val s = download) {
+        is SourceDownloadState.Corrupt -> "${s.reason}. Re-download required."
+        is SourceDownloadState.Failed -> s.message
+        else -> (bundleState as? BundleState.DownloadError)?.message ?: assetsSyncError
+    }
     val actionKey = when {
         !patchable -> "disabled"
         busy -> "busy"
-        allReady && outdated == null -> "ready"
+        hasUpdates -> "update"
+        allReady -> "ready"
         else -> "download"
     }
     GroupedItem(
         title = "Assets",
         subtitle = when {
             !patchable -> "Not supported on ${displayAbi(abi)} — ARM only"
-            isFetching -> "Checking the latest release…"
-            downloading != null -> "Downloading the client APK…"
+            downloading != null -> "Downloading client APK…"
+            isFetching -> "Checking client release…"
             downloadingBundle != null -> "Downloading mod libraries…"
-            outdated != null -> "A newer client build is available on GitHub"
-            allReady -> "Client APK and mod libraries"
-            !hasClient && bundleReady -> "The client APK is still required"
-            hasClient && !bundleReady -> "Mod libraries are still required"
-            else -> "Client APK and mod libraries"
+            busy -> assetsSyncStage ?: "Checking assets…"
+            outdated != null -> "Client APK update available · ${outdated.reason}"
+            coreOutdated > 0 -> "$coreOutdated core ${if (coreOutdated == 1) "library" else "libraries"} updated on GitHub"
+            gameAssetsOutdated -> "Game content archive update available"
+            allReady -> "Client APK and core libraries ready"
+            !hasClient && bundleReady -> "Client APK still required"
+            hasClient && !bundleReady -> "Core libraries still required"
+            else -> "Client APK, core libraries, and game data"
         },
         index = index,
         total = total,
@@ -353,8 +363,9 @@ private fun DownloadRow(
                     label = "downloadAction",
                 ) { key ->
                     when (key) {
-                        "busy" -> SmallProgressButton("Downloading")
+                        "busy" -> SmallButton("Stop", Icons.Filled.Close) { vm.cancelDownloadAll() }
                         "disabled" -> SmallButton("Not supported", Icons.Filled.Warning, enabled = false) { }
+                        "update" -> SmallButton("Update", Icons.Filled.Refresh) { vm.downloadAll() }
                         "ready" -> FilledTonalButton(
                             onClick = onOpenLibraries,
                             modifier = Modifier.height(38.dp),
@@ -392,8 +403,26 @@ private fun DownloadRow(
         if (downloadingBundle != null) {
             ProgressFooter(
                 progress = downloadingBundle.percent,
-                left = if (downloadingBundle.fileTotal > 0) "File ${downloadingBundle.fileIndex + 1} of ${downloadingBundle.fileTotal}" else "Downloading…",
+                left = if (downloadingBundle.fileTotal > 0) {
+                    "${downloadingBundle.currentFile.ifBlank { "Libraries" }} (${downloadingBundle.fileIndex + 1}/${downloadingBundle.fileTotal})"
+                } else {
+                    "Checking libraries…"
+                },
                 right = "${(downloadingBundle.percent * 100).toInt()}%",
+            )
+        }
+        val ga = gameAssetsProgress
+        if (busy && downloading == null && downloadingBundle == null && ga != null) {
+            val (done, totalBytes) = ga
+            val progress = if (totalBytes > 0L) (done.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f) else null
+            ProgressFooter(
+                progress = progress,
+                left = if (totalBytes > 0L) {
+                    "%.1f / %.1f MB".format(java.util.Locale.US, done / 1048576.0, totalBytes / 1048576.0)
+                } else {
+                    "%.1f MB".format(java.util.Locale.US, done / 1048576.0)
+                },
+                right = progress?.let { "${(it * 100).toInt()}%" }.orEmpty(),
             )
         }
         if (errorNote != null) {
@@ -691,18 +720,23 @@ internal fun GroupedItem(
     index: Int,
     total: Int,
     error: Boolean = false,
+    animateSize: Boolean = true,
     trailing: @Composable () -> Unit = {},
     footer: @Composable ColumnScope.() -> Unit = {},
 ) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .animateContentSize(
-                animationSpec = spring(
-                    dampingRatio = 0.9f,
-                    stiffness = Spring.StiffnessMediumLow,
-                ),
-            ),
+        modifier = if (animateSize) {
+            Modifier
+                .fillMaxWidth()
+                .animateContentSize(
+                    animationSpec = spring(
+                        dampingRatio = 0.9f,
+                        stiffness = Spring.StiffnessMediumLow,
+                    ),
+                )
+        } else {
+            Modifier.fillMaxWidth()
+        },
         shape = getGroupedItemShape(index, total),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,

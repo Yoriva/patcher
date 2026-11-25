@@ -106,8 +106,6 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     }
     private val _abi = MutableStateFlow(deviceAbi)
     val abi: StateFlow<String> = _abi.asStateFlow()
-    private val _autoDetectedAbi = MutableStateFlow(deviceAbi)
-    val autoDetectedAbi: StateFlow<String> = _autoDetectedAbi.asStateFlow()
 
     private fun chooseSupportedAbi(
         supported: List<String>,
@@ -202,7 +200,6 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun runAutoDetectAbi() {
         val detected = autoDetectAbi()
-        _autoDetectedAbi.value = detected
         if (detected in SUPPORTED_ABIS && _abi.value in SUPPORTED_ABIS && detected != _abi.value) {
             setAbi(detected)
         }
@@ -210,9 +207,6 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     val supportedAbis: List<String> = SUPPORTED_ABIS
     val patchableAbis: List<String> = SUPPORTED_ABIS
 
-    val isDeviceAbi: String get() = deviceAbi
-    val sourceAbis: List<String> get() = sourceManager.source.value?.abis ?: emptyList()
-    val loadedBundleAbi: String? get() = bundleManager.loadedBundle?.manifest?.abi?.ifBlank { null }
     fun setAbi(abi: String) {
         if (abi !in SUPPORTED_ABIS || abi == _abi.value) return
         _abi.value = abi
@@ -240,9 +234,6 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         val installed: Boolean get() = hasBundle && libCount > 0
     }
-    val bundleVersion: StateFlow<String> get() = bundleManager.bundleVersion
-    private val _updateAvailable = MutableStateFlow(false)
-    val updateAvailable: StateFlow<Boolean> = _updateAvailable.asStateFlow()
     private val _abiStatus = MutableStateFlow<List<AbiStatus>>(emptyList())
     val abiStatus: StateFlow<List<AbiStatus>> = _abiStatus.asStateFlow()
     private val downloadingAbi: String? get() = bundleManager.downloadingAbi
@@ -306,16 +297,31 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
             recordAppliedBuilds = { abi, assets -> updateManager.recordAppliedBuilds(abi, assets) },
             markBundleTagKnown = { tag -> updateManager.markBundleTagKnown(tag) },
             refreshAbiStatus = { refreshAbiStatus() },
-            setReleaseNote = { note -> _releaseNote.value = note },
             externalRoot = externalRoot(app),
-            gameDirProvider = { File(addonsManager.installPathValue()) },
         )
     }
     private val libsDir = bundleManager.libsDir
     val libs: StateFlow<List<LibInfo>> get() = bundleManager.libs
     val customLibs: StateFlow<List<CustomLib>> get() = bundleManager.customLibs
     val libsChecking: StateFlow<Boolean> get() = bundleManager.libsChecking
-    fun refreshLibStatus() = bundleManager.refreshLibStatus()
+    val libsError: StateFlow<String?> get() = bundleManager.libsError
+    val pluginsDownloading: StateFlow<Boolean> get() = bundleManager.pluginsDownloading
+    val coreOutdatedCount: StateFlow<Int> get() = bundleManager.coreOutdatedCount
+    val gameAssetsOutdated: StateFlow<Boolean> get() = patchManager.gameAssetsOutdated
+    fun dismissLibsError() = bundleManager.dismissLibsError()
+    fun refreshLibStatus(force: Boolean = true) = bundleManager.refreshLibStatus(force)
+    fun downloadOptionalPlugins() = bundleManager.downloadOptionalPlugins()
+    fun cancelPluginsDownload() = bundleManager.cancelPluginDownloads()
+    fun cancelBundleDownload() = bundleManager.cancelBundleDownload()
+    fun cancelSingleLib(libName: String) = bundleManager.cancelSingleLib(libName)
+
+    fun checkAllAssetsStatus() {
+        viewModelScope.launch(Dispatchers.IO) {
+            sourceManager.refreshSourceApkStatus()
+            bundleManager.scanLibs(autoLoad = true, checkRemote = true)
+            patchManager.checkGameAssetsStatus(sourceManager.receivedFile())
+        }
+    }
     private val updateManager: UpdateManager by lazy {
         UpdateManager(
             app = app,
@@ -347,7 +353,7 @@ class PatcherViewModel(app: Application) : AndroidViewModel(app) {
             abiProvider = { _abi.value },
             loadSigningKeystore = { loadSigningKeystore() },
             workFile = { name -> workFile(name) },
-            installAddons = { addonsManager.fetchAndInstallAddons() },
+            installAddons = { addonsManager.fetchAndInstallAddons(reportJob = false) },
         )
     }
     val patchWorkers: StateFlow<Int> get() = patchManager.patchWorkers
@@ -448,8 +454,6 @@ private fun externalRoot(app: Application): File {
         scanCustomLibs()
         runAutoDetectAbi()
     }
-    private val _releaseNote = MutableStateFlow<String?>(null)
-    val releaseNote: StateFlow<String?> = _releaseNote.asStateFlow()
     private fun loadSigningKeystore(): SigningKeystore {
         val assets = getApplication<Application>().assets
         val keyPem = runCatching {
@@ -473,42 +477,108 @@ private fun externalRoot(app: Application): File {
         throw IllegalStateException("Signing keystore assets (debug_key.pem or debug.p12) could not be loaded")
     }
     private fun cachedClientApk(): File? = sourceManager.cachedClientApk()
-    fun refreshSourceApkStatus() = sourceManager.refreshSourceApkStatus()
-    fun downloadSourceApk() = sourceManager.downloadSourceApk()
     fun useCachedBundle() = bundleManager.useCachedBundle()
-    fun useLoadedBundle() = bundleManager.useLoadedBundle()
     fun scanLibs(autoLoad: Boolean = false, checkRemote: Boolean = false) = bundleManager.scanLibs(autoLoad, checkRemote)
     fun refreshSingleLib(libName: String) = bundleManager.refreshSingleLib(libName)
     fun fetchAndDownloadBundle() = bundleManager.fetchAndDownloadBundle()
     val libExcluded: StateFlow<Set<String>> get() = bundleManager.libExcluded
-    fun toggleLibExcluded(name: String) = bundleManager.toggleLibExcluded(name)
     fun setLibExcluded(name: String, excluded: Boolean) = bundleManager.setLibExcluded(name, excluded)
     private var downloadAllJob: Job? = null
     private val _downloadAll = MutableStateFlow(false)
     val downloadAllRunning: StateFlow<Boolean> = _downloadAll.asStateFlow()
+    private val _assetsSyncStage = MutableStateFlow<String?>(null)
+    val assetsSyncStage: StateFlow<String?> = _assetsSyncStage.asStateFlow()
+    private val _gameAssetsProgress = MutableStateFlow<Pair<Long, Long>?>(null)
+    val gameAssetsProgress: StateFlow<Pair<Long, Long>?> = _gameAssetsProgress.asStateFlow()
+    private val _assetsSyncError = MutableStateFlow<String?>(null)
+    val assetsSyncError: StateFlow<String?> = _assetsSyncError.asStateFlow()
+
+    fun cancelDownloadAll() {
+        downloadAllJob?.cancel()
+        downloadAllJob = null
+        bundleManager.cancelAllDownloads()
+        _gameAssetsProgress.value = null
+        _assetsSyncStage.value = null
+        _assetsSyncError.value = null
+        _downloadAll.value = false
+        com.yoriva.jobs.JobProgress.clear(JOB_ASSETS)
+        sourceManager.refreshSourceApkStatus()
+        bundleManager.scanLibs()
+        bundleManager.useCachedBundle()
+    }
+
+    /**
+     * Incrementally checks each required asset against GitHub (`CS16Client-Android.apk`,
+     * each core `.so` via SHA-256/size, and `game-assets.zip`) and downloads only missing or
+     * updated files. Supports immediate cancellation via [cancelDownloadAll].
+     */
     fun downloadAll() {
         if (downloadAllJob?.isActive == true) return
         _downloadAll.value = true
+        _assetsSyncError.value = null
+        _gameAssetsProgress.value = null
+        _assetsSyncStage.value = "Checking installed assets…"
         downloadAllJob = viewModelScope.launch(Dispatchers.IO) {
+            com.yoriva.jobs.JobProgress.begin(app, JOB_ASSETS, "Assets", "Checking installed files…")
             try {
-                sourceManager.clearSourceCache()
-                bundleManager.clearLocalLibraryCache()
-                updateManager.clearLibraryState()
-                sourceManager.downloadSourceApkNow()
-                bundleManager.fetchAndDownloadBundleNow()
+                _assetsSyncStage.value = "Checking client APK…"
+                com.yoriva.jobs.JobProgress.detail(app, JOB_ASSETS, "Checking client APK…")
+                val apkOk = sourceManager.ensureSourceApkNow(reportJob = false) { done, total ->
+                    _assetsSyncStage.value = "Downloading client APK…"
+                    com.yoriva.jobs.JobProgress.progress(app, JOB_ASSETS, done, total, "Client APK…")
+                }
+                if (!apkOk) {
+                    val reason = (sourceManager.sourceDownload.value as? SourceDownloadState.Failed)?.message
+                        ?: "Client APK download failed"
+                    throw IllegalStateException(reason)
+                }
+
+                _assetsSyncStage.value = "Checking core libraries…"
+                com.yoriva.jobs.JobProgress.progress(app, JOB_ASSETS, 0L, 100L, "Checking core libraries…")
+                val bundleOk = bundleManager.fetchAndDownloadBundleNow(reportJob = false) { done, total ->
+                    _assetsSyncStage.value = "Downloading mod libraries…"
+                    if (total > 0L) {
+                        com.yoriva.jobs.JobProgress.progress(app, JOB_ASSETS, done, total, "Libraries…")
+                    }
+                }
+                if (!bundleOk) {
+                    val reason = (bundleManager.bundle.value as? BundleState.DownloadError)?.message
+                        ?: "Libraries download failed"
+                    throw IllegalStateException(reason)
+                }
+
+                val sourceApk = sourceManager.receivedFile()
+                if (sourceApk != null && !patchManager.sourceApkShipsAssets(sourceApk)) {
+                    _assetsSyncStage.value = "Checking game content…"
+                    com.yoriva.jobs.JobProgress.detail(app, JOB_ASSETS, "Checking game content…")
+                    patchManager.checkGameAssetsStatus(sourceApk)
+                    if (patchManager.needsGameAssetsDownload(sourceApk)) {
+                        patchManager.ensureGameAssetsArchive(
+                            onStatus = { msg ->
+                                _assetsSyncStage.value = msg
+                                com.yoriva.jobs.JobProgress.detail(app, JOB_ASSETS, msg)
+                            },
+                            onProgress = { done, total ->
+                                _gameAssetsProgress.value = done to total
+                                com.yoriva.jobs.JobProgress.progress(app, JOB_ASSETS, done, total, "Game content…")
+                            },
+                        )
+                    }
+                }
+
+                com.yoriva.jobs.JobProgress.finish(app, JOB_ASSETS, "All required assets are ready", notifyResult = true)
+            } catch (_: kotlinx.coroutines.CancellationException) {
+                com.yoriva.jobs.JobProgress.clear(JOB_ASSETS)
+            } catch (t: Throwable) {
+                val msg = t.message ?: "Asset sync failed"
+                _assetsSyncError.value = msg
+                com.yoriva.jobs.JobProgress.finish(app, JOB_ASSETS, msg, ok = false)
             } finally {
+                _gameAssetsProgress.value = null
+                _assetsSyncStage.value = null
                 _downloadAll.value = false
             }
         }
-    }
-    data class PatchComponent(
-        val key: String,
-        val label: String,
-        val description: String,
-        val entryTargets: List<String>,
-    ) {
-        override fun equals(other: Any?): Boolean = other is PatchComponent && other.key == key
-        override fun hashCode(): Int = key.hashCode()
     }
     data class CustomLib(
         val name: String,
@@ -526,7 +596,6 @@ private fun externalRoot(app: Application): File {
     private fun scanCustomLibs() = bundleManager.scanCustomLibs()
     fun customLibEntries(bundle: Bundle, selected: Set<String>) = bundleManager.customLibEntries(bundle, selected)
     fun staleCustomLibs() = bundleManager.staleCustomLibs()
-    fun patchComponents() = bundleManager.patchComponents()
     fun fetchAndInstallAddons() = addonsManager.fetchAndInstallAddons()
     private fun unzipInto(zip: File, target: File): Int = patchManager.unzipInto(zip, target)
     private fun patchMetamodConfig(gameDir: File, abi: String) = patchManager.patchMetamodConfig(gameDir, abi)
@@ -612,6 +681,7 @@ private fun externalRoot(app: Application): File {
         return false
     }
     val appUpdate: StateFlow<AppUpdate> get() = updateManager.appUpdate
+    val availableRelease: StateFlow<AppUpdate.Available?> get() = updateManager.availableRelease
     val lastAppUpdateCheckAtMillis: StateFlow<Long> get() = updateManager.lastCheckedAtMillis
     val recentCommits: StateFlow<List<com.yoriva.data.ReleaseRepository.CommitDetails>> get() = updateManager.recentCommits
     val commitsLoading: StateFlow<Boolean> get() = updateManager.commitsLoading
@@ -621,11 +691,12 @@ private fun externalRoot(app: Application): File {
     fun loadRecentCommits(force: Boolean = false) = updateManager.loadRecentCommits(force)
     fun onResumeAppUpdate() = updateManager.onAppResumed()
     fun downloadAppUpdate() = updateManager.downloadAppUpdate()
+    val pendingUpdateInstallIntent: StateFlow<Intent?> get() = updateManager.pendingInstallIntent
+    fun consumePendingUpdateInstallIntent() = updateManager.consumePendingInstallIntent()
     fun installAppUpdate(file: File) = updateManager.installAppUpdate(file)
     fun retryInstallUpdate() = updateManager.retryInstallUpdate()
     fun redownloadAppUpdate() = updateManager.redownloadAppUpdate()
     fun dismissUpdate() = updateManager.dismissUpdate()
-    fun consumeDownloaded() = updateManager.consumeDownloaded()
     fun markBundleTagKnown(tag: String) = updateManager.markBundleTagKnown(tag)
     private val pluginIniManager = PluginIniManager(
         app = app,
@@ -678,6 +749,7 @@ private fun externalRoot(app: Application): File {
         sb.toString()
     }
     companion object {
+        const val JOB_ASSETS = "assets"
         const val JOB_CLIENT_APK = "client-apk"
         const val JOB_LIBS = "libs"
         const val JOB_ADDONS = "addons"
@@ -758,9 +830,12 @@ private fun externalRoot(app: Application): File {
                 bundleManager.resetAll()
                 addonsManager.reset()
                 patchManager.reset()
-                listOf(JOB_PATCH, JOB_ADDONS, JOB_LIBS, JOB_CLIENT_APK).forEach {
+                listOf(JOB_ASSETS, JOB_PATCH, JOB_ADDONS, JOB_LIBS, JOB_CLIENT_APK).forEach {
                     com.yoriva.jobs.JobProgress.clear(it)
                 }
+                _assetsSyncError.value = null
+                _gameAssetsProgress.value = null
+                _assetsSyncStage.value = null
                 scanCustomLibs()
                 scanLibs()
                 refreshAbiStatus()

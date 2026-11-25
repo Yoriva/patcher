@@ -90,6 +90,7 @@ fun SettingsScreen(
     var showCleanConfirm by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { vm.refreshCleanupAvailability() }
     Scaffold(
+        contentWindowInsets = topAndHorizontalInsets(),
         topBar = {
             TopAppBar(
                 title = {
@@ -264,15 +265,9 @@ fun SettingsScreen(
                 }
             }
 
-        Spacer(Modifier.height(24.dp))
+        PreferenceCategoryHeader(title = "Appearance & Theme")
+        Spacer(modifier = Modifier.height(6.dp))
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                text = "Appearance & Theme",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(start = 8.dp, bottom = 4.dp),
-            )
             Card(
                 onClick = onOpenTheme,
                 modifier = Modifier.fillMaxWidth(),
@@ -325,15 +320,9 @@ fun SettingsScreen(
                 }
             }
         }
-        Spacer(Modifier.height(24.dp))
+        PreferenceCategoryHeader(title = "Tools & System")
+        Spacer(modifier = Modifier.height(6.dp))
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                text = "Tools & System",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(start = 8.dp, bottom = 4.dp),
-            )
             val updateSubtitle = when (val u = appUpdate) {
                 is com.yoriva.patcher.AppUpdate.Checking -> "Checking GitHub releases…"
                 is com.yoriva.patcher.AppUpdate.Available -> "Update available · ${u.remoteVersion}"
@@ -365,22 +354,16 @@ fun SettingsScreen(
             )
             GroupedActionCard(
                 title = "About Yoriva",
-                subtitle = "Version, license, and repository information",
+                subtitle = "Version, developers, and repository",
                 iconRes = R.drawable.yoriva_logo,
                 index = 2,
                 total = 3,
                 onClick = onOpenAbout,
             )
         }
-        Spacer(Modifier.height(24.dp))
+        PreferenceCategoryHeader(title = "Storage & Reset")
+        Spacer(modifier = Modifier.height(6.dp))
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                text = "Storage & Reset",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(start = 8.dp, bottom = 4.dp),
-            )
             GroupedActionCard(
                 title = "Clean Everything",
                 subtitle = when {
@@ -398,7 +381,7 @@ fun SettingsScreen(
                 },
             )
         }
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(24.dp + navigationBarBottomPadding()))
     }
     }
     if (showCleanConfirm) {

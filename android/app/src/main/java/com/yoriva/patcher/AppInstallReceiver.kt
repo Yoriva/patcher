@@ -6,7 +6,6 @@ import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.os.Build
 import android.util.Log
-import android.widget.Toast
 
 internal const val UPDATER_PREFS = "updater_prefs"
 internal const val RELAUNCH_AFTER_UPDATE = "relaunch_after_update"
@@ -20,18 +19,26 @@ class AppInstallReceiver : BroadcastReceiver() {
     }
 
     private fun handleInstallStatus(context: Context, intent: Intent) {
-        when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
+        val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+        when (status) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 val confirm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
                 } else {
                     @Suppress("DEPRECATION")
                     intent.getParcelableExtra(Intent.EXTRA_INTENT)
-                }
-                confirm?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                confirm?.let {
-                    runCatching { context.startActivity(it) }
-                        .onFailure { error -> Log.w(TAG, "Could not open installer", error) }
+                } ?: return
+                confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                // Dispatch via UpdateManager so the foreground Activity launches it (avoids Android BAL restrictions).
+                if (!UpdateManager.notifyConfirmPrompt(confirm)) {
+                    runCatching { context.startActivity(confirm) }
+                        .onFailure { error ->
+                            Log.w(TAG, "Background confirm launch blocked", error)
+                            UpdateManager.notifyInstallStatus(
+                                PackageInstaller.STATUS_FAILURE_ABORTED,
+                                error.message ?: "Permission denied",
+                            )
+                        }
                 }
             }
             PackageInstaller.STATUS_SUCCESS -> {
@@ -39,14 +46,8 @@ class AppInstallReceiver : BroadcastReceiver() {
             }
             else -> {
                 clearRelaunch(context)
-                val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
                 val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
                 UpdateManager.notifyInstallStatus(status, message)
-                Toast.makeText(
-                    context,
-                    message?.takeIf { it.isNotBlank() } ?: "Update install failed",
-                    Toast.LENGTH_LONG,
-                ).show()
             }
         }
     }

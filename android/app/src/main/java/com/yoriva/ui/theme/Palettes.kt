@@ -1,4 +1,5 @@
 ﻿package com.yoriva.ui.theme
+
 import android.content.Context
 import android.os.Build
 import androidx.compose.material3.ColorScheme
@@ -8,23 +9,30 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+
+const val DEFAULT_YORIVA_SEED = 0xFF5D7DF2.toInt()
+
+val supportsDynamicColor: Boolean
+    get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+
 val keyColorOptions = listOf(
-    0xFFF44336.toInt(),
-    0xFFE91E63.toInt(),
-    0xFF9C27B0.toInt(),
-    0xFF673AB7.toInt(),
+    DEFAULT_YORIVA_SEED,
     0xFF3F51B5.toInt(),
     0xFF2196F3.toInt(),
     0xFF00BCD4.toInt(),
     0xFF009688.toInt(),
     0xFF4CAF50.toInt(),
-    0xFFFFEB3B.toInt(),
     0xFFFFC107.toInt(),
     0xFFFF9800.toInt(),
+    0xFFF44336.toInt(),
+    0xFFE91E63.toInt(),
+    0xFFFF9CA8.toInt(),
+    0xFF9C27B0.toInt(),
+    0xFF673AB7.toInt(),
     0xFF795548.toInt(),
     0xFF607D8F.toInt(),
-    0xFFFF9CA8.toInt(),
 )
+
 fun ColorScheme.toAmoled(): ColorScheme = copy(
     background = Color.Black,
     surface = Color.Black,
@@ -35,23 +43,27 @@ fun ColorScheme.toAmoled(): ColorScheme = copy(
     surfaceContainerHigh = Color(0xFF1C1C1C),
     surfaceContainerHighest = Color(0xFF242424),
 )
+
 fun schemeForSeed(
     keyColor: Int,
     isDark: Boolean,
     isAmoled: Boolean,
     context: Context,
 ): ColorScheme {
-    val base = if (keyColor == 0) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+    val base = when {
+        keyColor == 0 && supportsDynamicColor -> {
             if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        } else {
-            if (isDark) darkColorScheme() else lightColorScheme()
         }
-    } else {
-        createM3SchemeFromSeed(Color(keyColor), isDark, isAmoled)
+        keyColor == 0 -> {
+            createM3SchemeFromSeed(Color(DEFAULT_YORIVA_SEED), isDark, isAmoled)
+        }
+        else -> {
+            createM3SchemeFromSeed(Color(keyColor), isDark, isAmoled)
+        }
     }
     return if (isDark && isAmoled) base.toAmoled() else base
 }
+
 private fun createM3SchemeFromSeed(seed: Color, isDark: Boolean, isAmoled: Boolean): ColorScheme {
     val hsv = FloatArray(3)
     android.graphics.Color.colorToHSV(seed.toArgb(), hsv)
@@ -88,6 +100,8 @@ private fun createM3SchemeFromSeed(seed: Color, isDark: Boolean, isAmoled: Boole
             onSurface = Color(0xFFE6E0E9),
             surfaceVariant = Color.hsv(h, 0.15f, 0.28f),
             onSurfaceVariant = Color(0xFFCAC4D0),
+            outline = Color.hsv(h, 0.10f, 0.56f),
+            outlineVariant = Color.hsv(h, 0.10f, 0.28f),
             surfaceContainerLowest = if (isAmoled) Color.Black else Color.hsv(h, 0.06f, 0.06f),
             surfaceContainerLow = if (isAmoled) Color(0xFF0C0C0C) else Color.hsv(h, 0.06f, 0.11f),
             surfaceContainer = surfaceContainer,
@@ -122,6 +136,8 @@ private fun createM3SchemeFromSeed(seed: Color, isDark: Boolean, isAmoled: Boole
             onSurface = Color(0xFF1D1B20),
             surfaceVariant = Color.hsv(h, 0.1f, 0.90f),
             onSurfaceVariant = Color(0xFF49454F),
+            outline = Color.hsv(h, 0.08f, 0.48f),
+            outlineVariant = Color.hsv(h, 0.08f, 0.82f),
             surfaceContainerLowest = Color.White,
             surfaceContainerLow = Color.hsv(h, 0.03f, 0.97f),
             surfaceContainer = Color.hsv(h, 0.04f, 0.95f),

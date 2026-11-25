@@ -4,6 +4,7 @@ import android.app.Application
 import com.yoriva.data.ReleaseRepository
 import com.yoriva.jobs.JobProgress
 import com.yoriva.lib.ZipAnalyzer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -116,26 +117,29 @@ class SourceManager(
                     )
                 }
             }
-            val tag = com.yoriva.patcher.PatcherViewModel.ASSETS_TAG
-            val remote = tag.let {
-                ReleaseRepository.probe(ReleaseRepository.assetUrl(com.yoriva.patcher.PatcherViewModel.CLIENT_APK_REPO, it, com.yoriva.patcher.PatcherViewModel.CLIENT_APK_ASSET))
-            }
-            val recorded = readSourceStamp(cached)
+            val tag = PatcherViewModel.ASSETS_TAG
+            val remote = ReleaseRepository.probe(
+                ReleaseRepository.assetUrl(
+                    PatcherViewModel.CLIENT_APK_REPO,
+                    tag,
+                    PatcherViewModel.CLIENT_APK_ASSET,
+                ),
+            )
             val problem = apkProblem(cached)
-            val outdated = if (remote != null) {
-                outdatedReasons(cached, remote, recorded)
+            val outdatedReason = if (problem == null) {
+                ReleaseRepository.remoteMismatchReason(cached, remote, PatcherViewModel.ASSET_DATE_SLOP)
             } else {
-                emptyList()
+                null
             }
             _sourceDownload.value = when {
-                problem != null -> SourceDownloadState.Corrupt(com.yoriva.patcher.PatcherViewModel.CLIENT_APK_ASSET, problem)
-                outdated.isNotEmpty() -> SourceDownloadState.Outdated(
-                    com.yoriva.patcher.PatcherViewModel.CLIENT_APK_ASSET,
+                problem != null -> SourceDownloadState.Corrupt(PatcherViewModel.CLIENT_APK_ASSET, problem)
+                outdatedReason != null -> SourceDownloadState.Outdated(
+                    PatcherViewModel.CLIENT_APK_ASSET,
                     cached.length(),
                     remote?.size ?: 0L,
-                    outdated.joinToString(", "),
+                    outdatedReason,
                 )
-                else -> SourceDownloadState.Done(com.yoriva.patcher.PatcherViewModel.CLIENT_APK_ASSET)
+                else -> SourceDownloadState.Done(PatcherViewModel.CLIENT_APK_ASSET)
             }
             if (_sourceDownload.value is SourceDownloadState.Done &&
                 _receivedSource.value?.absolutePath != cached.absolutePath &&
@@ -146,133 +150,92 @@ class SourceManager(
         }
     }
 
-    private fun outdatedReasons(
-        cached: File,
-        remote: ReleaseRepository.RemoteInfo,
-        recorded: SourceStamp?,
-    ): List<String> {
-        val reasons = mutableListOf<String>()
-        val localSize = cached.length()
-        if (recorded != null) {
-            if (recorded.size != localSize) reasons += "size changed since download"
-            if (remote.etag.isNotEmpty() && recorded.etag.isNotEmpty() &&
-                remote.etag != recorded.etag
-            ) {
-                reasons += "newer build on GitHub"
-            }
-            if (remote.lastModifiedMillis > 0L && recorded.lastModifiedMillis > 0L &&
-                remote.lastModifiedMillis != recorded.lastModifiedMillis
-            ) {
-                reasons += "rebuilt since download"
-            }
-        } else {
-            if (remote.size > 0L && localSize != remote.size) {
-                reasons += "size differs from GitHub"
-            }
-            if (remote.lastModifiedMillis > 0L &&
-                cached.lastModified() + com.yoriva.patcher.PatcherViewModel.ASSET_DATE_SLOP < remote.lastModifiedMillis
-            ) {
-                reasons += "older than the GitHub build"
+    /**
+     * Returns true if a valid, up-to-date client APK is already cached (loading it without
+     * re-downloading), or downloads a fresh copy only when missing, corrupt, or outdated on GitHub.
+     */
+    suspend fun ensureSourceApkNow(
+        reportJob: Boolean = true,
+        externalProgress: ((downloaded: Long, total: Long) -> Unit)? = null,
+    ): Boolean {
+        if (_sourceDownload.value is SourceDownloadState.Fetching ||
+            _sourceDownload.value is SourceDownloadState.Downloading
+        ) {
+            return false
+        }
+        val tag = PatcherViewModel.ASSETS_TAG
+        val url = ReleaseRepository.assetUrl(
+            PatcherViewModel.CLIENT_APK_REPO,
+            tag,
+            PatcherViewModel.CLIENT_APK_ASSET,
+        )
+        val cached = cachedClientApk()
+        if (cached != null && apkProblem(cached) == null) {
+            val remote = ReleaseRepository.probe(url)
+            if (ReleaseRepository.isRemoteMatch(cached, remote, PatcherViewModel.ASSET_DATE_SLOP)) {
+                useSourceFile(cached, "${cached.name} ($tag)")
+                _sourceDownload.value = SourceDownloadState.Done(cached.name)
+                return true
             }
         }
-        return reasons
+        return downloadSourceApkNow(reportJob = reportJob, externalProgress = externalProgress)
     }
 
-    private data class SourceStamp(val size: Long, val etag: String, val lastModifiedMillis: Long)
-
-    private fun readSourceStamp(cached: File): SourceStamp? {
-        val file = File(cached.parentFile ?: return null, "${cached.name}.stamp")
-        if (!file.isFile) return null
-        return try {
-            val parts = file.readText().trim().split(' ')
-            if (parts.size < 3) {
-                null
-            } else {
-                SourceStamp(parts[0].toLong(), parts[1], parts[2].toLong())
-            }
-        } catch (_: Throwable) {
-            null
-        }
-    }
-
-    private fun writeSourceStamp(cached: File, remote: ReleaseRepository.RemoteInfo?) {
-        try {
-            cached.parentFile?.mkdirs()
-            File(cached.parentFile, "${cached.name}.stamp").writeText(
-                "${cached.length()} ${remote?.etag.orEmpty()} ${remote?.lastModifiedMillis ?: 0L}"
-            )
-        } catch (_: Throwable) {
-        }
-    }
-
-    fun clearSourceCache() {
-        listOfNotNull(sourceCacheDir, legacySourceDir).forEach { dir ->
-            dir.listFiles()?.forEach { it.deleteRecursively() }
-        }
-        _source.value = null
-        _receivedSource.value = null
-        _sourceDownload.value = null
-    }
-
-    fun downloadSourceApk() {
-        scope.launch(Dispatchers.IO) { downloadSourceApkNow() }
-    }
-
-    suspend fun downloadSourceApkNow(): Boolean {
+    suspend fun downloadSourceApkNow(
+        reportJob: Boolean = true,
+        externalProgress: ((downloaded: Long, total: Long) -> Unit)? = null,
+    ): Boolean {
         if (_sourceDownload.value is SourceDownloadState.Fetching ||
             _sourceDownload.value is SourceDownloadState.Downloading
         ) {
             return false
         }
         _sourceDownload.value = SourceDownloadState.Fetching
-        com.yoriva.jobs.JobProgress.begin(app, com.yoriva.patcher.PatcherViewModel.JOB_CLIENT_APK, "Client APK", "Finding the release…")
-        var partial: File? = null
+        if (reportJob) {
+            JobProgress.begin(app, PatcherViewModel.JOB_CLIENT_APK, "Client APK", "Finding the release…")
+        }
         return try {
-            val repo = com.yoriva.patcher.PatcherViewModel.CLIENT_APK_REPO
-            val tag = com.yoriva.patcher.PatcherViewModel.ASSETS_TAG
-            val name = com.yoriva.patcher.PatcherViewModel.CLIENT_APK_ASSET
+            val repo = PatcherViewModel.CLIENT_APK_REPO
+            val tag = PatcherViewModel.ASSETS_TAG
+            val name = PatcherViewModel.CLIENT_APK_ASSET
             val url = ReleaseRepository.assetUrl(repo, tag, name)
             val remote = ReleaseRepository.probe(url)
             val total = remote?.size ?: 0L
             val dir = sourceCacheDir.apply { mkdirs() }
             val dest = File(dir, name)
-            val part = File(dir, "$name.part").also { it.delete() }
-            partial = part
-            ReleaseRepository.downloadUrl(url, part, total) { done, size ->
+            ReleaseRepository.downloadFile(url, dest, expectedSize = total) { done, size ->
                 _sourceDownload.value = SourceDownloadState.Downloading(done, size)
-                com.yoriva.jobs.JobProgress.progress(app, com.yoriva.patcher.PatcherViewModel.JOB_CLIENT_APK, done, size, "Downloading…")
-            }
-            if (total > 0 && part.length() != total) {
-                part.delete()
-                throw IOException(
-                    "Download stopped at %.1f MB of %.1f MB".format(java.util.Locale.US,
-                        part.length() / 1048576.0,
-                        total / 1048576.0,
-                    )
-                )
-            }
-            if (!part.renameTo(dest)) {
-                part.copyTo(dest, overwrite = true)
-                part.delete()
+                externalProgress?.invoke(done, size)
+                if (reportJob) {
+                    JobProgress.progress(app, PatcherViewModel.JOB_CLIENT_APK, done, size, "Downloading…")
+                }
             }
             apkProblem(dest)?.let {
                 dest.delete()
                 throw IOException("The downloaded APK is broken: $it")
             }
-            writeSourceStamp(dest, remote)
+            ReleaseRepository.writeFileStamp(dest, remote)
             useSourceFile(dest, "$name ($tag)")
             _sourceDownload.value = SourceDownloadState.Done(name)
-            com.yoriva.jobs.JobProgress.finish(app, com.yoriva.patcher.PatcherViewModel.JOB_CLIENT_APK, "Client APK ready", apkPath = dest.path)
+            if (reportJob) {
+                JobProgress.finish(app, PatcherViewModel.JOB_CLIENT_APK, "Client APK ready", apkPath = dest.path)
+            }
             true
+        } catch (c: CancellationException) {
+            _sourceDownload.value = null
+            if (reportJob) JobProgress.clear(PatcherViewModel.JOB_CLIENT_APK)
+            refreshSourceApkStatus()
+            throw c
         } catch (t: Throwable) {
-            partial?.delete()
             _sourceDownload.value = SourceDownloadState.Failed(t.message ?: "Download failed")
-            com.yoriva.jobs.JobProgress.finish(
-                app,
-                com.yoriva.patcher.PatcherViewModel.JOB_CLIENT_APK,
-                t.message ?: "Download failed",
-                ok = false,
-            )
+            if (reportJob) {
+                JobProgress.finish(
+                    app,
+                    PatcherViewModel.JOB_CLIENT_APK,
+                    t.message ?: "Download failed",
+                    ok = false,
+                )
+            }
             false
         }
     }

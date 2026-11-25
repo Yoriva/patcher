@@ -4,7 +4,9 @@ import android.app.Application
 import android.os.Build
 import android.os.Environment
 import com.yoriva.data.BundleProvider
+import com.yoriva.data.ReleaseRepository
 import com.yoriva.jobs.JobProgress
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,44 +51,66 @@ class AddonsManager(
 
     internal fun installPathValue(): String = _installPath.value
 
-    fun fetchAndInstallAddons() {
-        scope.launch(Dispatchers.IO) {
-            _addons.value = AddonsState.Downloading(0f, "Resolving latest release…")
-            JobProgress.begin(app, com.yoriva.patcher.PatcherViewModel.JOB_ADDONS, "Addons", "Resolving the release…")
-            try {
-                val tag = com.yoriva.patcher.PatcherViewModel.ASSETS_TAG
-                val zip = File(bundleProvider.cacheDir(), "amxx-addons.zip")
+    fun fetchAndInstallAddons(reportJob: Boolean = true) {
+        scope.launch(Dispatchers.IO) { fetchAndInstallAddonsNow(reportJob) }
+    }
+
+    suspend fun fetchAndInstallAddonsNow(reportJob: Boolean = true): Boolean {
+        _addons.value = AddonsState.Downloading(0f, "Resolving latest release…")
+        if (reportJob) {
+            JobProgress.begin(app, PatcherViewModel.JOB_ADDONS, "Addons", "Resolving release…")
+        }
+        return try {
+            val tag = PatcherViewModel.ASSETS_TAG
+            val zip = File(bundleProvider.cacheDir(), "amxx-addons.zip")
+            val url = ReleaseRepository.assetUrl(repo, tag, "amxx-addons.zip")
+            val remote = ReleaseRepository.probe(url)
+            if (!ReleaseRepository.isRemoteMatch(zip, remote)) {
                 _addons.value = AddonsState.Downloading(0f, "Downloading addons…")
-                com.yoriva.data.ReleaseRepository.downloadUrl(
-                    com.yoriva.data.ReleaseRepository.assetUrl(repo, tag, "amxx-addons.zip"),
-                    zip,
+                ReleaseRepository.downloadFile(
+                    url = url,
+                    dest = zip,
+                    expectedSize = remote?.size ?: 0L,
                 ) { done, total ->
                     _addons.value = AddonsState.Downloading(
                         if (total > 0) (done.toDouble() / total).toFloat().coerceIn(0f, 1f) else 0f,
-                        "Downloading addons…"
+                        "Downloading addons…",
                     )
-                    JobProgress.progress(app, com.yoriva.patcher.PatcherViewModel.JOB_ADDONS, done, total, "Downloading…")
-                }
-                _addons.value = AddonsState.Downloading(1f, "Extracting into ${_installPath.value.substringAfterLast("/")}…")
-                val target = File(_installPath.value)
-                val count = unzipInto(zip, target)
-                patchMetamodConfig(target, abiProvider())
-                val gamedataToggled = applyGamedataAbiPolicy(target, abiProvider())
-                JobProgress.finish(app, com.yoriva.patcher.PatcherViewModel.JOB_ADDONS, "Addons installed")
-                _addons.value = AddonsState.Done(
-                    buildString {
-                        append("Installed $count addons files into ${target.path}")
-                        if (gamedataToggled) {
-                            val variant = if (abiProvider() == "arm64-v8a") "arm64" else "arm32"
-                            append("\n$variant gamedata override selected for ${abiProvider()}")
-                        }
+                    if (reportJob) {
+                        JobProgress.progress(app, PatcherViewModel.JOB_ADDONS, done, total, "Downloading addons…")
                     }
-                )
-                _installed.value = true
-            } catch (t: Throwable) {
-                _addons.value = AddonsState.Error(t.message ?: "Unknown error")
-                JobProgress.finish(app, com.yoriva.patcher.PatcherViewModel.JOB_ADDONS, t.message ?: "Install failed", ok = false)
+                }
+                ReleaseRepository.writeFileStamp(zip, remote)
             }
+            _addons.value = AddonsState.Downloading(1f, "Extracting into ${_installPath.value.substringAfterLast("/")}…")
+            val target = File(_installPath.value)
+            val count = unzipInto(zip, target)
+            patchMetamodConfig(target, abiProvider())
+            val gamedataToggled = applyGamedataAbiPolicy(target, abiProvider())
+            if (reportJob) {
+                JobProgress.finish(app, PatcherViewModel.JOB_ADDONS, "Addons installed", notifyResult = false)
+            }
+            _addons.value = AddonsState.Done(
+                buildString {
+                    append("Installed $count addons files into ${target.path}")
+                    if (gamedataToggled) {
+                        val variant = if (abiProvider() == "arm64-v8a") "arm64" else "arm32"
+                        append("\n$variant gamedata override selected for ${abiProvider()}")
+                    }
+                },
+            )
+            _installed.value = true
+            true
+        } catch (c: CancellationException) {
+            _addons.value = AddonsState.None
+            if (reportJob) JobProgress.clear(PatcherViewModel.JOB_ADDONS)
+            throw c
+        } catch (t: Throwable) {
+            _addons.value = AddonsState.Error(t.message ?: "Unknown error")
+            if (reportJob) {
+                JobProgress.finish(app, PatcherViewModel.JOB_ADDONS, t.message ?: "Install failed", ok = false)
+            }
+            false
         }
     }
 
@@ -114,7 +138,7 @@ class AddonsManager(
                 applyGamedataAbiPolicy(gameDir, abiProvider())
                 return@launch
             }
-            fetchAndInstallAddons()
+            fetchAndInstallAddonsNow(reportJob = false)
         }
     }
 

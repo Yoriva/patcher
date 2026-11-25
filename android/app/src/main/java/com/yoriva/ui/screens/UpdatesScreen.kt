@@ -5,6 +5,17 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -29,15 +40,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -53,15 +63,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import coil.compose.SubcomposeAsyncImage
 import com.yoriva.data.ReleaseRepository
 import com.yoriva.patcher.AppUpdate
 import com.yoriva.patcher.PatcherViewModel
@@ -78,6 +89,7 @@ fun UpdatesScreen(
     onBack: () -> Unit,
 ) {
     val state by vm.appUpdate.collectAsState()
+    val availableRelease by vm.availableRelease.collectAsState()
     val lastCheckedAt by vm.lastAppUpdateCheckAtMillis.collectAsState()
     val recentCommits by vm.recentCommits.collectAsState()
     val commitsLoading by vm.commitsLoading.collectAsState()
@@ -95,6 +107,7 @@ fun UpdatesScreen(
     }
 
     val available = state as? AppUpdate.Available
+    val releaseInfo = available ?: availableRelease
     val downloading = state as? AppUpdate.Downloading
     val installingState = state as? AppUpdate.Installing
     val failed = state as? AppUpdate.Failed
@@ -103,17 +116,11 @@ fun UpdatesScreen(
         state is AppUpdate.Downloaded ||
         state is AppUpdate.Installing
 
-    val title = when (state) {
-        is AppUpdate.Failed -> if (mandatory) "Update required" else "Could not check for updates"
-        is AppUpdate.Downloading -> "Downloading update"
-        is AppUpdate.Downloaded -> "Preparing update"
-        is AppUpdate.Installing -> if (installingState?.needsInstallPermission == true) {
-            "Permission required"
-        } else {
-            "Installing update"
-        }
-        is AppUpdate.Available -> if (mandatory) "Update required" else "Update available"
-        is AppUpdate.Checking -> "Checking for updates"
+    val title = when {
+        state is AppUpdate.Failed -> if (mandatory) "Update required" else "Could not check for updates"
+        isInstalling -> "Installing update"
+        releaseInfo != null -> if (mandatory) "Update required" else "Update available"
+        isChecking -> "Checking for updates"
         else -> "No updates available"
     }
 
@@ -143,36 +150,24 @@ fun UpdatesScreen(
                     ),
                 )
             },
-            bottomBar = {
-                UpdatesBottomBar(
-                    vm = vm,
-                    state = state,
-                    onRequestInstallPermission = {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            val intent = Intent(
-                                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                                Uri.parse("package:${context.packageName}"),
-                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            runCatching { context.startActivity(intent) }
-                        }
-                    },
-                )
-            },
         ) { paddingValues ->
             val canPullToRefresh = !mandatory && !isInstalling
-            PullToRefreshBox(
-                isRefreshing = canPullToRefresh && isChecking,
-                onRefresh = {
-                    if (canPullToRefresh) {
-                        vm.checkAppUpdate(manual = true)
-                        vm.loadRecentCommits(force = true)
-                    }
-                },
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues),
-                indicator = {},
             ) {
+                PullToRefreshBox(
+                    isRefreshing = canPullToRefresh && isChecking,
+                    onRefresh = {
+                        if (canPullToRefresh) {
+                            vm.checkAppUpdate(manual = true)
+                            vm.loadRecentCommits(force = true)
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                    indicator = {},
+                ) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -187,55 +182,18 @@ fun UpdatesScreen(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
 
-                    if (isInstalling || isChecking) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            if (downloading != null && downloading.total > 0L) {
-                                val frac = (downloading.downloaded.toDouble() / downloading.total)
+                    val versionActivity = when {
+                        downloading != null -> {
+                            val frac = if (downloading.total > 0L) {
+                                (downloading.downloaded.toDouble() / downloading.total)
                                     .toFloat()
                                     .coerceIn(0f, 1f)
-                                LinearProgressIndicator(
-                                    progress = { frac },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(8.dp)
-                                        .clip(CircleShape),
-                                )
-                            } else {
-                                LinearProgressIndicator(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(8.dp)
-                                        .clip(CircleShape),
-                                )
-                            }
-                            if (downloading != null) {
-                                val progressText = if (downloading.total > 0L) {
-                                    "${formatUpdateBytes(downloading.downloaded)} / ${formatUpdateBytes(downloading.total)} · ${formatUpdateSpeed(downloading.bytesPerSec)}"
-                                } else {
-                                    "${formatUpdateBytes(downloading.downloaded)} · ${formatUpdateSpeed(downloading.bytesPerSec)}"
-                                }
-                                Text(
-                                    text = progressText,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center,
-                                )
-                            } else if (isInstalling) {
-                                Text(
-                                    text = if (installingState?.needsInstallPermission == true) {
-                                        "Allow Yoriva to install app updates in Android settings, then return here."
-                                    } else {
-                                        "Confirm the Android installation prompt. Yoriva will reopen afterward."
-                                    },
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center,
-                                )
-                            }
+                            } else null
+                            VersionBoxActivity.Downloading(frac)
                         }
+                        isInstalling -> VersionBoxActivity.Installing
+                        isChecking -> VersionBoxActivity.Checking
+                        else -> VersionBoxActivity.Idle
                     }
 
                     val errorText = failed?.message ?: installingState?.errorMessage
@@ -256,7 +214,7 @@ fun UpdatesScreen(
                         }
                     }
 
-                    if (available == null && downloading == null && state !is AppUpdate.Downloaded && installingState == null) {
+                    if (releaseInfo == null) {
                         val lastCheckLabel = if (lastCheckedAt > 0L) {
                             DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(lastCheckedAt))
                         } else {
@@ -269,28 +227,25 @@ fun UpdatesScreen(
                         UpdateInfoBento(
                             version = vm.installedAppVersion,
                             versionLabel = "Version",
+                            activity = versionActivity,
                             details = listOf(
                                 "Last check" to lastCheckLabel,
                                 "Size" to localSizeText,
                             ),
                         )
                     } else {
-                        val displayVersion = available?.remoteVersion
-                            ?: downloading?.tag
-                            ?: (state as? AppUpdate.Downloaded)?.tag
-                            ?: installingState?.tag
-                            ?: vm.installedAppVersion
-                        val sizeText = available?.size
-                            ?.takeIf { it > 0L }
+                        val displayVersion = releaseInfo.remoteVersion
+                        val sizeText = releaseInfo.size
+                            .takeIf { it > 0L }
                             ?.let { formatUpdateBytes(it) }
                             ?: downloading?.total?.takeIf { it > 0L }?.let { formatUpdateBytes(it) }
                             ?: vm.installedAppSizeBytes.takeIf { it > 0L }?.let { formatUpdateBytes(it) }
                             ?: "Auto"
-                        val dateText = available?.updatedAtMillis
-                            ?.takeIf { it > 0L }
+                        val dateText = releaseInfo.updatedAtMillis
+                            .takeIf { it > 0L }
                             ?.let { SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(it)) }
                             ?: vm.installedAppVersion
-                        val rightLabel = if (available?.updatedAtMillis?.let { it > 0L } == true) {
+                        val rightLabel = if (releaseInfo.updatedAtMillis > 0L) {
                             "Date"
                         } else {
                             "Installed"
@@ -298,6 +253,7 @@ fun UpdatesScreen(
                         UpdateInfoBento(
                             version = displayVersion,
                             versionLabel = "Version",
+                            activity = versionActivity,
                             details = listOf(
                                 "Size" to sizeText,
                                 rightLabel to dateText,
@@ -305,7 +261,34 @@ fun UpdatesScreen(
                         )
                     }
 
-                    if (available != null) {
+                    if (downloading != null) {
+                        val progressText = if (downloading.total > 0L) {
+                            "${formatUpdateBytes(downloading.downloaded)} / ${formatUpdateBytes(downloading.total)} · ${formatUpdateSpeed(downloading.bytesPerSec)}"
+                        } else {
+                            "${formatUpdateBytes(downloading.downloaded)} · ${formatUpdateSpeed(downloading.bytesPerSec)}"
+                        }
+                        Text(
+                            text = progressText,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else if (isInstalling) {
+                        Text(
+                            text = if (installingState?.needsInstallPermission == true) {
+                                "Allow Yoriva to install app updates in Android settings, then return here."
+                            } else {
+                                "Confirm the Android installation prompt. Yoriva will reopen afterward."
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    if (releaseInfo != null) {
                         Text(
                             text = "Changelog",
                             style = MaterialTheme.typography.headlineMedium,
@@ -313,40 +296,40 @@ fun UpdatesScreen(
                             color = MaterialTheme.colorScheme.onSurface,
                         )
 
-                        val profile = available.authorLogin.ifBlank {
-                            available.authorName.ifBlank { "Yoriva" }
+                        val profile = releaseInfo.authorLogin.ifBlank {
+                            releaseInfo.authorName.ifBlank { "Yoriva" }
                         }
-                        if (available.authorLogin.isNotBlank() ||
-                            available.authorName.isNotBlank() ||
-                            available.updatedAtMillis > 0L
+                        if (releaseInfo.authorLogin.isNotBlank() ||
+                            releaseInfo.authorName.isNotBlank() ||
+                            releaseInfo.updatedAtMillis > 0L
                         ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(20.dp))
-                                    .clickable(enabled = available.authorLogin.isNotBlank()) {
-                                        if (available.authorLogin.isNotBlank()) {
-                                            uriHandler.openUri("https://github.com/${available.authorLogin}")
+                                    .clickable(enabled = releaseInfo.authorLogin.isNotBlank()) {
+                                        if (releaseInfo.authorLogin.isNotBlank()) {
+                                            uriHandler.openUri("https://github.com/${releaseInfo.authorLogin}")
                                         }
                                     }
                                     .background(MaterialTheme.colorScheme.surfaceContainer)
                                     .padding(horizontal = 14.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                UpdateAuthorAvatar(username = profile)
+                                GithubAvatar(username = profile)
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = available.authorName.ifBlank {
-                                            available.authorLogin.ifBlank { "Yoriva" }
+                                        text = releaseInfo.authorName.ifBlank {
+                                            releaseInfo.authorLogin.ifBlank { "Yoriva" }
                                         },
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.onSurface,
                                     )
                                     val meta = listOfNotNull(
-                                        available.authorLogin.takeIf { it.isNotBlank() }?.let { "@$it" },
-                                        formatUpdateTimestamp(available.updatedAtMillis)
+                                        releaseInfo.authorLogin.takeIf { it.isNotBlank() }?.let { "@$it" },
+                                        formatUpdateTimestamp(releaseInfo.updatedAtMillis)
                                             .takeIf { it.isNotBlank() }
                                             ?.let { "Updated $it" },
                                     ).joinToString(" · ")
@@ -359,7 +342,7 @@ fun UpdatesScreen(
                                         )
                                     }
                                 }
-                                if (available.authorLogin.isNotBlank()) {
+                                if (releaseInfo.authorLogin.isNotBlank()) {
                                     Icon(
                                         imageVector = Icons.AutoMirrored.Filled.OpenInNew,
                                         contentDescription = null,
@@ -370,9 +353,9 @@ fun UpdatesScreen(
                             }
                         }
 
-                        if (available.commitMessage.isNotBlank() ||
-                            available.releaseNotes.isNotBlank() ||
-                            available.notes.isNotBlank()
+                        if (releaseInfo.commitMessage.isNotBlank() ||
+                            releaseInfo.releaseNotes.isNotBlank() ||
+                            releaseInfo.notes.isNotBlank()
                         ) {
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
@@ -387,15 +370,15 @@ fun UpdatesScreen(
                                         .padding(16.dp),
                                     verticalArrangement = Arrangement.spacedBy(10.dp),
                                 ) {
-                                    if (available.commitMessage.isNotBlank()) {
+                                    if (releaseInfo.commitMessage.isNotBlank()) {
                                         Text(
-                                            text = available.commitMessage.trim().take(1200),
+                                            text = releaseInfo.commitMessage.trim().take(1200),
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurface,
                                         )
-                                        if (available.commitSha.isNotBlank()) {
+                                        if (releaseInfo.commitSha.isNotBlank()) {
                                             Text(
-                                                text = "Commit ${available.commitSha.take(7)}",
+                                                text = "Commit ${releaseInfo.commitSha.take(7)}",
                                                 style = MaterialTheme.typography.labelSmall.copy(
                                                     fontFamily = FontFamily.Monospace,
                                                 ),
@@ -403,18 +386,18 @@ fun UpdatesScreen(
                                             )
                                         }
                                     }
-                                    if (available.releaseNotes.isNotBlank()) {
-                                        if (available.commitMessage.isNotBlank()) {
+                                    if (releaseInfo.releaseNotes.isNotBlank()) {
+                                        if (releaseInfo.commitMessage.isNotBlank()) {
                                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                         }
                                         Text(
-                                            text = available.releaseNotes.trim().take(1600),
+                                            text = releaseInfo.releaseNotes.trim().take(1600),
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
-                                    } else if (available.notes.isNotBlank() && available.commitMessage.isBlank()) {
+                                    } else if (releaseInfo.notes.isNotBlank() && releaseInfo.commitMessage.isBlank()) {
                                         Text(
-                                            text = available.notes.trim(),
+                                            text = releaseInfo.notes.trim(),
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
@@ -489,8 +472,23 @@ fun UpdatesScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(84.dp + navigationBarBottomPadding()))
                 }
+            }
+                UpdatesBottomBar(
+                    vm = vm,
+                    state = state,
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                    onRequestInstallPermission = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            val intent = Intent(
+                                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                Uri.parse("package:${context.packageName}"),
+                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            runCatching { context.startActivity(intent) }
+                        }
+                    },
+                )
             }
         }
     }
@@ -500,12 +498,21 @@ fun UpdatesScreen(
 private fun UpdatesBottomBar(
     vm: PatcherViewModel,
     state: AppUpdate,
+    modifier: Modifier = Modifier,
     onRequestInstallPermission: () -> Unit,
 ) {
+    val surfaceColor = MaterialTheme.colorScheme.surface
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
+            .background(
+                Brush.verticalGradient(
+                    0.0f to Color.Transparent,
+                    0.34f to Color.Transparent,
+                    0.42f to surfaceColor,
+                    1.0f to surfaceColor,
+                ),
+            )
             .navigationBarsPadding()
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -513,16 +520,21 @@ private fun UpdatesBottomBar(
         val buttonModifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 56.dp)
+        val opaqueButtonColors = ButtonDefaults.buttonColors(
+            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         when (state) {
             is AppUpdate.Downloading -> {
                 val pct = if (state.total > 0L) {
                     " (${((state.downloaded * 100L) / state.total).toInt().coerceIn(0, 100)}%)"
                 } else ""
-                OutlinedButton(
+                Button(
                     onClick = {},
                     enabled = false,
                     modifier = buttonModifier,
                     shape = CircleShape,
+                    colors = opaqueButtonColors,
                 ) {
                     Text("Downloading$pct")
                 }
@@ -534,6 +546,7 @@ private fun UpdatesBottomBar(
                     enabled = false,
                     modifier = buttonModifier,
                     shape = CircleShape,
+                    colors = opaqueButtonColors,
                 ) {
                     Text("Preparing installer…")
                 }
@@ -549,10 +562,14 @@ private fun UpdatesBottomBar(
                         Text("Allow install permission")
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(
+                    Button(
                         onClick = { vm.retryInstallUpdate() },
                         modifier = buttonModifier,
                         shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            contentColor = MaterialTheme.colorScheme.onSurface,
+                        ),
                     ) {
                         Text("Install")
                     }
@@ -603,6 +620,7 @@ private fun UpdatesBottomBar(
                     onClick = { vm.checkAppUpdate(manual = true) },
                     modifier = buttonModifier,
                     shape = CircleShape,
+                    colors = opaqueButtonColors,
                 ) {
                     Text("Check for updates")
                 }
@@ -611,11 +629,19 @@ private fun UpdatesBottomBar(
     }
 }
 
+private sealed interface VersionBoxActivity {
+    data object Idle : VersionBoxActivity
+    data object Checking : VersionBoxActivity
+    data class Downloading(val progress: Float?) : VersionBoxActivity
+    data object Installing : VersionBoxActivity
+}
+
 @Composable
 private fun UpdateInfoBento(
     version: String,
     details: List<Pair<String, String>>,
     versionLabel: String = "Version",
+    activity: VersionBoxActivity = VersionBoxActivity.Idle,
 ) {
     val outer = 24.dp
     val inner = 4.dp
@@ -631,6 +657,7 @@ private fun UpdateInfoBento(
                 bottomStart = inner,
                 bottomEnd = inner,
             ),
+            activity = activity,
             modifier = Modifier.fillMaxWidth(),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -661,17 +688,119 @@ private fun UpdateInfoTile(
     contentColor: Color,
     shape: RoundedCornerShape,
     modifier: Modifier = Modifier,
+    activity: VersionBoxActivity = VersionBoxActivity.Idle,
 ) {
+    val isBusy = activity != VersionBoxActivity.Idle
+    val isIndeterminate = activity is VersionBoxActivity.Checking ||
+        activity is VersionBoxActivity.Installing ||
+        (activity is VersionBoxActivity.Downloading && activity.progress == null)
+    val determinateTarget = (activity as? VersionBoxActivity.Downloading)?.progress ?: 0f
+
+    val fillVisibilityAlpha by animateFloatAsState(
+        targetValue = if (isBusy) 1f else 0f,
+        animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
+        label = "versionFillAlpha",
+    )
+    val animatedProgress by animateFloatAsState(
+        targetValue = determinateTarget,
+        animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing),
+        label = "versionDeterminateProgress",
+    )
+
+    val infiniteTransition = rememberInfiniteTransition(label = "versionFillWave")
+    val wavePhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1350, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "wavePhase",
+    )
+
+    val accentFill = MaterialTheme.colorScheme.primary
+
     Column(
         modifier = modifier
-            .background(containerColor, shape)
+            .clip(shape)
+            .background(containerColor)
+            .drawBehind {
+                if (fillVisibilityAlpha <= 0.01f) return@drawBehind
+                val w = size.width
+                val h = size.height
+                if (w <= 0f || h <= 0f) return@drawBehind
+
+                if (isIndeterminate) {
+                    val fillEndPhase = 0.72f
+                    val rawFill = (wavePhase / fillEndPhase).coerceIn(0f, 1f)
+                    val easedFill = FastOutSlowInEasing.transform(rawFill)
+                    val fadeOut = if (wavePhase < fillEndPhase) {
+                        1f
+                    } else {
+                        1f - ((wavePhase - fillEndPhase) / (1f - fillEndPhase)).coerceIn(0f, 1f)
+                    }
+                    val fillW = (w * easedFill).coerceIn(0f, w)
+                    if (fillW > 0f) {
+                        drawRect(
+                            color = accentFill.copy(alpha = 0.22f * fillVisibilityAlpha * fadeOut),
+                            size = Size(fillW, h),
+                        )
+                    }
+                } else {
+                    val fillW = (w * animatedProgress).coerceIn(0f, w)
+                    if (fillW > 0f) {
+                        drawRect(
+                            color = accentFill.copy(alpha = 0.24f * fillVisibilityAlpha),
+                            size = Size(fillW, h),
+                        )
+                    }
+                }
+            }
             .padding(horizontal = 16.dp, vertical = 14.dp),
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyLarge,
-            color = contentColor,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = contentColor,
+            )
+            AnimatedVisibility(
+                visible = isBusy,
+                enter = fadeIn(tween(200)),
+                exit = fadeOut(tween(220)),
+            ) {
+                val statusLabel = when (activity) {
+                    is VersionBoxActivity.Checking -> "Checking…"
+                    is VersionBoxActivity.Installing -> "Installing…"
+                    is VersionBoxActivity.Downloading -> activity.progress?.let {
+                        "${(it * 100f).toInt().coerceIn(0, 100)}%"
+                    } ?: "Downloading…"
+                    VersionBoxActivity.Idle -> ""
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (activity is VersionBoxActivity.Checking || activity is VersionBoxActivity.Installing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(12.dp),
+                            strokeWidth = 2.dp,
+                            color = contentColor,
+                        )
+                    }
+                    Text(
+                        text = statusLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = contentColor.copy(alpha = 0.85f),
+                    )
+                }
+            }
+        }
         Text(
             text = value,
             style = MaterialTheme.typography.titleLarge.copy(
@@ -771,37 +900,6 @@ private fun CommitHistoryRow(
             }
         }
     }
-}
-
-@Composable
-private fun UpdateAuthorAvatar(username: String) {
-    SubcomposeAsyncImage(
-        model = "https://github.com/$username.png?size=200",
-        contentDescription = "$username GitHub avatar",
-        contentScale = ContentScale.Crop,
-        modifier = Modifier
-            .size(44.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.secondaryContainer),
-        loading = {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(
-                    strokeWidth = 2.dp,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-        },
-        error = {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    text = username.take(1).uppercase(),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                )
-            }
-        },
-    )
 }
 
 private fun formatUpdateBytes(bytes: Long): String {

@@ -80,9 +80,37 @@ class PatchManager(
     private fun missingGameAssets(gameDir: File): List<String> =
         requiredGameAssets.filterNot { File(gameDir, it).isFile }
 
-    private fun sourceApkShipsAssets(apk: File): Boolean = runCatching {
+    private val _gameAssetsOutdated = MutableStateFlow(false)
+    val gameAssetsOutdated: StateFlow<Boolean> = _gameAssetsOutdated.asStateFlow()
+
+    internal fun sourceApkShipsAssets(apk: File): Boolean = runCatching {
         java.util.zip.ZipFile(apk).use { zf -> zf.getEntry("assets/touch.cfg") != null }
     }.getOrDefault(false)
+
+    private fun gameAssetsZipFile(): File = File(bundleProvider.cacheDir(), "game-assets.zip")
+
+    private fun gameAssetsUrl(): String =
+        ReleaseRepository.assetUrl(repo, PatcherViewModel.ASSETS_TAG, "game-assets.zip")
+
+    internal fun needsGameAssetsDownload(sourceApk: File?): Boolean {
+        if (sourceApk == null || sourceApkShipsAssets(sourceApk)) return false
+        val zip = gameAssetsZipFile()
+        return !zipIsComplete(zip) || _gameAssetsOutdated.value
+    }
+
+    internal suspend fun checkGameAssetsStatus(sourceApk: File?) {
+        if (sourceApk == null || sourceApkShipsAssets(sourceApk)) {
+            _gameAssetsOutdated.value = false
+            return
+        }
+        val zip = gameAssetsZipFile()
+        if (!zipIsComplete(zip)) {
+            _gameAssetsOutdated.value = true
+            return
+        }
+        val remote = ReleaseRepository.probe(gameAssetsUrl())
+        _gameAssetsOutdated.value = !ReleaseRepository.isRemoteMatch(zip, remote)
+    }
 
     private fun zipIsComplete(zip: File): Boolean {
         if (!zip.isFile || zip.length() == 0L) return false
@@ -93,27 +121,45 @@ class PatchManager(
         }.getOrDefault(false)
     }
 
+    /**
+     * Ensures `game-assets.zip` exists in cache, passes archive validation, and matches the latest
+     * GitHub release metadata — downloading atomically only when missing, corrupt, or updated.
+     */
+    suspend fun ensureGameAssetsArchive(
+        onStatus: (String) -> Unit,
+        onProgress: (done: Long, total: Long) -> Unit,
+    ): File {
+        val zip = gameAssetsZipFile()
+        val url = gameAssetsUrl()
+        val remote = ReleaseRepository.probe(url)
+        if (zipIsComplete(zip) && ReleaseRepository.isRemoteMatch(zip, remote)) {
+            _gameAssetsOutdated.value = false
+            onStatus("Game content archive is up to date")
+            return zip
+        }
+        if (zip.exists()) zip.delete()
+        onStatus("Downloading game content…")
+        ReleaseRepository.downloadFile(
+            url = url,
+            dest = zip,
+            expectedSize = remote?.size ?: 0L,
+            onProgress = onProgress,
+        )
+        if (!zipIsComplete(zip)) {
+            zip.delete()
+            throw IOException("game-assets.zip came back empty or incomplete")
+        }
+        ReleaseRepository.writeFileStamp(zip, remote)
+        _gameAssetsOutdated.value = false
+        return zip
+    }
+
     suspend fun ensureGameAssetsZip(
         gameDir: File,
         onStatus: (String) -> Unit,
         onProgress: (done: Long, total: Long) -> Unit,
-    ): File? {
-        val zip = File(bundleProvider.cacheDir(), "game-assets.zip")
-        if (zipIsComplete(zip)) {
-            onStatus("Game content archive already downloaded")
-        } else {
-            if (zip.exists()) zip.delete()
-            onStatus("Downloading game content…")
-            val tag = com.yoriva.patcher.PatcherViewModel.ASSETS_TAG
-            ReleaseRepository.downloadUrl(
-                ReleaseRepository.assetUrl(repo, tag, "game-assets.zip"),
-                zip,
-                onProgress = onProgress,
-            )
-            if (!zipIsComplete(zip)) {
-                throw IOException("game-assets.zip came back empty or incomplete")
-            }
-        }
+    ): File {
+        val zip = ensureGameAssetsArchive(onStatus = onStatus, onProgress = onProgress)
         if (missingGameAssets(gameDir).isEmpty()) {
             onStatus("Game content already extracted")
             return zip
@@ -336,7 +382,13 @@ class PatchManager(
                     ),
                     onProgress = { tick ->
                         val prev = _patch.value as? PatchUiState.Running
-                        JobProgress.detail(app, com.yoriva.patcher.PatcherViewModel.JOB_PATCH, patchStepLabel(tick))
+                        JobProgress.progress(
+                            app,
+                            PatcherViewModel.JOB_PATCH,
+                            (tick.fraction * 100f).toLong().coerceIn(0L, 99L),
+                            100L,
+                            patchStepLabel(tick),
+                        )
                         val line = logLine(tick)
                         val log = (prev?.log.orEmpty() + listOfNotNull(line)).takeLast(200)
                         _patchLog.value = log

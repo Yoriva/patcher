@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -37,7 +38,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.material.icons.filled.Handyman
@@ -51,28 +51,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RocketLaunch
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.outlined.Handyman
 import androidx.compose.material.icons.outlined.RocketLaunch
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -81,6 +72,7 @@ import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -102,22 +94,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -126,6 +115,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.yoriva.patcher.AppUpdate
 import com.yoriva.patcher.PatcherViewModel
+import com.yoriva.ui.screens.AboutScreen
 import com.yoriva.ui.screens.ToolsScreen
 import com.yoriva.ui.screens.LibraryScreen
 import com.yoriva.ui.screens.PatchScreen
@@ -136,13 +126,10 @@ import com.yoriva.ui.screens.SaveChangesDialog
 import com.yoriva.ui.screens.TopBarBackButton
 import com.yoriva.ui.screens.UpdatesScreen
 import com.yoriva.ui.screens.getGroupedItemShape
-import com.yoriva.ui.theme.Gray30
-import com.yoriva.ui.theme.Gray40
-import com.yoriva.ui.theme.Gray60
+import com.yoriva.ui.screens.topAndHorizontalInsets
 import com.yoriva.ui.theme.YorivaTheme
 import com.yoriva.ui.theme.ThemeController
 import com.yoriva.ui.theme.ThemeScreen
-import coil.compose.SubcomposeAsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -151,7 +138,20 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         CrashLog.install(applicationContext)
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(
+                android.graphics.Color.TRANSPARENT,
+                android.graphics.Color.TRANSPARENT,
+            ),
+            navigationBarStyle = SystemBarStyle.auto(
+                android.graphics.Color.TRANSPARENT,
+                android.graphics.Color.TRANSPARENT,
+            ),
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+            window.isStatusBarContrastEnforced = false
+        }
         setContent {
             val themeController: ThemeController = viewModel()
             val themeChoice by themeController.choice.collectAsState()
@@ -253,6 +253,13 @@ fun PatcherApp(vm: PatcherViewModel) {
             vm.installAppUpdate(u.file)
         }
     }
+    val pendingUpdateInstall by vm.pendingUpdateInstallIntent.collectAsState()
+    LaunchedEffect(pendingUpdateInstall) {
+        pendingUpdateInstall?.let { intent ->
+            runCatching { context.startActivity(intent) }
+            vm.consumePendingUpdateInstallIntent()
+        }
+    }
     val clientInstalled by vm.gameInstalled.collectAsState()
     val pendingInstall by vm.pendingInstall.collectAsState()
     LaunchedEffect(pendingInstall) {
@@ -311,6 +318,7 @@ fun PatcherApp(vm: PatcherViewModel) {
             showPluginEditor ||
             showPluginConfig ||
             showTheme ||
+            showAbout ||
             showUpdates ||
             showLibraries ||
             showSettings ||
@@ -323,6 +331,7 @@ fun PatcherApp(vm: PatcherViewModel) {
             }
             showPluginConfig -> showPluginConfig = false
             showTheme -> showTheme = false
+            showAbout -> showAbout = false
             showUpdates -> showUpdates = false
             showLibraries -> showLibraries = false
             showSettings -> showSettings = false
@@ -437,6 +446,11 @@ fun PatcherApp(vm: PatcherViewModel) {
                 Scaffold(
                     containerColor = MaterialTheme.colorScheme.background,
                     contentColor = MaterialTheme.colorScheme.onBackground,
+                    contentWindowInsets = if (!isTablet && isMainTab && bottomNavItems.size > 1) {
+                        ScaffoldDefaults.contentWindowInsets
+                    } else {
+                        topAndHorizontalInsets()
+                    },
                     topBar = {
                         TopAppBar(
                             colors = TopAppBarDefaults.topAppBarColors(
@@ -640,6 +654,7 @@ fun PatcherApp(vm: PatcherViewModel) {
                         vm = vm,
                         onBack = {
                             showTheme = false
+                            showAbout = false
                             showUpdates = false
                             showSettings = false
                         },
@@ -679,6 +694,27 @@ fun PatcherApp(vm: PatcherViewModel) {
                             )
                         }
                     }
+                    AnimatedVisibility(
+                        visible = showAbout,
+                        enter = slideInHorizontally(
+                            initialOffsetX = { fullWidth -> fullWidth },
+                            animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+                        ) + fadeIn(animationSpec = tween(durationMillis = 250)),
+                        exit = slideOutHorizontally(
+                            targetOffsetX = { fullWidth -> fullWidth },
+                            animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+                        ) + fadeOut(animationSpec = tween(durationMillis = 250)),
+                    ) {
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            color = MaterialTheme.colorScheme.background,
+                        ) {
+                            AboutScreen(
+                                version = appVersion(context),
+                                onBack = { showAbout = false },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -699,6 +735,7 @@ fun PatcherApp(vm: PatcherViewModel) {
             ) {
                 Scaffold(
                     containerColor = MaterialTheme.colorScheme.background,
+                    contentWindowInsets = topAndHorizontalInsets(),
                     topBar = {
                         TopAppBar(
                             title = {
@@ -742,6 +779,7 @@ fun PatcherApp(vm: PatcherViewModel) {
             ) {
                 Scaffold(
                     containerColor = MaterialTheme.colorScheme.background,
+                    contentWindowInsets = topAndHorizontalInsets(),
                     topBar = {
                         TopAppBar(
                             title = {
@@ -852,9 +890,6 @@ fun PatcherApp(vm: PatcherViewModel) {
             )
         }
     }
-    if (showAbout) {
-        AboutDialog(version = appVersion(context), onDismiss = { showAbout = false })
-    }
     val currentUpdate = update
     val isMandatoryUpdate = (currentUpdate as? AppUpdate.Checking)?.mandatory == true ||
         currentUpdate is AppUpdate.Available ||
@@ -867,11 +902,11 @@ fun PatcherApp(vm: PatcherViewModel) {
         enter = slideInHorizontally(
             initialOffsetX = { fullWidth -> fullWidth },
             animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
-        ) + fadeIn(animationSpec = tween(durationMillis = 250)),
+        ),
         exit = slideOutHorizontally(
             targetOffsetX = { fullWidth -> fullWidth },
             animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
-        ) + fadeOut(animationSpec = tween(durationMillis = 250)),
+        ),
     ) {
         UpdatesScreen(
             vm = vm,
@@ -1068,155 +1103,6 @@ private data class BottomNavItem(
     val selectedIcon: androidx.compose.ui.graphics.vector.ImageVector,
     val unselectedIcon: androidx.compose.ui.graphics.vector.ImageVector,
 )
-@Composable
-private fun AboutDialog(version: String, onDismiss: () -> Unit) {
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 6.dp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 420.dp),
-        ) {
-            Column {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    MaterialTheme.colorScheme.primaryContainer,
-                                    MaterialTheme.colorScheme.secondaryContainer,
-                                ),
-                            ),
-                        )
-                        .padding(vertical = 28.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Image(
-                            painter = painterResource(id = R.drawable.yoriva_logo),
-                            contentDescription = null,
-                            modifier = Modifier.size(96.dp),
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = "Yoriva",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Version $version",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
-                        )
-                    }
-                }
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text(
-                        text = "AMXX bundle injection for CS 1.6 on Android. Includes a Pawn compiler, addons manager and patch engine.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                    )
-                    Spacer(modifier = Modifier.height(20.dp))
-                    Text(
-                        text = "Developers",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    DeveloperRow(name = "berkchy", role = "Founder", github = "berkchy")
-                    Spacer(modifier = Modifier.height(8.dp))
-                    DeveloperRow(name = "nenquen", role = "UI Developer", github = "nenquen")
-                    Spacer(modifier = Modifier.height(20.dp))
-                    FilledTonalButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Close")
-                    }
-                }
-            }
-        }
-    }
-}
-@Composable
-private fun DeveloperRow(name: String, role: String, github: String) {
-    val uriHandler = LocalUriHandler.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .clickable { uriHandler.openUri("https://github.com/$github") }
-            .background(MaterialTheme.colorScheme.surfaceContainer)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        GithubAvatar(username = github)
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = name,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(modifier = Modifier.height(1.dp))
-            Text(
-                text = role,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            modifier = Modifier.size(16.dp),
-        )
-    }
-}
-@Composable
-private fun GithubAvatar(username: String) {
-    SubcomposeAsyncImage(
-        model = "https://github.com/$username.png?size=200",
-        contentDescription = "$username GitHub avatar",
-        contentScale = ContentScale.Crop,
-        modifier = Modifier
-            .size(44.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.secondaryContainer),
-        loading = {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(
-                    strokeWidth = 2.dp,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-        },
-        error = {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    text = username.take(1).uppercase(),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                )
-            }
-        },
-    )
-}
 @Composable
 private fun appVersion(context: android.content.Context): String {
     val pm = context.packageManager

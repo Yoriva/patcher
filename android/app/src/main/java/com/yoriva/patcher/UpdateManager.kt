@@ -8,8 +8,10 @@ import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.SystemClock
+import androidx.core.content.FileProvider
 import com.yoriva.data.IncrementalUpdateManager
 import com.yoriva.data.ReleaseRepository
+import com.yoriva.lib.ZipAnalyzer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -85,6 +87,9 @@ class UpdateManager(
     private val _recentCommits = MutableStateFlow<List<ReleaseRepository.CommitDetails>>(emptyList())
     val recentCommits: StateFlow<List<ReleaseRepository.CommitDetails>> = _recentCommits.asStateFlow()
 
+    private val _availableRelease = MutableStateFlow<AppUpdate.Available?>(null)
+    val availableRelease: StateFlow<AppUpdate.Available?> = _availableRelease.asStateFlow()
+
     private val _commitsLoading = MutableStateFlow(false)
     val commitsLoading: StateFlow<Boolean> = _commitsLoading.asStateFlow()
 
@@ -101,6 +106,9 @@ class UpdateManager(
     private var checkJob: Job? = null
 
     @Volatile
+    private var downloadJob: Job? = null
+
+    @Volatile
     private var lastCheckElapsedMs: Long = 0L
 
     @Volatile
@@ -109,17 +117,50 @@ class UpdateManager(
     @Volatile
     private var lastAvailable: AppUpdate.Available? = null
 
+    @Volatile
+    private var usedSystemInstallerFallback = false
+
+    @Volatile
+    private var fallbackTriedForAttempt = false
+
+    private val _pendingInstallIntent = MutableStateFlow<Intent?>(null)
+    val pendingInstallIntent: StateFlow<Intent?> = _pendingInstallIntent.asStateFlow()
+
+    fun consumePendingInstallIntent() {
+        _pendingInstallIntent.value = null
+    }
+
     init {
+        scope.launch {
+            confirmPrompts.collect { prompt ->
+                _pendingInstallIntent.value = prompt
+            }
+        }
         scope.launch {
             installEvents.collect { (status, message) ->
                 val cur = _appUpdate.value
                 if (cur is AppUpdate.Installing) {
                     if (status == PackageInstaller.STATUS_SUCCESS) return@collect
+                    // If PackageInstaller session is aborted or denied (common under OEM/BAL restrictions),
+                    // fall back automatically once per attempt to the standard foreground ACTION_VIEW installer.
+                    if (!fallbackTriedForAttempt && cur.file.isFile && cur.file.length() > 0L) {
+                        fallbackTriedForAttempt = true
+                        usedSystemInstallerFallback = true
+                        val fallback = viewInstallerIntentFor(cur.file)
+                        if (fallback != null) {
+                            _pendingInstallIntent.value = fallback
+                            _appUpdate.value = cur.copy(
+                                needsInstallPermission = !canRequestPackageInstalls(),
+                                errorMessage = null,
+                            )
+                            return@collect
+                        }
+                    }
                     val detail = message?.takeIf { it.isNotBlank() }
                         ?: if (status == PackageInstaller.STATUS_FAILURE_ABORTED) {
                             "Installation was cancelled. You must install the update to continue using Yoriva."
                         } else {
-                            "Installation failed (code $status). Tap Install Update to try again."
+                            "Installation failed (code $status). Tap Install to try again."
                         }
                     _appUpdate.value = cur.copy(
                         needsInstallPermission = !canRequestPackageInstalls(),
@@ -169,9 +210,12 @@ class UpdateManager(
                 val apkSize = ReleaseRepository.probeSize(apkUrl)
                 val ours = installedVersion()
                 val localSize = installedApkSize()
-                val versionDiffers = ours.isNullOrBlank() || remoteVersion != ours
-                val sizeDiffers = apkSize != null && apkSize > 0 &&
-                    localSize != null && apkSize != localSize
+                val needsUpdate = isRemoteNewer(
+                    ours = ours,
+                    remote = remoteVersion,
+                    localSize = localSize,
+                    remoteSize = apkSize,
+                )
                 val notes = buildString {
                     if (!ours.isNullOrBlank()) append("Installed: $ours")
                     if (localSize != null) append(" (${mb(localSize)})")
@@ -184,7 +228,7 @@ class UpdateManager(
                 val checkedWallMs = System.currentTimeMillis()
                 _lastCheckedAtMillis.value = checkedWallMs
                 updatePrefs.edit().putLong(KEY_LAST_CHECK_AT, checkedWallMs).apply()
-                if (versionDiffers || sizeDiffers) {
+                if (needsUpdate) {
                     persistMandatoryUpdate(remoteVersion)
                     val release = ReleaseRepository.fetchReleaseDetails(
                         PatcherViewModel.APP_RELEASE_REPO, tag,
@@ -214,11 +258,13 @@ class UpdateManager(
                             ?: 0L,
                     )
                     lastAvailable = available
+                    _availableRelease.value = available
                     _appUpdate.value = available
                     loadRecentCommits(force = true)
                 } else {
                     clearMandatoryUpdate()
                     lastAvailable = null
+                    _availableRelease.value = null
                     _appUpdate.value = if (manual) AppUpdate.UpToDate(remoteVersion) else AppUpdate.Idle
                 }
             } catch (t: Throwable) {
@@ -264,6 +310,7 @@ class UpdateManager(
     }
 
     fun downloadAppUpdate() {
+        if (downloadJob?.isActive == true) return
         val available = (_appUpdate.value as? AppUpdate.Available)
             ?: lastAvailable
             ?: run {
@@ -271,15 +318,21 @@ class UpdateManager(
                 return
             }
         lastAvailable = available
-        scope.launch(Dispatchers.IO) {
+        usedSystemInstallerFallback = false
+        fallbackTriedForAttempt = false
+        downloadJob = scope.launch(Dispatchers.IO) {
             try {
                 val dest = workFile("update.apk")
                 if (dest.exists()) dest.delete()
                 val t0 = SystemClock.elapsedRealtime()
-                val downloadUrl = "${available.url}?t=${System.currentTimeMillis()}"
-                ReleaseRepository.downloadUrl(downloadUrl, dest, available.size) { done, total ->
+                ReleaseRepository.downloadFile(available.url, dest, available.size) { done, total ->
                     val dt = (SystemClock.elapsedRealtime() - t0).coerceAtLeast(1L)
                     _appUpdate.value = AppUpdate.Downloading(available.tag, done, total, done * 1000L / dt)
+                }
+                val valid = runCatching { ZipAnalyzer.analyze(dest) }.isSuccess
+                if (!valid) {
+                    dest.delete()
+                    throw IOException("Downloaded update APK is invalid or corrupted")
                 }
                 updatePrefs.edit().putString("known_tag", available.tag).apply()
                 _appUpdate.value = AppUpdate.Downloaded(available.tag, dest)
@@ -316,17 +369,32 @@ class UpdateManager(
                 needsInstallPermission = false,
                 errorMessage = null,
             )
+            fallbackTriedForAttempt = false
+            updatePrefs.edit().putBoolean(RELAUNCH_AFTER_UPDATE, true).commit()
+            if (usedSystemInstallerFallback) {
+                val intent = viewInstallerIntentFor(file)
+                if (intent != null) {
+                    _pendingInstallIntent.value = intent
+                    return@launch
+                }
+            }
             try {
-                updatePrefs.edit().putBoolean(RELAUNCH_AFTER_UPDATE, true).commit()
                 installPackage(file)
             } catch (t: Throwable) {
-                updatePrefs.edit().putBoolean(RELAUNCH_AFTER_UPDATE, false).apply()
-                _appUpdate.value = AppUpdate.Installing(
-                    tag = tag,
-                    file = file,
-                    needsInstallPermission = !canRequestPackageInstalls(),
-                    errorMessage = t.message ?: "Install failed",
-                )
+                usedSystemInstallerFallback = true
+                val fallback = viewInstallerIntentFor(file)
+                if (fallback != null && file.isFile && file.length() > 0L) {
+                    fallbackTriedForAttempt = true
+                    _pendingInstallIntent.value = fallback
+                } else {
+                    updatePrefs.edit().putBoolean(RELAUNCH_AFTER_UPDATE, false).apply()
+                    _appUpdate.value = AppUpdate.Installing(
+                        tag = tag,
+                        file = file,
+                        needsInstallPermission = !canRequestPackageInstalls(),
+                        errorMessage = t.message ?: "Install failed",
+                    )
+                }
             }
         }
     }
@@ -334,9 +402,22 @@ class UpdateManager(
     fun retryInstallUpdate() {
         val cur = _appUpdate.value as? AppUpdate.Installing ?: return
         if (cur.file.exists() && cur.file.length() > 0L) {
+            if (cur.errorMessage != null) usedSystemInstallerFallback = true
             installAppUpdate(cur.file)
         } else {
             downloadAppUpdate()
+        }
+    }
+
+    private fun viewInstallerIntentFor(apk: File): Intent? {
+        if (!apk.isFile || apk.length() <= 0L) return null
+        val uri = runCatching {
+            FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", apk)
+        }.getOrNull() ?: return null
+        return Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
     }
 
@@ -460,21 +541,8 @@ class UpdateManager(
         }
     }
 
-    fun consumeDownloaded() {
-        if (lastAvailable == null && !isMandatoryLockedForCurrentApk()) {
-            _appUpdate.value = AppUpdate.Idle
-        }
-    }
-
     fun markBundleTagKnown(tag: String) {
         updatePrefs.edit().putString("known_bundle_tag", tag).apply()
-    }
-    fun clearLibraryState() {
-        updatePrefs.edit()
-            .remove("known_bundle_tag")
-            .remove("applied_builds_arm64-v8a")
-            .remove("applied_builds_armeabi-v7a")
-            .apply()
     }
 
     internal fun appliedBuilds(abi: String): Map<String, String> {
@@ -498,6 +566,25 @@ class UpdateManager(
             .apply()
     }
 
+    private fun isRemoteNewer(
+        ours: String?,
+        remote: String,
+        localSize: Long?,
+        remoteSize: Long?,
+    ): Boolean {
+        if (ours.isNullOrBlank()) return true
+        if (ours == remote) {
+            return remoteSize != null && remoteSize > 0L &&
+                localSize != null && remoteSize != localSize
+        }
+        val localCont = Regex("^continuous-r(\\d+)$").find(ours)?.groupValues?.get(1)?.toLongOrNull()
+        val remoteCont = Regex("^continuous-r(\\d+)$").find(remote)?.groupValues?.get(1)?.toLongOrNull()
+        if (localCont != null && remoteCont != null) {
+            return remoteCont > localCont
+        }
+        return true
+    }
+
     private fun mb(bytes: Long): String =
         "${(bytes / 1048576.0).let { "%.1f".format(java.util.Locale.US, it) }} MB"
 
@@ -507,9 +594,13 @@ class UpdateManager(
         private const val KEY_REQUIRED_TARGET = "required_target_version"
         private const val KEY_LAST_CHECK_AT = "last_check_timestamp"
         private val installEvents = MutableSharedFlow<Pair<Int, String?>>(extraBufferCapacity = 8)
+        private val confirmPrompts = MutableSharedFlow<Intent>(extraBufferCapacity = 4)
 
         internal fun notifyInstallStatus(status: Int, message: String?) {
             installEvents.tryEmit(status to message)
         }
+
+        internal fun notifyConfirmPrompt(intent: Intent): Boolean =
+            confirmPrompts.subscriptionCount.value > 0 && confirmPrompts.tryEmit(intent)
     }
 }
