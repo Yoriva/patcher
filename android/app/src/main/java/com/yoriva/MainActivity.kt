@@ -274,14 +274,28 @@ fun PatcherApp(vm: PatcherViewModel) {
             vm.consumePendingUninstall()
         }
     }
-    val bottomNavItems = remember {
-        listOf(
-            BottomNavItem(0, "Patch", Icons.Filled.RocketLaunch, Icons.Outlined.RocketLaunch),
-            BottomNavItem(1, "Tools", Icons.Filled.Handyman, Icons.Outlined.Handyman),
-        )
+    val bottomNavItems = remember(clientInstalled) {
+        if (clientInstalled) {
+            listOf(
+                BottomNavItem(0, "Patch", Icons.Filled.RocketLaunch, Icons.Outlined.RocketLaunch),
+                BottomNavItem(1, "Tools", Icons.Filled.Handyman, Icons.Outlined.Handyman),
+            )
+        } else {
+            listOf(
+                BottomNavItem(0, "Patch", Icons.Filled.RocketLaunch, Icons.Outlined.RocketLaunch),
+            )
+        }
     }
     val isMainTab = currentRoute == Dest.Tabs.route
-    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 2 })
+    val pagerState = rememberPagerState(
+        initialPage = 0,
+        pageCount = { if (clientInstalled) 2 else 1 },
+    )
+    LaunchedEffect(clientInstalled) {
+        if (!clientInstalled && pagerState.currentPage != 0) {
+            pagerState.scrollToPage(0)
+        }
+    }
     val tabScope = rememberCoroutineScope()
     var showSettings by remember { mutableStateOf(false) }
     var showTheme by remember { mutableStateOf(false) }
@@ -498,7 +512,7 @@ fun PatcherApp(vm: PatcherViewModel) {
                         )
                     },
                     bottomBar = {
-                        if (!isTablet && isMainTab) {
+                        if (!isTablet && isMainTab && bottomNavItems.size > 1) {
                             NavigationBar(
                                 containerColor = MaterialTheme.colorScheme.background,
                                 contentColor = MaterialTheme.colorScheme.onSurface,
@@ -584,7 +598,7 @@ fun PatcherApp(vm: PatcherViewModel) {
                                     HorizontalPager(
                                         state = pagerState,
                                         modifier = Modifier.fillMaxSize(),
-                                        beyondViewportPageCount = 1,
+                                        beyondViewportPageCount = if (clientInstalled) 1 else 0,
                                     ) { page ->
                                         when (page) {
                                             0 -> PatchScreen(
