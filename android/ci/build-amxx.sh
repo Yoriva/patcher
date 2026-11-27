@@ -9,7 +9,45 @@ NDK=$2
 OUT=$3
 PLUGINS_SRC=${4:-}
 ABI=${5:-arm64-v8a}
+SELECTION=${6:-}
 
+if [ -n "$SELECTION" ]; then
+  NORMALIZED=""
+  IFS=',' read -ra REQUESTED <<< "$(echo "$SELECTION" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  for item in "${REQUESTED[@]}"; do
+    case "$item" in
+      ''|all) continue ;;
+      libmenu|menu) item=menu ;;
+      libclient|client) item=client ;;
+      libamxmodx|amxxmodx|core) item=amxxmodx ;;
+      libmetadroid|metadroid|meta) item=metadroid ;;
+      libcs|cs|regamedll|gamedll) item=regamedll ;;
+      libyapb|yapb) item=yapb ;;
+      libreapi|reapi) item=reapi ;;
+      amxxpc|compiler) item=compiler ;;
+      engine|fakemeta|fun|geoip|json|nvault|regex|sockets|sqlite|cstrike|csx|hamsandwich) item=modules ;;
+    esac
+    case ",$NORMALIZED," in
+      *",$item,"*) ;;
+      *) NORMALIZED=${NORMALIZED:+$NORMALIZED,}$item ;;
+    esac
+  done
+  SELECTION=$NORMALIZED
+fi
+
+want() {
+  local key=$1
+  [ -z "$SELECTION" ] && return 0
+  case ",$SELECTION," in
+    *",$key,"*) return 0 ;;
+  esac
+  return 1
+}
+
+want_amxx() { want amxxmodx || want modules || want compiler || want plugins; }
+want_regex() { want regex || want modules; }
+
+echo "== lib selection: ${SELECTION:-all} =="
 
 mkdir -p "$SRC" "$OUT/lib/$ABI" "$OUT/plugins"
 
@@ -28,17 +66,21 @@ fetch() {
   fi
 }
 
-fetch reapi "https://github.com/rehlds/ReAPI.git" yes
-
-AMXX_REF=nexora
-if [ "$ABI" = "arm64-v8a" ]; then
-  AMXX_REF=nexora-cell64
+if want reapi || want modules; then
+  fetch reapi "https://github.com/rehlds/ReAPI.git" yes
 fi
-echo "== amxmodx: $AMXX_REF =="
-git -C "$REPO_ROOT/3rdparty/amxmodx" fetch -q --depth 1 origin \
-  "+refs/heads/$AMXX_REF:refs/remotes/origin/$AMXX_REF"
-git -C "$REPO_ROOT/3rdparty/amxmodx" checkout -q -B "$AMXX_REF" "refs/remotes/origin/$AMXX_REF"
-git -C "$REPO_ROOT/3rdparty/amxmodx" submodule update --init --recursive --depth 1 2>&1 | tail -2 || true
+
+if want_amxx; then
+  AMXX_REF=nexora
+  if [ "$ABI" = "arm64-v8a" ]; then
+    AMXX_REF=nexora-cell64
+  fi
+  echo "== amxmodx: $AMXX_REF =="
+  git -C "$REPO_ROOT/3rdparty/amxmodx" fetch -q --depth 1 origin \
+    "+refs/heads/$AMXX_REF:refs/remotes/origin/$AMXX_REF"
+  git -C "$REPO_ROOT/3rdparty/amxmodx" checkout -q -B "$AMXX_REF" "refs/remotes/origin/$AMXX_REF"
+  git -C "$REPO_ROOT/3rdparty/amxmodx" submodule update --init --recursive --depth 1 2>&1 | tail -2 || true
+fi
 
 
 HOST=$(uname -s | tr 'A-Z' 'a-z')
@@ -83,7 +125,7 @@ LOGS_DIR="$SCRIPT_FOLDER/logs"
 COMPILER_LOG="$LOGS_DIR/compiler.log"
 ERROR_LOG="$LOGS_DIR/error.log"
 
-if [ -f "$AMXX/modules/hamsandwich/Trampolines.h" ]; then
+if want_amxx && [ -f "$AMXX/modules/hamsandwich/Trampolines.h" ]; then
   TH="$AMXX/modules/hamsandwich/Trampolines.h"
   if ! grep -q 'intptr_t' "$TH"; then
     echo "   patching Trampolines.h for 64-bit pointer cast"
@@ -169,6 +211,7 @@ relink() {
     "$SYSROOT_LIB/libc++abi.a" -ldl -lm -pthread
 }
 
+if want amxxmodx; then
 echo "== building core =="
 
 NATIVES_FILE="$AMXX/amxmodx/natives-android.c"
@@ -333,7 +376,9 @@ done
 
 relink "$OUT/lib/$ABI/libamxmodx.so" "$TMP"/core/*.o
 echo "   core -> $(ls -l "$OUT/lib/$ABI/libamxmodx.so" | awk '{print $5}') bytes"
+fi
 
+if want_regex; then
 PCRE_VER=8.45
 if [[ ! -f "$TMP/libpcre.a" ]]; then
   echo "== building pcre $PCRE_VER ($ABI) =="
@@ -350,7 +395,9 @@ if [[ ! -f "$TMP/libpcre.a" ]]; then
   )
 fi
 PCRE_A="$TMP/pcre-inst/lib/libpcre.a"
+fi
 
+if want metadroid; then
 echo "== building metadroid ($ABI) =="
 MMBUILD=$TMP/metadroid-build
 cmake -S "$METAMOD_R" -B "$MMBUILD" \
@@ -372,10 +419,15 @@ if [ -n "$MM_SO" ]; then
 else
   echo "WARN: metadroid lib not found, skipping"
 fi
+fi
 
 build_module() {
   local name="$1" modsub="$2" extra_inc="$3" extra_defs="$4"
   shift 4
+  if ! want "$name" && ! want modules; then
+    echo "   skipping module $name"
+    return 0
+  fi
   echo "== building module $name =="
   local M="$AMXX/modules/$modsub"
   local MOD_INC="-I$M"
@@ -448,12 +500,15 @@ build_module hamsandwich hamsandwich "" "-DHAVE_STDINT_H" \
   "srvcmd.cpp" "call_funcs.cpp" "hook_create.cpp" "DataHandler.cpp" \
   "pdata.cpp" "hook_specialbot.cpp"
 
+if want_regex; then
 "$CXX" -fPIC -O2 -shared -nostdlib++ -o "$OUT/lib/$ABI/libregex_amxx_$MOD_SUFFIX.so" \
   "$TMP"/mod-regex/*.o "$cmd_shim" "$PCRE_A" \
   -Wl,--wrap=__assert2 -Wl,--wrap=__assert_fail \
   -Wl,--whole-archive "$SYSROOT_LIB/libc++_static.a" -Wl,--no-whole-archive \
   "$SYSROOT_LIB/libc++abi.a" -ldl -lm -pthread
+fi
 
+if want reapi || want modules; then
 echo "== building reapi module =="
 REAPI="$SRC/reapi/reapi"
 mkdir -p "$TMP/mod-reapi"
@@ -569,7 +624,9 @@ done
   -Wl,--whole-archive "$SYSROOT_LIB/libc++_static.a" -Wl,--no-whole-archive \
   "$SYSROOT_LIB/libc++abi.a" -ldl -lm
 echo "   reapi -> $(ls -l "$OUT/lib/$ABI/libreapi_amxx_$MOD_SUFFIX.so" | awk '{print $5}') bytes"
+fi
 
+if want yapb; then
 echo "== building yapb =="
 YAPBBUILD="$TMP/yapb-build"
 cmake -S "$YAPB" -B "$YAPBBUILD" \
@@ -589,7 +646,9 @@ if [ -n "$YAPB_SO" ]; then
 else
   echo "WARN: yapb lib not found, skipping"
 fi
+fi
 
+if want client || want menu; then
 echo "== building client (cs16-client, crash handler) =="
 CLIENT_SRC="$REPO_ROOT/cs16-client"
 CLIENT_BUILD="$TMP/client-build"
@@ -633,23 +692,35 @@ cmake -S "$CLIENT_SRC" -B "$CLIENT_BUILD" \
   -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
   -DCS16_PATCHER_VERSION="${RELEASE_VERSION:-dev}" \
   -DBUILD_CLIENT=ON -DBUILD_SERVER=OFF -DBUILD_MAINUI=ON -DMAINUI_NAME=menu -DMAINUI_USE_STB=ON -DMAINUI_RENDER_PICBUTTON_TEXT=ON
+if want client; then
 cmake --build "$CLIENT_BUILD" --target client -j"$(nproc)"
-CLIENT_SO=$(find "$CLIENT_BUILD" -name "libclient_android_*.so" -o -name "client_android_*.so" | head -1)
+CLIENT_SO=""
+if [ -d "$CLIENT_BUILD" ]; then
+  CLIENT_SO=$(find "$CLIENT_BUILD" -name "libclient_android_*.so" -o -name "client_android_*.so" | head -1)
+fi
 if [ -n "$CLIENT_SO" ]; then
   cp "$CLIENT_SO" "$OUT/lib/$ABI/libclient_android_$RUNTIME_SUFFIX.so"
   echo "   client -> $(ls -l "$OUT/lib/$ABI/libclient_android_$RUNTIME_SUFFIX.so" | awk '{print $5}') bytes"
 else
   echo "WARN: client lib not found, skipping"
 fi
+fi
+if want menu; then
 cmake --build "$CLIENT_BUILD" --target menu -j"$(nproc)"
-MENU_SO=$(find "$CLIENT_BUILD" -name "libmenu*.so" | head -1)
+MENU_SO=""
+if [ -d "$CLIENT_BUILD" ]; then
+  MENU_SO=$(find "$CLIENT_BUILD" -name "libmenu*.so" | head -1)
+fi
 if [ -n "$MENU_SO" ]; then
   cp "$MENU_SO" "$OUT/lib/$ABI/libmenu_android_$RUNTIME_SUFFIX.so"
   echo "   menu -> $(ls -l "$OUT/lib/$ABI/libmenu_android_$RUNTIME_SUFFIX.so" | awk '{print $5}') bytes"
 else
   echo "WARN: menu lib not found, skipping"
 fi
+fi
+fi
 
+if want plugins; then
 echo "== building host pawncc (64-bit cells) =="
 LIBPC="$AMXX/compiler/libpc300"
 PC_BUILD="$TMP/libpc300"
@@ -726,7 +797,9 @@ PY
     { printf '%s\n' "$out"; } >> "$COMPILER_LOG"
   done
 fi
+fi
 
+if want compiler; then
 echo "== building amxxpc for $ABI (embedded, cell $CELL) =="
 PC_DEV="$TMP/amxxpc-$ABI"
 rm -rf "$PC_DEV"
@@ -759,6 +832,7 @@ done
 mkdir -p "$OUT/compiler/$ABI"
 cp "$PC_DEV/amxxpc" "$PC_DEV/amxxpc32.so" "$OUT/compiler/$ABI/"
 echo "   amxxpc -> $(ls -l "$OUT/compiler/$ABI/amxxpc" | awk '{print $5}') bytes"
+fi
 
 echo "ALL_BUILT"
-ls -l "$OUT/lib/$ABI/" "$OUT/plugins" "$OUT/compiler/$ABI"
+ls -l "$OUT/lib/$ABI/" "$OUT/plugins" "$OUT/compiler/$ABI" || true

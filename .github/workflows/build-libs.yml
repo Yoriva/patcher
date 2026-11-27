@@ -9,6 +9,10 @@ on:
         description: 'Bundle version tag (default: 1.10.0)'
         required: false
         default: '1.10.0'
+      libs:
+        description: 'Comma-separated libs to rebuild (e.g. libmenu,libclient,libamxmodx,regamedll). Empty = all'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -28,6 +32,8 @@ jobs:
 
       - name: Detect build type
         id: detect
+        env:
+          LIBS_INPUT: ${{ github.event.inputs.libs || '' }}
         shell: bash
         run: |
           MSG=$(git log -1 --pretty=%s)
@@ -39,6 +45,53 @@ jobs:
           if echo "$LOWER" | grep -q '\[libs\]'; then NEEDS_LIBS=true; fi
           if echo "$LOWER" | grep -qE '\[android build\]|\[version build\]'; then NEEDS_ANDROID=true; fi
           if echo "$LOWER" | grep -qE '\[bundle build\]'; then NEEDS_LIBS=true; fi
+
+          SELECTION=$(echo "$LIBS_INPUT" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+          if [[ "$LOWER" =~ \[libs[[:space:]]*:[[:space:]]*([^]]+)\] ]]; then
+            SELECTION=${BASH_REMATCH[1]}
+          elif [[ "$LOWER" =~ \[libs[[:space:]]+([^]]+)\] ]]; then
+            SELECTION=${BASH_REMATCH[1]}
+          fi
+          SELECTION=$(echo "$SELECTION" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+          NORMALIZED=""
+          IFS=',' read -ra REQUESTED <<< "$SELECTION"
+          for item in "${REQUESTED[@]}"; do
+            case "$item" in
+              ''|all) continue ;;
+              libmenu|menu) item=menu ;;
+              libclient|client) item=client ;;
+              libamxmodx|amxxmodx|core) item=amxxmodx ;;
+              libmetadroid|metadroid|meta) item=metadroid ;;
+              libcs|cs|regamedll|gamedll) item=regamedll ;;
+              libyapb|yapb) item=yapb ;;
+              libreapi|reapi) item=reapi ;;
+              amxxpc|compiler) item=compiler ;;
+              engine|fakemeta|fun|geoip|json|nvault|regex|sockets|sqlite|cstrike|csx|hamsandwich) item=modules ;;
+            esac
+            case ",$NORMALIZED," in
+              *",$item,"*) ;;
+              *) NORMALIZED=${NORMALIZED:+$NORMALIZED,}$item ;;
+            esac
+          done
+          SELECTIVE=false
+          NEEDS_SCRIPT=true
+          NEEDS_REGAMEDLL=true
+          if [ -n "$NORMALIZED" ]; then
+            SELECTIVE=true
+            NEEDS_SCRIPT=false
+            NEEDS_REGAMEDLL=false
+            case ",$NORMALIZED," in
+              *",regamedll,"*) NEEDS_REGAMEDLL=true ;;
+            esac
+            case ",$NORMALIZED," in
+              *",menu,"*|*",client,"*|*",amxxmodx,"*|*",metadroid,"*|*",modules,"*|*",reapi,"*|*",yapb,"*|*",compiler,"*|*",plugins,"*) NEEDS_SCRIPT=true ;;
+            esac
+          fi
+          echo "selected_libs=$NORMALIZED" >> "$GITHUB_OUTPUT"
+          echo "selective=$SELECTIVE" >> "$GITHUB_OUTPUT"
+          echo "needs_script=$NEEDS_SCRIPT" >> "$GITHUB_OUTPUT"
+          echo "needs_regamedll=$NEEDS_REGAMEDLL" >> "$GITHUB_OUTPUT"
+          echo "Selective libs: ${NORMALIZED:-all} (script: $NEEDS_SCRIPT, regamedll: $NEEDS_REGAMEDLL)"
           CONTINUOUS=false
           if [ "$GITHUB_REF_NAME" = "continuous" ]; then
             CONTINUOUS=true
@@ -88,6 +141,10 @@ jobs:
                 fi
               fi
             fi
+          fi
+          if [ "$SELECTIVE" = true ]; then
+            SKIP_NATIVE=false
+            NATIVE_SHA_OUT=$(git rev-parse HEAD)
           fi
           echo "skip_native=$SKIP_NATIVE" >> "$GITHUB_OUTPUT"
           echo "native_sha_out=$NATIVE_SHA_OUT" >> "$GITHUB_OUTPUT"
@@ -155,12 +212,15 @@ jobs:
           python3 ./android/ci/check-engine-abi.py
 
       - name: Cross-compile core + modules + plugins
-        if: steps.detect.outputs.needs_libs == 'true' && steps.detect.outputs.skip_native != 'true'
+        if: steps.detect.outputs.needs_libs == 'true' && steps.detect.outputs.skip_native != 'true' && steps.detect.outputs.needs_script == 'true'
+        env:
+          SELECTED_LIBS: ${{ steps.detect.outputs.selected_libs }}
+          SELECTIVE: ${{ steps.detect.outputs.selective }}
         shell: bash
         run: |
           for ABI in arm64-v8a armeabi-v7a; do
             if RELEASE_VERSION="$BUNDLE_VERSION" bash ./android/ci/build-amxx.sh "$GITHUB_WORKSPACE/src" "$ANDROID_NDK_HOME" \
-                "$GITHUB_WORKSPACE/build-out" "" "$ABI"; then
+                "$GITHUB_WORKSPACE/build-out" "" "$ABI" "$SELECTED_LIBS"; then
               echo "::group::OK $ABI"
               ls -l "$GITHUB_WORKSPACE/build-out/lib/$ABI" 2>/dev/null
               echo "::endgroup::"
@@ -170,8 +230,12 @@ jobs:
                 echo "::error::arm64-v8a cross-compile failed (required)"
                 exit 1
               fi
-              echo "::warning::armeabi-v7a cross-compile failed — v7a bundle will be skipped"
-              touch "$GITHUB_WORKSPACE/v7a-missing"
+              if [ "$SELECTIVE" = "true" ] && [ -f "$GITHUB_WORKSPACE/build-out/lib/armeabi-v7a/libamxmodx.so" ]; then
+                echo "::warning::armeabi-v7a selective build failed — keeping restored v7a libs"
+              else
+                echo "::warning::armeabi-v7a cross-compile failed — v7a bundle will be skipped"
+                touch "$GITHUB_WORKSPACE/v7a-missing"
+              fi
             fi
           done
 
@@ -182,7 +246,7 @@ jobs:
           if [ -n "${CCACHE:-}" ]; then ccache --show-stats || true; fi
 
       - name: Restore native outputs from release
-        if: steps.detect.outputs.needs_libs == 'true' && steps.detect.outputs.skip_native == 'true'
+        if: steps.detect.outputs.needs_libs == 'true' && (steps.detect.outputs.skip_native == 'true' || steps.detect.outputs.selective == 'true')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -218,7 +282,7 @@ jobs:
           [ -f "$BO/lib/armeabi-v7a/libcs_android_armv7l.so" ] || touch "$GITHUB_WORKSPACE/v7a-missing"
 
       - name: Build ReGameDLL libcs (first-spawn fix)
-        if: steps.detect.outputs.needs_libs == 'true' && steps.detect.outputs.skip_native != 'true'
+        if: steps.detect.outputs.needs_libs == 'true' && steps.detect.outputs.skip_native != 'true' && steps.detect.outputs.needs_regamedll == 'true'
         shell: bash
         run: |
           set -euo pipefail
