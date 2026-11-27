@@ -333,6 +333,12 @@ object ReleaseRepository {
 
     fun isRemoteMatch(file: File, remote: RemoteInfo?, dateSlopMs: Long = 5 * 60_000L): Boolean =
         remoteMismatchReason(file, remote, dateSlopMs) == null
+
+    fun isRemoteSizeMatch(file: File, remote: RemoteInfo?): Boolean {
+        if (!file.isFile || file.length() <= 0L) return false
+        if (remote == null) return true
+        return remote.size <= 0L || file.length() == remote.size
+    }
     suspend fun fetchText(url: String): String? =
         fetchTextInternal(url, accept = null)
 

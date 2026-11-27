@@ -113,7 +113,7 @@ class PatchManager(
             return
         }
         val remote = ReleaseRepository.probe(gameAssetsUrl())
-        _gameAssetsOutdated.value = !ReleaseRepository.isRemoteMatch(zip, remote)
+        _gameAssetsOutdated.value = !ReleaseRepository.isRemoteSizeMatch(zip, remote)
     }
 
     private fun zipIsComplete(zip: File): Boolean {
@@ -127,7 +127,7 @@ class PatchManager(
 
     /**
      * Ensures `game-assets.zip` exists in cache, passes archive validation, and matches the latest
-     * GitHub release metadata — downloading atomically only when missing, corrupt, or updated.
+     * GitHub release byte size — downloading atomically only when missing, corrupt, or updated.
      */
     suspend fun ensureGameAssetsArchive(
         onStatus: (String) -> Unit,
@@ -136,7 +136,7 @@ class PatchManager(
         val zip = gameAssetsZipFile()
         val url = gameAssetsUrl()
         val remote = ReleaseRepository.probe(url)
-        if (zipIsComplete(zip) && ReleaseRepository.isRemoteMatch(zip, remote)) {
+        if (zipIsComplete(zip) && ReleaseRepository.isRemoteSizeMatch(zip, remote)) {
             _gameAssetsOutdated.value = false
             onStatus("Game content archive is up to date")
             return zip
