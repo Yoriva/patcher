@@ -72,7 +72,7 @@ class PatchManager(
         "touch_default/numbers.cfg",
         "BotProfile.db",
         "BotChatter.db",
-        "gfx/shell/btn_touch.bmp",
+        "gfx/shell/splash.bmp",
         "maps/tr_1.bsp",
         "sound/radio/bot/a.wav",
     )
