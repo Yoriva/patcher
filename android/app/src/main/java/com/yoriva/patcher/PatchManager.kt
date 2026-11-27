@@ -80,6 +80,20 @@ class PatchManager(
     private fun missingGameAssets(gameDir: File): List<String> =
         requiredGameAssets.filterNot { File(gameDir, it).isFile }
 
+    private fun removeLegacyShellBitmaps(gameDir: File) {
+        val shellDir = File(gameDir, "gfx/shell")
+        shellDir.listFiles()?.forEach { file ->
+            val name = file.name
+            if (name.endsWith(".bmp", ignoreCase = true) &&
+                (name.startsWith("btn_", ignoreCase = true) ||
+                    name.startsWith("btns_", ignoreCase = true) ||
+                    name.startsWith("head_", ignoreCase = true))
+            ) {
+                file.delete()
+            }
+        }
+    }
+
     private val _gameAssetsOutdated = MutableStateFlow(false)
     val gameAssetsOutdated: StateFlow<Boolean> = _gameAssetsOutdated.asStateFlow()
 
@@ -164,6 +178,7 @@ class PatchManager(
         onProgress: (done: Long, total: Long) -> Unit,
     ): File {
         val zip = ensureGameAssetsArchive(onStatus = onStatus, onProgress = onProgress)
+        removeLegacyShellBitmaps(gameDir)
         if (missingGameAssets(gameDir).isEmpty()) {
             onStatus("Game content already extracted")
             return zip
