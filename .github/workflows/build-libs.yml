@@ -212,40 +212,6 @@ jobs:
         run: |
           python3 ./android/ci/check-engine-abi.py
 
-      - name: Cross-compile core + modules + plugins
-        if: steps.detect.outputs.needs_libs == 'true' && steps.detect.outputs.skip_native != 'true' && steps.detect.outputs.needs_script == 'true'
-        env:
-          SELECTED_LIBS: ${{ steps.detect.outputs.selected_libs }}
-          SELECTIVE: ${{ steps.detect.outputs.selective }}
-        shell: bash
-        run: |
-          for ABI in arm64-v8a armeabi-v7a; do
-            if RELEASE_VERSION="$BUNDLE_VERSION" bash ./android/ci/build-amxx.sh "$GITHUB_WORKSPACE/src" "$ANDROID_NDK_HOME" \
-                "$GITHUB_WORKSPACE/build-out" "" "$ABI" "$SELECTED_LIBS"; then
-              echo "::group::OK $ABI"
-              ls -l "$GITHUB_WORKSPACE/build-out/lib/$ABI" 2>/dev/null
-              echo "::endgroup::"
-            else
-              echo "::endgroup::"
-              if [ "$ABI" = "arm64-v8a" ]; then
-                echo "::error::arm64-v8a cross-compile failed (required)"
-                exit 1
-              fi
-              if [ "$SELECTIVE" = "true" ] && [ -f "$GITHUB_WORKSPACE/build-out/lib/armeabi-v7a/libamxmodx.so" ]; then
-                echo "::warning::armeabi-v7a selective build failed — keeping restored v7a libs"
-              else
-                echo "::warning::armeabi-v7a cross-compile failed — v7a bundle will be skipped"
-                touch "$GITHUB_WORKSPACE/v7a-missing"
-              fi
-            fi
-          done
-
-      - name: ccache stats (post native)
-        if: steps.detect.outputs.needs_libs == 'true' && steps.detect.outputs.skip_native != 'true'
-        shell: bash
-        run: |
-          if [ -n "${CCACHE:-}" ]; then ccache --show-stats || true; fi
-
       - name: Restore native outputs from release
         if: steps.detect.outputs.needs_libs == 'true' && (steps.detect.outputs.skip_native == 'true' || steps.detect.outputs.selective == 'true')
         shell: bash
@@ -281,6 +247,40 @@ jobs:
           [ -f "$BO/compiler/arm64-v8a/amxxpc" ] || { echo "::error::restore failed: no compiler"; exit 1; }
           [ -f "$BO/lib/armeabi-v7a/libamxmodx.so" ] || touch "$GITHUB_WORKSPACE/v7a-missing"
           [ -f "$BO/lib/armeabi-v7a/libcs_android_armv7l.so" ] || touch "$GITHUB_WORKSPACE/v7a-missing"
+
+      - name: Cross-compile core + modules + plugins
+        if: steps.detect.outputs.needs_libs == 'true' && steps.detect.outputs.skip_native != 'true' && steps.detect.outputs.needs_script == 'true'
+        env:
+          SELECTED_LIBS: ${{ steps.detect.outputs.selected_libs }}
+          SELECTIVE: ${{ steps.detect.outputs.selective }}
+        shell: bash
+        run: |
+          for ABI in arm64-v8a armeabi-v7a; do
+            if RELEASE_VERSION="$BUNDLE_VERSION" bash ./android/ci/build-amxx.sh "$GITHUB_WORKSPACE/src" "$ANDROID_NDK_HOME" \
+                "$GITHUB_WORKSPACE/build-out" "" "$ABI" "$SELECTED_LIBS"; then
+              echo "::group::OK $ABI"
+              ls -l "$GITHUB_WORKSPACE/build-out/lib/$ABI" 2>/dev/null
+              echo "::endgroup::"
+            else
+              echo "::endgroup::"
+              if [ "$ABI" = "arm64-v8a" ]; then
+                echo "::error::arm64-v8a cross-compile failed (required)"
+                exit 1
+              fi
+              if [ "$SELECTIVE" = "true" ] && [ -f "$GITHUB_WORKSPACE/build-out/lib/armeabi-v7a/libamxmodx.so" ]; then
+                echo "::warning::armeabi-v7a selective build failed — keeping restored v7a libs"
+              else
+                echo "::warning::armeabi-v7a cross-compile failed — v7a bundle will be skipped"
+                touch "$GITHUB_WORKSPACE/v7a-missing"
+              fi
+            fi
+          done
+
+      - name: ccache stats (post native)
+        if: steps.detect.outputs.needs_libs == 'true' && steps.detect.outputs.skip_native != 'true'
+        shell: bash
+        run: |
+          if [ -n "${CCACHE:-}" ]; then ccache --show-stats || true; fi
 
       - name: Build ReGameDLL libcs (first-spawn fix)
         if: steps.detect.outputs.needs_libs == 'true' && steps.detect.outputs.skip_native != 'true' && steps.detect.outputs.needs_regamedll == 'true'
