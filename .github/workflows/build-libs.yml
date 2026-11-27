@@ -42,7 +42,7 @@ jobs:
           NEEDS_ANDROID=false
           NEEDS_LIBS=false
           if echo "$LOWER" | grep -q '\[android\]'; then NEEDS_ANDROID=true; fi
-          if echo "$LOWER" | grep -q '\[libs\]'; then NEEDS_LIBS=true; fi
+          if echo "$LOWER" | grep -qE '\[libs[^]]*\]'; then NEEDS_LIBS=true; fi
           if echo "$LOWER" | grep -qE '\[android build\]|\[version build\]'; then NEEDS_ANDROID=true; fi
           if echo "$LOWER" | grep -qE '\[bundle build\]'; then NEEDS_LIBS=true; fi
 
@@ -73,6 +73,7 @@ jobs:
               *) NORMALIZED=${NORMALIZED:+$NORMALIZED,}$item ;;
             esac
           done
+          if [ -n "$NORMALIZED" ]; then NEEDS_LIBS=true; fi
           SELECTIVE=false
           NEEDS_SCRIPT=true
           NEEDS_REGAMEDLL=true
