@@ -513,8 +513,9 @@ jobs:
             -x '*.gitignore' '*.git/*')
 
           unzip -tq "$GITHUB_WORKSPACE/game-assets.zip"
-          for f in touch.cfg touch_default/numbers.cfg BotProfile.db BotChatter.db \
-                   gfx/shell/btn_touch.bmp maps/tr_1.bsp sound/radio/bot/a.wav; do
+           for f in touch.cfg touch_default/numbers.cfg BotProfile.db BotChatter.db \
+                    gfx/shell/splash.bmp maps/tr_1.bsp sound/radio/bot/a.wav; do
+
             unzip -l "$GITHUB_WORKSPACE/game-assets.zip" "$f" | grep -q "$f" || {
               echo "::error::$f missing from game-assets.zip"; exit 1; }
           done
